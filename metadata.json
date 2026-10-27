@@ -1,0 +1,8 @@
+{
+  "name": "Remix FlowBrowser",
+  "description": "Organize tabs, navigate effortlessly with a bottom bar, and discover content using personalized, AI-driven search suggestions.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

@@ -1,0 +1,187 @@
+name: Build and Release Debug APK
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Verify Java environment
+        run: |
+          java -version
+          echo "JAVA_HOME: $JAVA_HOME"
+          JAVA_VER=$(java -version 2>&1 | awk -F '"' '/version/ {print $2}' | awk -F '.' '{print $1}')
+          echo "Detected Java major version: $JAVA_VER"
+          if [ -z "$JAVA_VER" ]; then
+            echo "ERROR: Unable to detect Java version."
+            exit 1
+          fi
+          if [ "$JAVA_VER" -lt 17 ]; then
+            echo "ERROR: Java version $JAVA_VER is lower than 17."
+            exit 1
+          fi
+
+      - name: Set up Gradle 9.3.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
+
+      - name: Create temporary debug keystore
+        run: |
+          if [ -f "debug.keystore" ]; then
+            echo "debug.keystore already exists in root directory."
+          elif [ -f "debug.keystore.base64" ]; then
+            echo "Decoding debug.keystore from debug.keystore.base64 into repository root..."
+            base64 -d debug.keystore.base64 > debug.keystore || base64 --decode debug.keystore.base64 > debug.keystore
+          elif [ -f "$HOME/.android/debug.keystore" ]; then
+            echo "debug.keystore already exists at ~/.android/debug.keystore. Copying to repository root..."
+            cp "$HOME/.android/debug.keystore" ./debug.keystore
+          else
+            echo "Generating debug keystore at ./debug.keystore and ~/.android/debug.keystore..."
+            mkdir -p "$HOME/.android"
+            keytool -genkeypair -v \
+              -keystore "./debug.keystore" \
+              -storepass android \
+              -alias androiddebugkey \
+              -keypass android \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
+            echo "Temporary debug keystore generated successfully."
+          fi
+          mkdir -p "$HOME/.android"
+          if [ ! -f "$HOME/.android/debug.keystore" ] && [ -f "./debug.keystore" ]; then
+            cp "./debug.keystore" "$HOME/.android/debug.keystore"
+          fi
+          echo "Keystore presence in root and ~/.android:"
+          ls -lh ./debug.keystore
+          ls -lh "$HOME/.android/debug.keystore"
+
+      - name: Build debug APK
+        run: gradle :app:assembleDebug --stacktrace --no-daemon
+
+      - name: Verify debug APK
+        run: |
+          APK_PATH="app/build/outputs/apk/debug/app-debug.apk"
+          if [ ! -f "$APK_PATH" ]; then
+            echo "ERROR: Debug APK was not generated at $APK_PATH!"
+            exit 1
+          fi
+          echo "Debug APK successfully verified at $APK_PATH"
+          ls -lh "$APK_PATH"
+
+      - name: Upload debug APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+      - name: Prepare release asset
+        id: prepare_asset
+        run: |
+          REPO_NAME="${{ github.event.repository.name }}"
+          if [ -z "$REPO_NAME" ]; then
+            REPO_NAME=$(basename "${{ github.repository }}")
+          fi
+          SANITIZED_NAME=$(echo "$REPO_NAME" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g' | sed -E 's/^-+|-+$//g')
+          if [ -z "$SANITIZED_NAME" ]; then
+            SANITIZED_NAME="app"
+          fi
+          ASSET_NAME="${SANITIZED_NAME}-debug.apk"
+          cp app/build/outputs/apk/debug/app-debug.apk "./$ASSET_NAME"
+          FILE_SIZE=$(ls -lh "./$ASSET_NAME" | awk '{print $5}')
+          echo "asset_path=./$ASSET_NAME" >> "$GITHUB_OUTPUT"
+          echo "asset_name=$ASSET_NAME" >> "$GITHUB_OUTPUT"
+          echo "file_size=$FILE_SIZE" >> "$GITHUB_OUTPUT"
+          echo "Prepared release asset: ./$ASSET_NAME ($FILE_SIZE)"
+
+      - name: Create GitHub Release
+        id: create_release
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG_NAME="debug-apk-build-${{ github.run_number }}-${{ github.run_attempt }}"
+          RELEASE_TITLE="Debug APK - Build #${{ github.run_number }}"
+          ASSET_PATH="${{ steps.prepare_asset.outputs.asset_path }}"
+          ASSET_NAME="${{ steps.prepare_asset.outputs.asset_name }}"
+          FILE_SIZE="${{ steps.prepare_asset.outputs.file_size }}"
+
+          BODY=$(cat <<EOF
+          ### Debug APK Build #${{ github.run_number }}
+
+          - **Commit SHA:** \`${{ github.sha }}\`
+          - **Workflow Run:** #${{ github.run_number }} (Attempt #${{ github.run_attempt }})
+          - **File Name:** \`$ASSET_NAME\`
+          - **File Size:** $FILE_SIZE
+
+          #### How to Install on Android:
+          1. Download \`$ASSET_NAME\` directly to your Android device from the Assets section below.
+          2. Open the downloaded \`.apk\` file on your phone.
+          3. If prompted by Android, enable **"Install unknown apps"** for your browser or file manager.
+          4. Follow on-screen prompts to complete installation and launch the app.
+          EOF
+          )
+
+          gh release create "$TAG_NAME" "$ASSET_PATH" \
+            --title "$RELEASE_TITLE" \
+            --notes "$BODY" \
+            --latest
+
+          RELEASE_URL="https://github.com/${{ github.repository }}/releases/tag/$TAG_NAME"
+          echo "release_url=$RELEASE_URL" >> "$GITHUB_OUTPUT"
+
+      - name: Report APK download result
+        if: always()
+        run: |
+          echo "=========================================================="
+          echo "                 APK BUILD & RELEASE REPORT                "
+          echo "=========================================================="
+          if [ "${{ steps.create_release.outcome }}" = "success" ]; then
+            TAG_NAME="debug-apk-build-${{ github.run_number }}-${{ github.run_attempt }}"
+            echo "STATUS: GitHub Release created successfully!"
+            echo ""
+            echo "Release URL:"
+            echo "https://github.com/${{ github.repository }}/releases/tag/$TAG_NAME"
+            echo ""
+            echo "Asset Name: ${{ steps.prepare_asset.outputs.asset_name }}"
+            echo ""
+            echo "Instructions for downloading and installing on Android:"
+            echo "1. Visit the release URL above on your Android device."
+            echo "2. Download '${{ steps.prepare_asset.outputs.asset_name }}' under Assets."
+            echo "3. Open the APK and allow 'Install unknown apps' if prompted."
+            echo "4. Tap 'Install' and launch the application."
+          else
+            echo "STATUS: GitHub Release creation did not complete or was skipped."
+            echo ""
+            echo "However, the debug APK was built successfully and is preserved as an artifact!"
+            echo ""
+            echo "How to download the APK from the GitHub Actions run summary:"
+            echo "1. Go to the Actions tab in your GitHub repository."
+            echo "2. Click on workflow run #${{ github.run_number }}."
+            echo "3. Scroll down to the 'Artifacts' section."
+            echo "4. Download 'app-debug-apk.zip', extract it, and install 'app-debug.apk' on your Android device."
+            echo ""
+            echo "Troubleshooting GitHub Release permissions:"
+            echo "If release creation failed due to token permissions, ensure workflows have write access:"
+            echo "Go to: Repository Settings -> Actions -> General -> Workflow permissions -> Select 'Read and write permissions' -> Save."
+          fi
+          echo "=========================================================="
