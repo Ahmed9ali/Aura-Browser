@@ -16,45 +16,65 @@ private val DarkColorScheme = darkColorScheme(
     onPrimary = Color(0xFF00354E),
     primaryContainer = Color(0xFF004D6F),
     onPrimaryContainer = Color(0xFFC7E7FF),
-    secondary = AuraSecondary,
-    onSecondary = Color(0xFFFFFFFF),
-    secondaryContainer = Color(0xFF2E3378),
-    onSecondaryContainer = Color(0xFFE0E0FF),
-    tertiary = AuraTertiary,
-    onTertiary = Color(0xFF003731),
+    secondary = AuraSecondaryLight,
+    onSecondary = Color(0xFF1E1B4B),
+    secondaryContainer = Color(0xFF312E81),
+    onSecondaryContainer = Color(0xFFE0E7FF),
+    tertiary = AuraTertiaryLight,
+    onTertiary = Color(0xFF042F2C),
+    tertiaryContainer = Color(0xFF115E59),
+    onTertiaryContainer = Color(0xFFCCFBF1),
     background = AuraBgDark,
     onBackground = Color(0xFFF1F5F9),
     surface = AuraSurfaceDark,
-    onSurface = Color(0xFFF1F5F9),
+    onSurface = Color(0xFFF8FAFC),
     surfaceVariant = AuraSurfaceVariantDark,
     onSurfaceVariant = Color(0xFFCBD5E1),
-    outline = Color(0xFF64748B)
+    surfaceContainerLowest = DarkSurfaceContainerLowest,
+    surfaceContainerLow = DarkSurfaceContainerLow,
+    surfaceContainer = DarkSurfaceContainer,
+    surfaceContainerHigh = DarkSurfaceContainerHigh,
+    surfaceContainerHighest = DarkSurfaceContainerHighest,
+    outline = Color(0xFF475569),
+    outlineVariant = Color(0xFF334155),
+    error = AuraCoral,
+    onError = Color.White
 )
 
 private val LightColorScheme = lightColorScheme(
     primary = AuraPrimary,
     onPrimary = Color.White,
-    primaryContainer = Color(0xFFC7E7FF),
-    onPrimaryContainer = Color(0xFF001E2F),
+    primaryContainer = Color(0xFFE0F2FE),
+    onPrimaryContainer = Color(0xFF0369A1),
     secondary = AuraSecondary,
     onSecondary = Color.White,
-    secondaryContainer = Color(0xFFE0E0FF),
-    onSecondaryContainer = Color(0xFF131754),
+    secondaryContainer = Color(0xFFEEF2FF),
+    onSecondaryContainer = Color(0xFF3730A3),
     tertiary = AuraTertiary,
     onTertiary = Color.White,
+    tertiaryContainer = Color(0xFFCCFBF1),
+    onTertiaryContainer = Color(0xFF0F766E),
     background = AuraBgLight,
     onBackground = Color(0xFF0F172A),
     surface = AuraSurfaceLight,
     onSurface = Color(0xFF0F172A),
     surfaceVariant = AuraSurfaceVariantLight,
     onSurfaceVariant = Color(0xFF475569),
-    outline = Color(0xFF94A3B8)
+    surfaceContainerLowest = LightSurfaceContainerLowest,
+    surfaceContainerLow = LightSurfaceContainerLow,
+    surfaceContainer = LightSurfaceContainer,
+    surfaceContainerHigh = LightSurfaceContainerHigh,
+    surfaceContainerHighest = LightSurfaceContainerHighest,
+    outline = Color(0xFF94A3B8),
+    outlineVariant = Color(0xFFE2E8F0),
+    error = AuraCoral,
+    onError = Color.White
 )
 
 @Composable
 fun AuraBrowserTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
-    dynamicColor: Boolean = false, // Use our sleek Aura theme by default
+    dynamicColor: Boolean = false,
     content: @Composable () -> Unit
 ) {
     val colorScheme = when {
@@ -69,6 +89,7 @@ fun AuraBrowserTheme(
     MaterialTheme(
         colorScheme = colorScheme,
         typography = Typography,
+        shapes = ExpressiveShapes,
         content = content
     )
 }

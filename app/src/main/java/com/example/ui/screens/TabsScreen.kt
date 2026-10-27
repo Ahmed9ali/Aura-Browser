@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -64,8 +63,18 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.model.BrowserTab
 import com.example.model.TabGroup
+import com.example.ui.theme.ExpressiveCardShape
+import com.example.ui.theme.ExpressiveChipShape
+import com.example.ui.theme.ExpressiveDialogShape
+import com.example.ui.theme.ExpressivePillShape
+import com.example.ui.theme.ExpressiveSquircleShape
 import com.example.ui.theme.TabGroupColors
 
+/**
+ * Material 3 Expressive Tab Manager Screen
+ * Features squircle tab preview cards, expressive group accordions,
+ * pill actions, and rich tonal container elevations.
+ */
 @Composable
 fun TabsScreen(
     tabs: List<BrowserTab>,
@@ -95,10 +104,10 @@ fun TabsScreen(
             .fillMaxSize()
             .testTag("tabs_screen")
     ) {
-        // Tabs Header & Actions Bar
+        // Tabs Header & Expressive Actions Bar
         Surface(
             color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 2.dp,
+            tonalElevation = 3.dp,
             modifier = Modifier.fillMaxWidth()
         ) {
             Row(
@@ -111,25 +120,33 @@ fun TabsScreen(
                 Column {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Layers,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(22.dp)
-                        )
+                        Surface(
+                            shape = ExpressiveChipShape,
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.Layers,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
                         Text(
                             text = "Tab Manager",
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.titleLarge,
                             color = MaterialTheme.colorScheme.onSurface
                         )
                     }
                     Text(
                         text = "${tabs.size} tabs • ${tabGroups.size} groups",
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(start = 40.dp)
                     )
                 }
 
@@ -140,7 +157,8 @@ fun TabsScreen(
                     // New Group Button
                     OutlinedButton(
                         onClick = onOpenCreateGroupDialog,
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                        shape = ExpressivePillShape,
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                         modifier = Modifier.testTag("btn_new_group")
                     ) {
                         Icon(
@@ -149,13 +167,14 @@ fun TabsScreen(
                             modifier = Modifier.size(16.dp)
                         )
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text(text = "New Group", fontSize = 12.sp)
+                        Text(text = "Group", style = MaterialTheme.typography.labelMedium)
                     }
 
                     // New Tab Button
                     Button(
                         onClick = { onOpenNewTab(null) },
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                        shape = ExpressivePillShape,
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
                         modifier = Modifier.testTag("btn_new_tab")
                     ) {
                         Icon(
@@ -164,7 +183,7 @@ fun TabsScreen(
                             modifier = Modifier.size(16.dp)
                         )
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text(text = "New Tab", fontSize = 12.sp)
+                        Text(text = "New Tab", style = MaterialTheme.typography.labelMedium)
                     }
 
                     Box {
@@ -193,7 +212,7 @@ fun TabsScreen(
 
         // Tab Groups & Tabs Content
         LazyColumn(
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 90.dp),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 96.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
             modifier = Modifier.fillMaxSize()
         ) {
@@ -202,7 +221,7 @@ fun TabsScreen(
                 val groupTabs = tabs.filter { it.groupId == group.id }
                 val groupColor = try {
                     Color(android.graphics.Color.parseColor(group.colorHex))
-                } catch (e: Exception) {
+                } catch (_: Exception) {
                     MaterialTheme.colorScheme.primary
                 }
 
@@ -230,24 +249,23 @@ fun TabsScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(vertical = 6.dp)
+                                .padding(vertical = 8.dp)
                         ) {
                             Text(
                                 text = "Ungrouped Tabs",
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold,
+                                style = MaterialTheme.typography.titleMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Surface(
-                                shape = RoundedCornerShape(10.dp),
-                                color = MaterialTheme.colorScheme.surfaceVariant
+                                shape = ExpressiveChipShape,
+                                color = MaterialTheme.colorScheme.surfaceContainerHigh
                             ) {
                                 Text(
                                     text = "${ungroupedTabs.size}",
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
                                 )
                             }
                         }
@@ -256,10 +274,10 @@ fun TabsScreen(
                         val pairs = ungroupedTabs.chunked(2)
                         pairs.forEach { rowTabs ->
                             Row(
-                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(vertical = 4.dp)
+                                    .padding(vertical = 5.dp)
                             ) {
                                 rowTabs.forEach { tab ->
                                     TabCard(
@@ -322,27 +340,27 @@ fun TabGroupSection(
     var menuExpanded by remember { mutableStateOf(false) }
 
     Card(
-        shape = RoundedCornerShape(16.dp),
+        shape = ExpressiveCardShape,
         colors = CardDefaults.cardColors(
             containerColor = groupColor.copy(alpha = 0.08f)
         ),
-        border = BorderStroke(1.dp, groupColor.copy(alpha = 0.25f)),
+        border = BorderStroke(1.2.dp, groupColor.copy(alpha = 0.35f)),
         modifier = modifier.fillMaxWidth()
     ) {
-        Column(modifier = Modifier.padding(12.dp)) {
+        Column(modifier = Modifier.padding(14.dp)) {
             // Group Header Bar
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(8.dp))
+                    .clip(RoundedCornerShape(12.dp))
                     .clickable(onClick = onToggleCollapse)
                     .padding(vertical = 4.dp)
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Box(
                         modifier = Modifier
@@ -353,21 +371,20 @@ fun TabGroupSection(
 
                     Text(
                         text = group.name,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.titleMedium,
                         color = MaterialTheme.colorScheme.onSurface
                     )
 
                     Surface(
-                        shape = RoundedCornerShape(10.dp),
+                        shape = ExpressiveChipShape,
                         color = groupColor.copy(alpha = 0.2f)
                     ) {
                         Text(
                             text = "${tabs.size} tabs",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.SemiBold,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
                             color = groupColor,
-                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
                         )
                     }
                 }
@@ -375,7 +392,9 @@ fun TabGroupSection(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     IconButton(
                         onClick = onAddTabToGroup,
-                        modifier = Modifier.size(32.dp).testTag("btn_add_tab_to_${group.name.lowercase().replace(" ", "_")}")
+                        modifier = Modifier
+                            .size(32.dp)
+                            .testTag("btn_add_tab_to_${group.name.lowercase().replace(" ", "_")}")
                     ) {
                         Icon(
                             imageVector = Icons.Default.Add,
@@ -432,13 +451,15 @@ fun TabGroupSection(
                 Column(modifier = Modifier.padding(top = 10.dp)) {
                     if (tabs.isEmpty()) {
                         Surface(
-                            shape = RoundedCornerShape(12.dp),
+                            shape = ExpressiveSquircleShape,
                             color = MaterialTheme.colorScheme.surface.copy(alpha = 0.6f),
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 8.dp)
                         ) {
                             Text(
                                 text = "No tabs in this group yet. Tap + to add one.",
-                                fontSize = 12.sp,
+                                style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.padding(16.dp)
                             )
@@ -486,20 +507,20 @@ fun TabCard(
     modifier: Modifier = Modifier
 ) {
     Card(
-        shape = RoundedCornerShape(14.dp),
+        shape = ExpressiveSquircleShape,
         colors = CardDefaults.cardColors(
-            containerColor = if (isActive) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
-            else MaterialTheme.colorScheme.surface
+            containerColor = if (isActive) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
+            else MaterialTheme.colorScheme.surfaceContainerLow
         ),
         border = if (isActive) BorderStroke(2.dp, tagColor)
         else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
         modifier = modifier
-            .clip(RoundedCornerShape(14.dp))
+            .clip(ExpressiveSquircleShape)
             .clickable(onClick = onSelect)
             .testTag("tab_card_${tab.id}")
     ) {
         Column(
-            modifier = Modifier.padding(10.dp)
+            modifier = Modifier.padding(12.dp)
         ) {
             // Card Top Row: Favicon/Icon + Close Button
             Row(
@@ -508,16 +529,16 @@ fun TabCard(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Surface(
-                    shape = CircleShape,
-                    color = tagColor.copy(alpha = 0.15f),
-                    modifier = Modifier.size(26.dp)
+                    shape = ExpressiveChipShape,
+                    color = tagColor.copy(alpha = 0.16f),
+                    modifier = Modifier.size(28.dp)
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
                             imageVector = Icons.Default.Public,
                             contentDescription = null,
                             tint = tagColor,
-                            modifier = Modifier.size(15.dp)
+                            modifier = Modifier.size(16.dp)
                         )
                     }
                 }
@@ -528,7 +549,7 @@ fun TabCard(
                             imageVector = Icons.Default.Computer,
                             contentDescription = "Desktop mode",
                             tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(14.dp)
+                            modifier = Modifier.size(15.dp)
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                     }
@@ -536,37 +557,41 @@ fun TabCard(
                     // Move to another group icon
                     IconButton(
                         onClick = onMove,
-                        modifier = Modifier.size(24.dp).testTag("btn_move_tab_${tab.id}")
+                        modifier = Modifier
+                            .size(26.dp)
+                            .testTag("btn_move_tab_${tab.id}")
                     ) {
                         Icon(
                             imageVector = Icons.Default.DriveFileMove,
                             contentDescription = "Move to Group",
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(15.dp)
+                            modifier = Modifier.size(16.dp)
                         )
                     }
 
                     // Close tab
                     IconButton(
                         onClick = onClose,
-                        modifier = Modifier.size(24.dp).testTag("btn_close_tab_${tab.id}")
+                        modifier = Modifier
+                            .size(26.dp)
+                            .testTag("btn_close_tab_${tab.id}")
                     ) {
                         Icon(
                             imageVector = Icons.Default.Close,
                             contentDescription = "Close tab",
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(15.dp)
+                            modifier = Modifier.size(16.dp)
                         )
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(10.dp))
 
             // Tab Title
             Text(
                 text = tab.title.ifBlank { "Untitled" },
-                fontSize = 13.sp,
+                style = MaterialTheme.typography.titleSmall,
                 fontWeight = if (isActive) FontWeight.Bold else FontWeight.Medium,
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
@@ -581,7 +606,7 @@ fun TabCard(
 
             Text(
                 text = preview,
-                fontSize = 11.sp,
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
@@ -600,11 +625,11 @@ fun CreateGroupDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
+        shape = ExpressiveDialogShape,
         title = {
             Text(
                 text = "Create Tab Group",
-                fontWeight = FontWeight.Bold,
-                fontSize = 18.sp
+                style = MaterialTheme.typography.titleLarge
             )
         },
         text = {
@@ -615,14 +640,15 @@ fun CreateGroupDialog(
                     label = { Text("Group Name") },
                     placeholder = { Text("e.g. Travel, Finance, Docs") },
                     singleLine = true,
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.fillMaxWidth().testTag("input_group_name")
+                    shape = ExpressiveCardShape,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("input_group_name")
                 )
 
                 Text(
                     text = "Select Color Badge",
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Medium,
+                    style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
@@ -635,7 +661,7 @@ fun CreateGroupDialog(
                         Box(
                             contentAlignment = Alignment.Center,
                             modifier = Modifier
-                                .size(36.dp)
+                                .size(38.dp)
                                 .clip(CircleShape)
                                 .background(color)
                                 .clickable { selectedColor = color }
@@ -658,13 +684,17 @@ fun CreateGroupDialog(
                     }
                 },
                 enabled = groupName.isNotBlank(),
+                shape = ExpressivePillShape,
                 modifier = Modifier.testTag("btn_confirm_create_group")
             ) {
                 Text("Create Group")
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
+            TextButton(
+                onClick = onDismiss,
+                shape = ExpressivePillShape
+            ) {
                 Text("Cancel")
             }
         }
@@ -680,11 +710,11 @@ fun MoveTabDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
+        shape = ExpressiveDialogShape,
         title = {
             Text(
                 text = "Move Tab to Group",
-                fontWeight = FontWeight.Bold,
-                fontSize = 18.sp
+                style = MaterialTheme.typography.titleLarge
             )
         },
         text = {
@@ -694,26 +724,26 @@ fun MoveTabDialog(
             ) {
                 Text(
                     text = "Move \"${tab.title}\" into:",
-                    fontSize = 13.sp,
+                    style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
                 // Option: Ungroup (No Group)
                 Surface(
-                    shape = RoundedCornerShape(12.dp),
+                    shape = ExpressiveSquircleShape,
                     color = if (tab.groupId == null) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
+                        .clip(ExpressiveSquircleShape)
                         .clickable { onAssign(null) }
                         .padding(vertical = 2.dp)
                         .testTag("move_option_ungroup")
                 ) {
                     Text(
                         text = "None (Ungrouped Tab)",
-                        fontSize = 14.sp,
+                        style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.Medium,
-                        modifier = Modifier.padding(12.dp)
+                        modifier = Modifier.padding(14.dp)
                     )
                 }
 
@@ -722,17 +752,17 @@ fun MoveTabDialog(
                     val isCurrent = tab.groupId == group.id
                     val color = try {
                         Color(android.graphics.Color.parseColor(group.colorHex))
-                    } catch (e: Exception) {
+                    } catch (_: Exception) {
                         MaterialTheme.colorScheme.primary
                     }
 
                     Surface(
-                        shape = RoundedCornerShape(12.dp),
+                        shape = ExpressiveSquircleShape,
                         color = if (isCurrent) color.copy(alpha = 0.25f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                        border = if (isCurrent) BorderStroke(1.dp, color) else null,
+                        border = if (isCurrent) BorderStroke(1.2.dp, color) else null,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
+                            .clip(ExpressiveSquircleShape)
                             .clickable { onAssign(group.id) }
                             .padding(vertical = 2.dp)
                             .testTag("move_option_${group.name.lowercase().replace(" ", "_")}")
@@ -740,7 +770,7 @@ fun MoveTabDialog(
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            modifier = Modifier.padding(12.dp)
+                            modifier = Modifier.padding(14.dp)
                         ) {
                             Box(
                                 modifier = Modifier
@@ -750,8 +780,7 @@ fun MoveTabDialog(
                             )
                             Text(
                                 text = group.name,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.SemiBold,
+                                style = MaterialTheme.typography.titleSmall,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                         }
@@ -761,7 +790,10 @@ fun MoveTabDialog(
         },
         confirmButton = {},
         dismissButton = {
-            TextButton(onClick = onDismiss) {
+            TextButton(
+                onClick = onDismiss,
+                shape = ExpressivePillShape
+            ) {
                 Text("Cancel")
             }
         }

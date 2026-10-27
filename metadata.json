@@ -1,6 +1,6 @@
 {
-  "name": "Remix FlowBrowser",
-  "description": "Organize tabs, navigate effortlessly with a bottom bar, and discover content using personalized, AI-driven search suggestions.",
+  "name": "Aura",
+  "description": "Material 3 Expressive Android Web Browser with autonomous automation engine, tab grouping, and personalized discovery.",
   "requestFramePermissions": [],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"

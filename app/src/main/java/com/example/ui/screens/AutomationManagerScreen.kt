@@ -2,9 +2,15 @@ package com.example.ui.screens
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -19,23 +25,37 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CheckBox
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FileUpload
+import androidx.compose.material.icons.filled.HourglassBottom
+import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.LibraryBooks
 import androidx.compose.material.icons.filled.ListAlt
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.RadioButtonChecked
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -45,6 +65,9 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -64,7 +87,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
@@ -76,6 +101,7 @@ import com.example.model.AutomationActionType
 import com.example.model.AutomationDataGenerator
 import com.example.model.AutomationExecutionState
 import com.example.model.AutomationScript
+import com.example.model.AutomationStatus
 import com.example.model.AutomationStep
 import com.example.model.DataExhaustionPolicy
 import com.example.model.DataIterationOrder
@@ -83,6 +109,14 @@ import com.example.model.DataSheet
 import com.example.ui.components.StepEditDialog
 import java.util.UUID
 
+/**
+ * Modern, simplified, easy-to-use Automation Studio.
+ *
+ * Tab 0: "Workflow" - Plain-English visual steps, 1-click test run, quick settings
+ * Tab 1: "Library & Templates" - Ready-made 1-click templates + saved workflows
+ * Tab 2: "My Data" - Simple 1-by-1 batch data cards with easy paste & file upload
+ * Tab 3: "Logs" - Clean execution logs
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AutomationManagerScreen(
@@ -104,12 +138,14 @@ fun AutomationManagerScreen(
     onNavigateBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var selectedTab by remember { mutableIntStateOf(0) } // 0: Manage Scripts, 1: My Data, 2: Live Logs
+    var selectedTab by remember { mutableIntStateOf(0) } // 0: Workflow, 1: Library & Templates, 2: My Data, 3: Logs
+    var showFlowSettingsDialog by remember { mutableStateOf(false) }
     var showNewScriptDialog by remember { mutableStateOf(false) }
     var showNewDataSheetDialog by remember { mutableStateOf(false) }
     var stepToEdit by remember { mutableStateOf<AutomationStep?>(null) }
     var showAddNavigateDialog by remember { mutableStateOf(false) }
-    var showAddCustomStepDialog by remember { mutableStateOf(false) }
+    var showAddStepDialog by remember { mutableStateOf(false) }
+    var showRenameScriptDialog by remember { mutableStateOf(false) }
 
     val availableFieldKeys = remember(dataSheets) {
         val standard = listOf(
@@ -121,12 +157,16 @@ fun AutomationManagerScreen(
         (standard + custom).distinct()
     }
 
+    val emerald = Color(0xFF10B981)
+    val indigo = Color(0xFF6366F1)
+
     Column(
         modifier = modifier
             .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
             .testTag("automation_manager_screen")
     ) {
-        // Top Header
+        // Top App Bar
         Surface(
             color = MaterialTheme.colorScheme.surface,
             tonalElevation = 2.dp,
@@ -138,24 +178,35 @@ fun AutomationManagerScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 8.dp, vertical = 8.dp)
+                        .padding(horizontal = 10.dp, vertical = 10.dp)
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        IconButton(onClick = onNavigateBack, modifier = Modifier.testTag("btn_manager_back")) {
+                        IconButton(
+                            onClick = onNavigateBack,
+                            modifier = Modifier
+                                .size(40.dp)
+                                .testTag("btn_manager_back")
+                        ) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                         }
 
-                        Icon(
-                            imageVector = Icons.Default.SmartToy,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(24.dp)
-                        )
-
-                        Spacer(modifier = Modifier.width(4.dp))
+                        Surface(
+                            shape = CircleShape,
+                            color = indigo.copy(alpha = 0.15f),
+                            modifier = Modifier.size(36.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.SmartToy,
+                                    contentDescription = null,
+                                    tint = indigo,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
 
                         Column {
                             Text(
@@ -165,25 +216,36 @@ fun AutomationManagerScreen(
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = "${savedScripts.size} saved scripts • ${dataSheets.size} data sheets + Default",
+                                text = "${currentScript.steps.size} steps • ${if (currentScript.targetWebsite == "*") "Any website" else currentScript.targetWebsite}",
                                 fontSize = 11.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
 
+                    // Primary One-Tap Run Button
                     Button(
                         onClick = onRunScript,
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)),
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = emerald),
+                        shape = com.example.ui.theme.ExpressivePillShape,
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                         modifier = Modifier.testTag("btn_manager_run_script")
                     ) {
-                        Icon(Icons.Default.PlayArrow, contentDescription = "Run", modifier = Modifier.size(16.dp))
+                        Icon(
+                            Icons.Default.PlayArrow,
+                            contentDescription = "Run",
+                            modifier = Modifier.size(18.dp)
+                        )
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text(text = "Run Script", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text(
+                            text = "Run Flow",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
                     }
                 }
 
+                // Modern 4-Tab Navigation Bar
                 PrimaryTabRow(
                     selectedTabIndex = selectedTab,
                     modifier = Modifier.fillMaxWidth()
@@ -192,9 +254,12 @@ fun AutomationManagerScreen(
                         selected = selectedTab == 0,
                         onClick = { selectedTab = 0 },
                         text = {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Icon(Icons.Default.Code, contentDescription = null, modifier = Modifier.size(15.dp))
-                                Text("Manage Scripts (${savedScripts.size})", fontSize = 11.sp)
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(Icons.Default.Code, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Text("Workflow (${currentScript.steps.size})", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                             }
                         }
                     )
@@ -202,9 +267,12 @@ fun AutomationManagerScreen(
                         selected = selectedTab == 1,
                         onClick = { selectedTab = 1 },
                         text = {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Icon(Icons.Default.ListAlt, contentDescription = null, modifier = Modifier.size(15.dp))
-                                Text("My Data (${dataSheets.size})", fontSize = 11.sp)
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(Icons.Default.LibraryBooks, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Text("Templates (${savedScripts.size})", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                             }
                         }
                     )
@@ -212,9 +280,25 @@ fun AutomationManagerScreen(
                         selected = selectedTab == 2,
                         onClick = { selectedTab = 2 },
                         text = {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Icon(Icons.Default.Terminal, contentDescription = null, modifier = Modifier.size(15.dp))
-                                Text("Live Logs", fontSize = 11.sp)
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(Icons.Default.ListAlt, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Text("My Data (${dataSheets.size})", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                    )
+                    Tab(
+                        selected = selectedTab == 3,
+                        onClick = { selectedTab = 3 },
+                        text = {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(Icons.Default.Terminal, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Text("Logs", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                             }
                         }
                     )
@@ -222,32 +306,50 @@ fun AutomationManagerScreen(
             }
         }
 
-        // Body Content
-        when (selectedTab) {
-            0 -> ScriptsTabContent(
-                currentScript = currentScript,
-                savedScripts = savedScripts,
-                dataSheets = dataSheets,
-                onSelectScript = onSelectScript,
-                onSaveScript = onSaveScript,
-                onDeleteScript = onDeleteScript,
-                onEditStep = { stepToEdit = it },
-                onMoveStep = onMoveStep,
-                onDeleteStep = onDeleteStep,
-                onOpenNewScript = { showNewScriptDialog = true },
-                onOpenAddNavigate = { showAddNavigateDialog = true },
-                onOpenAddCustomStep = { showAddCustomStepDialog = true },
-                onClearAllSteps = onClearAllSteps
-            )
-            1 -> MyDataTabContent(
-                dataSheets = dataSheets,
-                onSaveDataSheet = onSaveDataSheet,
-                onDeleteDataSheet = onDeleteDataSheet,
-                onOpenNewDataSheet = { showNewDataSheetDialog = true }
-            )
-            2 -> LogsTabContent(
-                logMessages = executionState.logMessages
-            )
+        // Tab Content
+        Box(modifier = Modifier.weight(1f)) {
+            when (selectedTab) {
+                0 -> EasyWorkflowTab(
+                    currentScript = currentScript,
+                    dataSheets = dataSheets,
+                    executionState = executionState,
+                    onOpenSettings = { showFlowSettingsDialog = true },
+                    onRenameScript = { showRenameScriptDialog = true },
+                    onEditStep = { stepToEdit = it },
+                    onMoveStep = onMoveStep,
+                    onDeleteStep = onDeleteStep,
+                    onAddStep = { showAddStepDialog = true },
+                    onAddNavigate = { showAddNavigateDialog = true },
+                    onClearAll = onClearAllSteps,
+                    onGoToTemplates = { selectedTab = 1 }
+                )
+                1 -> EasyLibraryAndTemplatesTab(
+                    currentScript = currentScript,
+                    savedScripts = savedScripts,
+                    dataSheets = dataSheets,
+                    onSelectScript = { script ->
+                        onSelectScript(script)
+                        selectedTab = 0 // Switch to workflow
+                    },
+                    onLoadTemplate = { template ->
+                        onSaveScript(template)
+                        onSelectScript(template)
+                        selectedTab = 0 // Switch to workflow
+                    },
+                    onDeleteScript = onDeleteScript,
+                    onOpenNewScript = { showNewScriptDialog = true }
+                )
+                2 -> EasyMyDataTab(
+                    dataSheets = dataSheets,
+                    onSaveDataSheet = onSaveDataSheet,
+                    onDeleteDataSheet = onDeleteDataSheet,
+                    onOpenNewDataSheet = { showNewDataSheetDialog = true }
+                )
+                3 -> EasyLogsTab(
+                    logMessages = executionState.logMessages,
+                    executionStatus = executionState.status
+                )
+            }
         }
     }
 
@@ -260,6 +362,63 @@ fun AutomationManagerScreen(
             onSave = { updated ->
                 onUpdateStep(updated)
                 stepToEdit = null
+            }
+        )
+    }
+
+    // Easy Add Step Dialog
+    if (showAddStepDialog) {
+        EasyAddStepDialog(
+            availableFieldKeys = availableFieldKeys,
+            onDismiss = { showAddStepDialog = false },
+            onAdd = { step ->
+                onAddStep(step)
+                showAddStepDialog = false
+            }
+        )
+    }
+
+    // Add Navigate Dialog
+    if (showAddNavigateDialog) {
+        AddNavigateStepDialog(
+            onDismiss = { showAddNavigateDialog = false },
+            onAdd = { url ->
+                onAddStep(
+                    AutomationStep(
+                        actionType = AutomationActionType.NAVIGATE,
+                        selector = url,
+                        elementDescription = "Open $url",
+                        value = url,
+                        delayMs = 2000L
+                    )
+                )
+                showAddNavigateDialog = false
+            }
+        )
+    }
+
+    // Flow Settings Dialog (Simple & uncluttered modal)
+    if (showFlowSettingsDialog) {
+        FlowSettingsDialog(
+            script = currentScript,
+            dataSheets = dataSheets,
+            onDismiss = { showFlowSettingsDialog = false },
+            onSave = { updated ->
+                onSaveScript(updated)
+                showFlowSettingsDialog = false
+            }
+        )
+    }
+
+    // Rename Script Dialog
+    if (showRenameScriptDialog) {
+        RenameScriptDialog(
+            currentName = currentScript.name,
+            currentWebsite = currentScript.targetWebsite,
+            onDismiss = { showRenameScriptDialog = false },
+            onConfirm = { newName, newSite ->
+                onSaveScript(currentScript.copy(name = newName, targetWebsite = newSite))
+                showRenameScriptDialog = false
             }
         )
     }
@@ -282,46 +441,7 @@ fun AutomationManagerScreen(
                 onSaveScript(newScript)
                 onSelectScript(newScript)
                 showNewScriptDialog = false
-            }
-        )
-    }
-
-    // Add Navigate Step Dialog
-    if (showAddNavigateDialog) {
-        AddNavigateStepDialog(
-            onDismiss = { showAddNavigateDialog = false },
-            onAdd = { url ->
-                onAddStep(
-                    AutomationStep(
-                        actionType = AutomationActionType.NAVIGATE,
-                        selector = url,
-                        elementDescription = "Navigate to $url",
-                        value = url,
-                        delayMs = 2000L
-                    )
-                )
-                showAddNavigateDialog = false
-            }
-        )
-    }
-
-    // Add Custom Step Dialog
-    if (showAddCustomStepDialog) {
-        AddCustomStepDialog(
-            availableFieldKeys = availableFieldKeys,
-            onDismiss = { showAddCustomStepDialog = false },
-            onAdd = { action, selector, desc, varKey, delay ->
-                onAddStep(
-                    AutomationStep(
-                        actionType = action,
-                        selector = selector,
-                        elementDescription = desc.ifBlank { "${action.name}: ${selector.take(20)}" },
-                        value = if (varKey != null) "{{$varKey}}" else "",
-                        variableKey = varKey,
-                        delayMs = delay
-                    )
-                )
-                showAddCustomStepDialog = false
+                selectedTab = 0
             }
         )
     }
@@ -356,344 +476,277 @@ fun AutomationManagerScreen(
 }
 
 /**
- * TAB 0: Saved Scripts Management
+ * TAB 0: Easy Workflow
+ * Clean, visual timeline of steps + quick settings bar
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ScriptsTabContent(
+private fun EasyWorkflowTab(
     currentScript: AutomationScript,
-    savedScripts: List<AutomationScript>,
     dataSheets: List<DataSheet>,
-    onSelectScript: (AutomationScript) -> Unit,
-    onSaveScript: (AutomationScript) -> Unit,
-    onDeleteScript: (String) -> Unit,
+    executionState: AutomationExecutionState,
+    onOpenSettings: () -> Unit,
+    onRenameScript: () -> Unit,
     onEditStep: (AutomationStep) -> Unit,
     onMoveStep: (String, Int) -> Unit,
     onDeleteStep: (String) -> Unit,
-    onOpenNewScript: () -> Unit,
-    onOpenAddNavigate: () -> Unit,
-    onOpenAddCustomStep: () -> Unit,
-    onClearAllSteps: () -> Unit
+    onAddStep: () -> Unit,
+    onAddNavigate: () -> Unit,
+    onClearAll: () -> Unit,
+    onGoToTemplates: () -> Unit
 ) {
-    var dataSheetMenuOpen by remember { mutableStateOf(false) }
-    var orderMenuOpen by remember { mutableStateOf(false) }
-    var policyMenuOpen by remember { mutableStateOf(false) }
+    val emerald = Color(0xFF10B981)
+    val activeSheet = dataSheets.firstOrNull { it.id == currentScript.dataSheetId }
 
     LazyColumn(
-        contentPadding = PaddingValues(12.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
         modifier = Modifier.fillMaxSize()
     ) {
-        // Saved Scripts Horizontal Selector
+        // Hero Flow Summary Card
         item {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 4.dp)
-            ) {
-                Text("Saved Website Scripts", fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                TextButton(onClick = onOpenNewScript) {
-                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp))
-                    Spacer(modifier = Modifier.width(3.dp))
-                    Text("New Script", fontSize = 11.sp)
-                }
-            }
-
-            LazyRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                ),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                items(savedScripts) { script ->
-                    val isSelected = script.id == currentScript.id
-                    Card(
-                        shape = RoundedCornerShape(12.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                        ),
-                        border = BorderStroke(
-                            1.dp,
-                            if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
-                        ),
-                        modifier = Modifier
-                            .width(215.dp)
-                            .clickable { onSelectScript(script) }
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Column(modifier = Modifier.padding(10.dp)) {
+                        Column(modifier = Modifier.weight(1f)) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                modifier = Modifier.fillMaxWidth()
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                Surface(
-                                    shape = RoundedCornerShape(4.dp),
-                                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                                Text(
+                                    text = currentScript.name,
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                IconButton(
+                                    onClick = onRenameScript,
+                                    modifier = Modifier.size(24.dp)
                                 ) {
-                                    Text(
-                                        text = if (script.targetWebsite == "*") "All Sites (*)" else script.targetWebsite.take(18),
-                                        fontSize = 9.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                    Icon(
+                                        Icons.Default.Edit,
+                                        contentDescription = "Rename",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(15.dp)
                                     )
-                                }
-
-                                if (savedScripts.size > 1) {
-                                    IconButton(
-                                        onClick = { onDeleteScript(script.id) },
-                                        modifier = Modifier.size(20.dp)
-                                    ) {
-                                        Icon(
-                                            Icons.Default.Delete,
-                                            contentDescription = "Delete",
-                                            tint = MaterialTheme.colorScheme.error,
-                                            modifier = Modifier.size(12.dp)
-                                        )
-                                    }
                                 }
                             }
 
-                            Spacer(modifier = Modifier.height(4.dp))
-
                             Text(
-                                text = script.name,
+                                text = if (currentScript.targetWebsite == "*") "Runs on: All websites" else "Runs on: ${currentScript.targetWebsite}",
                                 fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                text = "${script.steps.size} captured elements • ${script.repeatCount}x runs",
-                                fontSize = 10.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-                    }
-                }
-            }
-        }
 
-        // Active Script Settings Card
-        item {
-            Card(
-                shape = RoundedCornerShape(14.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        "Manage Selected Script",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                        OutlinedTextField(
-                            value = currentScript.name,
-                            onValueChange = { onSaveScript(currentScript.copy(name = it)) },
-                            label = { Text("Script Name", fontSize = 10.sp) },
-                            modifier = Modifier.weight(1.2f)
-                        )
-                        OutlinedTextField(
-                            value = currentScript.targetWebsite,
-                            onValueChange = { onSaveScript(currentScript.copy(targetWebsite = it)) },
-                            label = { Text("Website (* for all)", fontSize = 10.sp) },
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-
-                    // Data Sheet Selector
-                    ExposedDropdownMenuBox(
-                        expanded = dataSheetMenuOpen,
-                        onExpandedChange = { dataSheetMenuOpen = it }
-                    ) {
-                        val activeSheet = dataSheets.firstOrNull { it.id == currentScript.dataSheetId }
-                        val labelText = activeSheet?.let { "${it.name} (${it.totalRows()} rows stored — used 1 by 1)" }
-                            ?: "Default Section (Randomly Generated Every Step)"
-                        OutlinedTextField(
-                            value = labelText,
-                            onValueChange = {},
-                            readOnly = true,
-                            label = { Text("Data Sheet Used in Script", fontSize = 10.sp) },
-                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = dataSheetMenuOpen) },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .menuAnchor(MenuAnchorType.PrimaryNotEditable)
-                        )
-                        ExposedDropdownMenu(
-                            expanded = dataSheetMenuOpen,
-                            onDismissRequest = { dataSheetMenuOpen = false }
+                        OutlinedButton(
+                            onClick = onOpenSettings,
+                            shape = RoundedCornerShape(10.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
                         ) {
-                            DropdownMenuItem(
-                                text = { Text("Default Section (Randomly Generated Every Step)", fontSize = 11.sp) },
-                                onClick = {
-                                    onSaveScript(currentScript.copy(dataSheetId = null))
-                                    dataSheetMenuOpen = false
-                                }
-                            )
-                            dataSheets.forEach { sheet ->
-                                DropdownMenuItem(
-                                    text = { Text("${sheet.name} (${sheet.totalRows()} rows stored)", fontSize = 11.sp) },
-                                    onClick = {
-                                        onSaveScript(currentScript.copy(dataSheetId = sheet.id))
-                                        dataSheetMenuOpen = false
-                                    }
+                            Icon(Icons.Default.Settings, contentDescription = null, modifier = Modifier.size(15.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Flow Settings", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+
+                    // Quick Status Chips
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = emerald.copy(alpha = 0.12f),
+                            border = BorderStroke(1.dp, emerald.copy(alpha = 0.25f))
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                            ) {
+                                Icon(Icons.Default.Refresh, contentDescription = null, tint = emerald, modifier = Modifier.size(12.dp))
+                                Text("${currentScript.repeatCount}x Runs (1-by-1)", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = emerald)
+                            }
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.25f))
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                            ) {
+                                Icon(Icons.Default.ListAlt, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(12.dp))
+                                Text(
+                                    text = activeSheet?.let { "Data: ${it.name}" } ?: "Data: Default Random",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary
                                 )
                             }
                         }
                     }
-
-                    // Ordering & Exhaustion Row
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                        // Order
-                        ExposedDropdownMenuBox(
-                            expanded = orderMenuOpen,
-                            onExpandedChange = { orderMenuOpen = it },
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            OutlinedTextField(
-                                value = currentScript.iterationOrder.shortLabel,
-                                onValueChange = {},
-                                readOnly = true,
-                                label = { Text("1-by-1 Order", fontSize = 9.sp) },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .menuAnchor(MenuAnchorType.PrimaryNotEditable)
-                            )
-                            ExposedDropdownMenu(expanded = orderMenuOpen, onDismissRequest = { orderMenuOpen = false }) {
-                                DataIterationOrder.entries.forEach { order ->
-                                    DropdownMenuItem(
-                                        text = { Text(order.label, fontSize = 11.sp) },
-                                        onClick = {
-                                            onSaveScript(currentScript.copy(iterationOrder = order))
-                                            orderMenuOpen = false
-                                        }
-                                    )
-                                }
-                            }
-                        }
-
-                        // Exhaustion
-                        ExposedDropdownMenuBox(
-                            expanded = policyMenuOpen,
-                            onExpandedChange = { policyMenuOpen = it },
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            OutlinedTextField(
-                                value = currentScript.exhaustionPolicy.shortLabel,
-                                onValueChange = {},
-                                readOnly = true,
-                                label = { Text("When Data Finished", fontSize = 9.sp) },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .menuAnchor(MenuAnchorType.PrimaryNotEditable)
-                            )
-                            ExposedDropdownMenu(expanded = policyMenuOpen, onDismissRequest = { policyMenuOpen = false }) {
-                                DataExhaustionPolicy.entries.forEach { policy ->
-                                    DropdownMenuItem(
-                                        text = { Text(policy.label, fontSize = 11.sp) },
-                                        onClick = {
-                                            onSaveScript(currentScript.copy(exhaustionPolicy = policy))
-                                            policyMenuOpen = false
-                                        }
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    // Repeat Count Stepper
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 2.dp)
-                    ) {
-                        Text("Repeat Runs (Uses next stored data 1 by 1):", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            OutlinedButton(
-                                onClick = { onSaveScript(currentScript.copy(repeatCount = (currentScript.repeatCount - 1).coerceAtLeast(1))) },
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                            ) { Text("-", fontSize = 14.sp) }
-
-                            Text("${currentScript.repeatCount}x", fontSize = 13.sp, fontWeight = FontWeight.Bold)
-
-                            OutlinedButton(
-                                onClick = { onSaveScript(currentScript.copy(repeatCount = currentScript.repeatCount + 1)) },
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                            ) { Text("+", fontSize = 14.sp) }
-                        }
-                    }
                 }
             }
         }
 
-        // Script Steps Header & Action Buttons (+ Website/Page, + Element Step, Clear)
+        // Action Toolbar: + Step, + Navigate, Clear
         item {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 4.dp)
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Text("Captured Elements (${currentScript.steps.size})", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    text = "Steps Sequence (${currentScript.steps.size})",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
 
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    OutlinedButton(
-                        onClick = onOpenAddNavigate,
-                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Button(
+                        onClick = onAddStep,
+                        shape = RoundedCornerShape(10.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
                     ) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, modifier = Modifier.size(12.dp))
-                        Spacer(modifier = Modifier.width(2.dp))
-                        Text("+ Website / Page", fontSize = 10.sp)
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("+ Add Step", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
 
                     OutlinedButton(
-                        onClick = onOpenAddCustomStep,
-                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                        onClick = onAddNavigate,
+                        shape = RoundedCornerShape(10.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
                     ) {
-                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(12.dp))
-                        Spacer(modifier = Modifier.width(2.dp))
-                        Text("+ Element", fontSize = 10.sp)
+                        Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, modifier = Modifier.size(13.dp))
+                        Spacer(modifier = Modifier.width(3.dp))
+                        Text("+ Navigate", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                     }
 
                     if (currentScript.steps.isNotEmpty()) {
-                        TextButton(
-                            onClick = onClearAllSteps,
-                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
+                        IconButton(
+                            onClick = onClearAll,
+                            modifier = Modifier.size(34.dp)
                         ) {
-                            Text("Clear", fontSize = 10.sp, color = MaterialTheme.colorScheme.error)
+                            Icon(Icons.Default.Clear, contentDescription = "Clear All", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(18.dp))
                         }
                     }
                 }
             }
         }
 
-        // Steps List
-        itemsIndexed(currentScript.steps) { index, step ->
-            ScriptStepDetailCard(
-                index = index,
-                totalCount = currentScript.steps.size,
-                step = step,
-                onEdit = { onEditStep(step) },
-                onMoveUp = { onMoveStep(step.id, -1) },
-                onMoveDown = { onMoveStep(step.id, 1) },
-                onDelete = { onDeleteStep(step.id) }
-            )
+        // Empty State or List of Step Cards
+        if (currentScript.steps.isEmpty()) {
+            item {
+                Card(
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(28.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                            modifier = Modifier.size(56.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    Icons.Default.AutoAwesome,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(28.dp)
+                                )
+                            }
+                        }
+
+                        Text(
+                            text = "No steps in this workflow yet",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+
+                        Text(
+                            text = "Add steps manually or choose a 1-click starter template to automate form filling, searches, or multi-page tasks.",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 16.dp),
+                            lineHeight = 16.sp
+                        )
+
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Button(
+                                onClick = onGoToTemplates,
+                                shape = RoundedCornerShape(10.dp),
+                                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
+                            ) {
+                                Icon(Icons.Default.LibraryBooks, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Browse Templates", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+
+                            OutlinedButton(
+                                onClick = onAddStep,
+                                shape = RoundedCornerShape(10.dp),
+                                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
+                            ) {
+                                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Add Custom Step", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            itemsIndexed(currentScript.steps) { index, step ->
+                EasyStepCard(
+                    index = index,
+                    totalCount = currentScript.steps.size,
+                    step = step,
+                    onEdit = { onEditStep(step) },
+                    onMoveUp = { onMoveStep(step.id, -1) },
+                    onMoveDown = { onMoveStep(step.id, 1) },
+                    onDelete = { onDeleteStep(step.id) }
+                )
+            }
         }
     }
 }
 
 /**
- * Detailed Step Card in Studio
+ * Human-readable step card with friendly icons and clear badges
  */
 @Composable
-private fun ScriptStepDetailCard(
+private fun EasyStepCard(
     index: Int,
     totalCount: Int,
     step: AutomationStep,
@@ -702,22 +755,24 @@ private fun ScriptStepDetailCard(
     onMoveDown: () -> Unit,
     onDelete: () -> Unit
 ) {
-    val actionColor = when (step.actionType) {
-        AutomationActionType.INPUT -> Color(0xFF3B82F6)
-        AutomationActionType.CLICK -> Color(0xFF10B981)
-        AutomationActionType.NAVIGATE -> Color(0xFF8B5CF6)
-        AutomationActionType.SELECT_DROPDOWN -> Color(0xFFD946EF)
-        AutomationActionType.SELECT_COUNTRY_CODE -> Color(0xFF10B981)
-        AutomationActionType.SELECT_DATE -> Color(0xFF0284C7)
-        AutomationActionType.UPLOAD_FILE -> Color(0xFFF59E0B)
-        AutomationActionType.SUBMIT -> Color(0xFF10B981)
-        AutomationActionType.WAIT -> Color(0xFF64748B)
-        AutomationActionType.CLEAR -> Color(0xFFEF4444)
-        AutomationActionType.SCROLL -> Color(0xFF6366F1)
+    val (icon, color, actionTitle) = when (step.actionType) {
+        AutomationActionType.INPUT -> Triple(Icons.Default.Keyboard, Color(0xFF3B82F6), "Type Text")
+        AutomationActionType.CLICK -> Triple(Icons.Default.TouchApp, Color(0xFF10B981), "Click Element")
+        AutomationActionType.CHECKBOX -> Triple(Icons.Default.CheckBox, Color(0xFF06B6D4), "Toggle Checkbox")
+        AutomationActionType.RADIO -> Triple(Icons.Default.RadioButtonChecked, Color(0xFF8B5CF6), "Select Radio")
+        AutomationActionType.NAVIGATE -> Triple(Icons.Default.Language, Color(0xFF8B5CF6), "Open Web Page")
+        AutomationActionType.SUBMIT -> Triple(Icons.Default.Send, Color(0xFF10B981), "Submit Form")
+        AutomationActionType.WAIT -> Triple(Icons.Default.HourglassBottom, Color(0xFF64748B), "Wait / Delay")
+        AutomationActionType.SELECT_DROPDOWN -> Triple(Icons.Default.KeyboardArrowDown, Color(0xFFD946EF), "Choose Option")
+        AutomationActionType.SELECT_COUNTRY_CODE -> Triple(Icons.Default.Language, Color(0xFF10B981), "Select Country")
+        AutomationActionType.SELECT_DATE -> Triple(Icons.Default.ListAlt, Color(0xFF0284C7), "Select Date")
+        AutomationActionType.UPLOAD_FILE -> Triple(Icons.Default.FileUpload, Color(0xFFF59E0B), "Upload File")
+        AutomationActionType.CLEAR -> Triple(Icons.Default.Clear, Color(0xFFEF4444), "Clear Input")
+        AutomationActionType.SCROLL -> Triple(Icons.Default.KeyboardArrowDown, Color(0xFF6366F1), "Scroll Page")
     }
 
     Card(
-        shape = RoundedCornerShape(10.dp),
+        shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
         modifier = Modifier
@@ -727,72 +782,104 @@ private fun ScriptStepDetailCard(
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
-            modifier = Modifier.padding(10.dp)
+            modifier = Modifier.padding(14.dp)
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
                 modifier = Modifier.weight(1f)
             ) {
+                // Step Number & Icon Avatar
                 Surface(
-                    shape = RoundedCornerShape(6.dp),
-                    color = actionColor.copy(alpha = 0.15f)
+                    shape = RoundedCornerShape(10.dp),
+                    color = color.copy(alpha = 0.15f),
+                    modifier = Modifier.size(42.dp)
                 ) {
-                    Text(
-                        text = "${index + 1}. ${step.actionType.name}",
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = actionColor,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
-                    )
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = icon,
+                            contentDescription = null,
+                            tint = color,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
                 }
 
-                Column(modifier = Modifier.weight(1f)) {
+                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = "${index + 1}. $actionTitle",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = color
+                        )
+                        Surface(
+                            shape = RoundedCornerShape(4.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant
+                        ) {
+                            Text(
+                                text = "${step.delayMs}ms",
+                                fontSize = 9.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+
                     Text(
                         text = step.elementDescription.ifBlank { step.selector },
-                        fontSize = 12.sp,
+                        fontSize = 13.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Text(
-                        text = "Element Selector: ${step.selector}",
-                        fontSize = 9.sp,
-                        fontFamily = FontFamily.Monospace,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = MaterialTheme.colorScheme.onSurface,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
+
+                    // Data Binding or Value Badge
                     if (!step.variableKey.isNullOrBlank() || step.value.isNotBlank()) {
-                        Text(
-                            text = if (!step.variableKey.isNullOrBlank()) {
-                                "Fills from My Data field: '${step.variableKey}' (1 by 1)"
-                            } else {
-                                "Target / Value: ${step.value}"
-                            },
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = MaterialTheme.colorScheme.primary
-                        )
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
+                        ) {
+                            Text(
+                                text = if (!step.variableKey.isNullOrBlank()) {
+                                    "Fills: '${step.variableKey}' from My Data (1-by-1)"
+                                } else {
+                                    "Value: ${step.value}"
+                                },
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
                     }
                 }
             }
 
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            // Quick Actions: Reorder, Edit, Delete
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
                 if (index > 0) {
-                    IconButton(onClick = onMoveUp, modifier = Modifier.size(26.dp)) {
-                        Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Move Up", modifier = Modifier.size(16.dp))
+                    IconButton(onClick = onMoveUp, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Move Up", modifier = Modifier.size(18.dp))
                     }
                 }
                 if (index < totalCount - 1) {
-                    IconButton(onClick = onMoveDown, modifier = Modifier.size(26.dp)) {
-                        Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Move Down", modifier = Modifier.size(16.dp))
+                    IconButton(onClick = onMoveDown, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Move Down", modifier = Modifier.size(18.dp))
                     }
                 }
-                IconButton(onClick = onEdit, modifier = Modifier.size(28.dp)) {
-                    Icon(Icons.Default.Edit, contentDescription = "Edit", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(15.dp))
+                IconButton(onClick = onEdit, modifier = Modifier.size(32.dp)) {
+                    Icon(Icons.Default.Edit, contentDescription = "Edit", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
                 }
-                IconButton(onClick = onDelete, modifier = Modifier.size(28.dp)) {
-                    Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(15.dp))
+                IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {
+                    Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp))
                 }
             }
         }
@@ -800,17 +887,221 @@ private fun ScriptStepDetailCard(
 }
 
 /**
- * TAB 1: My Data (Custom Data Sheets e.g. "XYZ Data" + Default Random Generator Section)
+ * TAB 1: Library & Ready-Made Templates
+ * Gives users 1-tap automations they can use immediately without complex setup!
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun MyDataTabContent(
+private fun EasyLibraryAndTemplatesTab(
+    currentScript: AutomationScript,
+    savedScripts: List<AutomationScript>,
+    dataSheets: List<DataSheet>,
+    onSelectScript: (AutomationScript) -> Unit,
+    onLoadTemplate: (AutomationScript) -> Unit,
+    onDeleteScript: (String) -> Unit,
+    onOpenNewScript: () -> Unit
+) {
+    val templates = remember {
+        listOf(
+            AutomationScript(
+                id = UUID.randomUUID().toString(),
+                name = "Smart Form Autofill",
+                targetWebsite = "*",
+                repeatCount = 4,
+                steps = listOf(
+                    AutomationStep(actionType = AutomationActionType.INPUT, selector = "input[type='email'], #email", elementDescription = "Email Address", variableKey = "email", delayMs = 600L),
+                    AutomationStep(actionType = AutomationActionType.INPUT, selector = "input[name='username'], #username", elementDescription = "Username", variableKey = "username", delayMs = 600L),
+                    AutomationStep(actionType = AutomationActionType.INPUT, selector = "input[type='password'], #password", elementDescription = "Password", variableKey = "password", delayMs = 600L),
+                    AutomationStep(actionType = AutomationActionType.CHECKBOX, selector = "input[type='checkbox']", elementDescription = "Agree to Terms", delayMs = 500L),
+                    AutomationStep(actionType = AutomationActionType.SUBMIT, selector = "button[type='submit'], input[type='submit']", elementDescription = "Submit Form", delayMs = 1200L)
+                )
+            ),
+            AutomationScript(
+                id = UUID.randomUUID().toString(),
+                name = "Web Search Flow",
+                targetWebsite = "google.com",
+                repeatCount = 3,
+                steps = listOf(
+                    AutomationStep(actionType = AutomationActionType.NAVIGATE, selector = "https://www.google.com", elementDescription = "Open Google", value = "https://www.google.com", delayMs = 2000L),
+                    AutomationStep(actionType = AutomationActionType.INPUT, selector = "textarea[name='q'], input[name='q']", elementDescription = "Search Query Box", variableKey = "username", delayMs = 800L),
+                    AutomationStep(actionType = AutomationActionType.SUBMIT, selector = "input[name='btnK'], form[action='/search']", elementDescription = "Search Button", delayMs = 1500L),
+                    AutomationStep(actionType = AutomationActionType.WAIT, selector = "", elementDescription = "Review Results", delayMs = 3000L)
+                )
+            ),
+            AutomationScript(
+                id = UUID.randomUUID().toString(),
+                name = "Multi-Page Transition Loop",
+                targetWebsite = "*",
+                repeatCount = 2,
+                steps = listOf(
+                    AutomationStep(actionType = AutomationActionType.NAVIGATE, selector = "https://example.com/step1", elementDescription = "Step 1 Page", value = "https://example.com/step1", delayMs = 2000L),
+                    AutomationStep(actionType = AutomationActionType.INPUT, selector = "#firstName", elementDescription = "First Name", variableKey = "firstName", delayMs = 600L),
+                    AutomationStep(actionType = AutomationActionType.CLICK, selector = "a.next-page, button.next", elementDescription = "Next Page Button", delayMs = 1500L),
+                    AutomationStep(actionType = AutomationActionType.INPUT, selector = "#phoneNumber", elementDescription = "Phone Number", variableKey = "phoneNumber", delayMs = 600L),
+                    AutomationStep(actionType = AutomationActionType.SUBMIT, selector = "#finishBtn", elementDescription = "Finish Button", delayMs = 1000L)
+                )
+            )
+        )
+    }
+
+    LazyColumn(
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+        modifier = Modifier.fillMaxSize()
+    ) {
+        // Ready-to-Use 1-Click Starter Templates
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                    Text("1-Click Starter Templates", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                }
+
+                Text(
+                    "Select a pre-built automation recipe to jump-start your flow with zero manual configuration:",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                templates.forEach { template ->
+                    Card(
+                        shape = RoundedCornerShape(14.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier.padding(14.dp)
+                        ) {
+                            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(template.name, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                Text(
+                                    text = "${template.steps.size} steps • Target: ${template.targetWebsite} • ${template.repeatCount}x runs",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+
+                            Button(
+                                onClick = { onLoadTemplate(template) },
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                            ) {
+                                Text("Use Template", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        item { HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)) }
+
+        // Saved Custom Scripts
+        item {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column {
+                    Text("Your Saved Workflows", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    Text("${savedScripts.size} saved scripts in storage", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+
+                Button(
+                    onClick = onOpenNewScript,
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("New Script", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+
+        items(savedScripts) { script ->
+            val isCurrent = script.id == currentScript.id
+            Card(
+                shape = RoundedCornerShape(14.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = if (isCurrent) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f) else MaterialTheme.colorScheme.surface
+                ),
+                border = BorderStroke(
+                    1.dp,
+                    if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onSelectScript(script) }
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier.padding(14.dp)
+                ) {
+                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(script.name, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            if (isCurrent) {
+                                Surface(
+                                    shape = RoundedCornerShape(4.dp),
+                                    color = MaterialTheme.colorScheme.primary
+                                ) {
+                                    Text("Active", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp))
+                                }
+                            }
+                        }
+
+                        Text(
+                            text = "${script.steps.size} steps • ${if (script.targetWebsite == "*") "All sites" else script.targetWebsite} • ${script.repeatCount}x runs",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        if (!isCurrent) {
+                            OutlinedButton(
+                                onClick = { onSelectScript(script) },
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                            ) {
+                                Text("Load", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+
+                        if (savedScripts.size > 1) {
+                            IconButton(
+                                onClick = { onDeleteScript(script.id) },
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * TAB 2: Easy My Data
+ * Clean, uncluttered view of data sheets and 1-by-1 form filling data
+ */
+@Composable
+private fun EasyMyDataTab(
     dataSheets: List<DataSheet>,
     onSaveDataSheet: (DataSheet) -> Unit,
     onDeleteDataSheet: (String) -> Unit,
     onOpenNewDataSheet: () -> Unit
 ) {
-    // "__DEFAULT__" represents viewing the Default Randomly Generated Data Sheet section
     var selectedSheetId by remember { mutableStateOf(dataSheets.firstOrNull()?.id ?: "__DEFAULT__") }
     val isViewingDefault = selectedSheetId == "__DEFAULT__" || dataSheets.isEmpty()
     val activeSheet = if (!isViewingDefault) {
@@ -821,226 +1112,115 @@ private fun MyDataTabContent(
     var showAddFieldDialog by remember { mutableStateOf(false) }
 
     LazyColumn(
-        contentPadding = PaddingValues(12.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
         modifier = Modifier.fillMaxSize()
     ) {
-        // Top Strip: Data Sheets horizontal selector (Custom Data Sheets + Default Random Sheet)
+        // Sheet Selector Strip
         item {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 4.dp)
-            ) {
-                Text("Select Data Sheet or Default Generator", fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                Button(
-                    onClick = onOpenNewDataSheet,
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Create Data Sheet", fontSize = 11.sp)
-                }
-            }
+                    Text("Select Active Data Sheet", fontSize = 14.sp, fontWeight = FontWeight.Bold)
 
-            LazyRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                // 1. User-created Data Sheets (e.g. "XYZ Data")
-                items(dataSheets) { sheet ->
-                    val isSelected = !isViewingDefault && sheet.id == activeSheet?.id
-                    Card(
-                        shape = RoundedCornerShape(12.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = if (isSelected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                        ),
-                        border = BorderStroke(
-                            1.5.dp,
-                            if (isSelected) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
-                        ),
-                        modifier = Modifier
-                            .width(195.dp)
-                            .clickable { selectedSheetId = sheet.id }
+                    Button(
+                        onClick = onOpenNewDataSheet,
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
                     ) {
-                        Column(modifier = Modifier.padding(10.dp)) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text(
-                                    text = sheet.name,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                if (dataSheets.size > 1) {
-                                    IconButton(
-                                        onClick = { onDeleteDataSheet(sheet.id) },
-                                        modifier = Modifier.size(20.dp)
-                                    ) {
-                                        Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(12.dp))
-                                    }
-                                }
-                            }
-                            Text(
-                                text = "${sheet.fields.keys.size} fields • ${sheet.totalRows()} items (1 by 1)",
-                                fontSize = 10.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("New Sheet", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
                 }
 
-                // 2. Default Section Card (Randomly Generated Data Sheet every time)
-                item {
-                    Card(
-                        shape = RoundedCornerShape(12.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = if (isViewingDefault) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
-                        ),
-                        border = BorderStroke(
-                            1.5.dp,
-                            if (isViewingDefault) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
-                        ),
-                        modifier = Modifier
-                            .width(210.dp)
-                            .clickable { selectedSheetId = "__DEFAULT__" }
-                    ) {
-                        Column(modifier = Modifier.padding(10.dp)) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Icon(
-                                    Icons.Default.AutoAwesome,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.tertiary,
-                                    modifier = Modifier.size(14.dp)
-                                )
-                                Text(
-                                    text = "Default Data Sheet",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    maxLines = 1
-                                )
-                            }
-                            Text(
-                                text = "New random email/pass every step",
-                                fontSize = 10.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    items(dataSheets) { sheet ->
+                        val isSelected = !isViewingDefault && sheet.id == activeSheet?.id
+                        FilterChip(
+                            selected = isSelected,
+                            onClick = { selectedSheetId = sheet.id },
+                            label = { Text("${sheet.name} (${sheet.totalRows()} rows)") },
+                            leadingIcon = if (isSelected) {
+                                { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(14.dp)) }
+                            } else null
+                        )
+                    }
+
+                    item {
+                        FilterChip(
+                            selected = isViewingDefault,
+                            onClick = { selectedSheetId = "__DEFAULT__" },
+                            label = { Text("Default Generator (Random)") },
+                            leadingIcon = { Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(14.dp)) }
+                        )
                     }
                 }
             }
         }
 
-        // If viewing a user-created Data Sheet (e.g. "XYZ Data")
+        // Active Sheet Overview
         if (activeSheet != null) {
             item {
                 Card(
-                    shape = RoundedCornerShape(14.dp),
+                    shape = RoundedCornerShape(16.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween,
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            OutlinedTextField(
-                                value = activeSheet.name,
-                                onValueChange = { onSaveDataSheet(activeSheet.copy(name = it)) },
-                                label = { Text("Data Sheet Name (e.g. XYZ Data)", fontSize = 10.sp) },
-                                modifier = Modifier.weight(1f)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
-                            ) {
+                            Column {
+                                Text(activeSheet.name, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                                 Text(
-                                    text = "${activeSheet.totalRows()} Max Rows",
+                                    text = "Stored items are used 1-by-1 sequentially on each recurring run.",
                                     fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
+                            }
+
+                            if (dataSheets.size > 1) {
+                                TextButton(
+                                    onClick = { onDeleteDataSheet(activeSheet.id) }
+                                ) {
+                                    Text("Delete Sheet", fontSize = 11.sp, color = MaterialTheme.colorScheme.error)
+                                }
                             }
                         }
 
-                        Text(
-                            text = "Inside '${activeSheet.name}', add fields like email, username, password, etc. Paste or upload 10s of items inside each field. When present, these stored values are ALWAYS used 1 by 1 (Default is NOT taken unless finished and you select Continue Using Default).",
-                            fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            // Iteration Order Selector (Top to Bottom, Bottom to Top, Random)
-                            var orderMenu by remember { mutableStateOf(false) }
-                            ExposedDropdownMenuBox(
-                                expanded = orderMenu,
-                                onExpandedChange = { orderMenu = it },
+                        // Order & Policy Row
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant,
                                 modifier = Modifier.weight(1f)
                             ) {
-                                OutlinedTextField(
-                                    value = activeSheet.iterationOrder.shortLabel,
-                                    onValueChange = {},
-                                    readOnly = true,
-                                    label = { Text("1-by-1 Order", fontSize = 9.sp) },
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .menuAnchor(MenuAnchorType.PrimaryNotEditable)
-                                )
-                                ExposedDropdownMenu(expanded = orderMenu, onDismissRequest = { orderMenu = false }) {
-                                    DataIterationOrder.entries.forEach { ord ->
-                                        DropdownMenuItem(
-                                            text = { Text(ord.label, fontSize = 11.sp) },
-                                            onClick = {
-                                                onSaveDataSheet(activeSheet.copy(iterationOrder = ord))
-                                                orderMenu = false
-                                            }
-                                        )
-                                    }
+                                Column(modifier = Modifier.padding(8.dp)) {
+                                    Text("Consumption Order", fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(activeSheet.iterationOrder.shortLabel, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                 }
                             }
-
-                            // Exhaustion Policy Selector (Stop, Continue Default, Add New, Loop)
-                            var policyMenu by remember { mutableStateOf(false) }
-                            ExposedDropdownMenuBox(
-                                expanded = policyMenu,
-                                onExpandedChange = { policyMenu = it },
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant,
                                 modifier = Modifier.weight(1f)
                             ) {
-                                OutlinedTextField(
-                                    value = activeSheet.exhaustionPolicy.shortLabel,
-                                    onValueChange = {},
-                                    readOnly = true,
-                                    label = { Text("When Finished", fontSize = 9.sp) },
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .menuAnchor(MenuAnchorType.PrimaryNotEditable)
-                                )
-                                ExposedDropdownMenu(expanded = policyMenu, onDismissRequest = { policyMenu = false }) {
-                                    DataExhaustionPolicy.entries.forEach { pol ->
-                                        DropdownMenuItem(
-                                            text = { Text(pol.label, fontSize = 11.sp) },
-                                            onClick = {
-                                                onSaveDataSheet(activeSheet.copy(exhaustionPolicy = pol))
-                                                policyMenu = false
-                                            }
-                                        )
-                                    }
+                                Column(modifier = Modifier.padding(8.dp)) {
+                                    Text("When Finished", fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(activeSheet.exhaustionPolicy.shortLabel, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                 }
                             }
                         }
@@ -1048,51 +1228,40 @@ private fun MyDataTabContent(
                 }
             }
 
-            // Fields List in Sheet
+            // Quick Add Field Header
             item {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 4.dp)
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text(
-                        "Fields inside '${activeSheet.name}' (Tap to Paste / Upload 10s of items)",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold
-                    )
+                    Text("Form Fields in '${activeSheet.name}'", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+
                     OutlinedButton(
                         onClick = { showAddFieldDialog = true },
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
                     ) {
-                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(12.dp))
-                        Spacer(modifier = Modifier.width(3.dp))
-                        Text("+ Add Field", fontSize = 10.sp)
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("+ Add Field", fontSize = 11.sp)
                     }
                 }
             }
 
-            val standardFieldKeys = listOf(
-                "email" to "Email Field (email)",
-                "username" to "Username Field (username)",
-                "password" to "Password Field (password)",
-                "phoneNumber" to "Phone Number Field (phoneNumber)",
-                "firstName" to "First Name Field (firstName)",
-                "lastName" to "Last Name Field (lastName)",
-                "countryCode" to "Country Code Field (countryCode)",
-                "gender" to "Gender Field (gender)",
-                "dob" to "Date of Birth Field (dob)",
-                "address" to "Address Field (address)",
-                "city" to "City Field (city)",
-                "state" to "State Field (state)",
-                "zipCode" to "ZIP / PIN Code Field (zipCode)",
-                "fileName" to "Upload File Name Field (fileName)"
+            // Standard common fields: email, username, password, phone, firstName
+            val standardKeys = listOf(
+                "email" to "Email Address",
+                "username" to "Username",
+                "password" to "Password",
+                "phoneNumber" to "Phone Number",
+                "firstName" to "First Name",
+                "lastName" to "Last Name"
             )
 
-            items(standardFieldKeys) { (key, label) ->
+            items(standardKeys) { (key, label) ->
                 val values = activeSheet.getFieldValues(key)
-                DataFieldCard(
+                EasyFieldCard(
                     fieldKey = key,
                     fieldLabel = label,
                     values = values,
@@ -1100,26 +1269,53 @@ private fun MyDataTabContent(
                 )
             }
 
-            // Custom fields defined outside standard
-            val customKeys = activeSheet.fields.keys.filterNot { k -> standardFieldKeys.any { it.first == k } }
-            items(customKeys) { key ->
+            // Any extra custom fields
+            val otherKeys = activeSheet.fields.keys.filterNot { k -> standardKeys.any { it.first == k } }
+            items(otherKeys) { key ->
                 val values = activeSheet.getFieldValues(key)
-                DataFieldCard(
+                EasyFieldCard(
                     fieldKey = key,
-                    fieldLabel = "Custom Field ($key)",
+                    fieldLabel = "Custom: $key",
                     values = values,
                     onEdit = { fieldKeyToEdit = key }
                 )
             }
         }
 
-        // DEFAULT SECTION: Randomly Generated Data Sheet every time
+        // Default Generator Preview Card
         item {
-            DefaultRandomDataSheetSection()
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.35f)
+                ),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.tertiary.copy(alpha = 0.4f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = MaterialTheme.colorScheme.tertiary, modifier = Modifier.size(18.dp))
+                        Text("Dynamic Default Generator", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    }
+
+                    Text(
+                        text = "Whenever a field is left empty or your stored list runs out, Aura automatically generates fresh, realistic dummy data (email, password, phone, address) for each step so automation never fails.",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        lineHeight = 16.sp
+                    )
+                }
+            }
         }
     }
 
-    // Edit Field Values Dialog (Supports manual paste of 10s of items AND file upload .txt / .csv)
+    // Edit Field Values Dialog
     if (fieldKeyToEdit != null && activeSheet != null) {
         val currentValues = activeSheet.getFieldValues(fieldKeyToEdit!!)
         EditFieldValuesDialog(
@@ -1156,89 +1352,137 @@ private fun MyDataTabContent(
 }
 
 /**
- * Dedicated Card explaining and previewing the Default Section (Randomly Generated Data Sheet every time)
+ * Clean field card in My Data
  */
 @Composable
-private fun DefaultRandomDataSheetSection() {
-    var sampleList by remember {
-        mutableStateOf(
-            List(3) { AutomationDataGenerator.generateSingleRandomRecord() }
-        )
-    }
-
+private fun EasyFieldCard(
+    fieldKey: String,
+    fieldLabel: String,
+    values: List<String>,
+    onEdit: () -> Unit
+) {
     Card(
-        shape = RoundedCornerShape(14.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.4f)
-        ),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.tertiary.copy(alpha = 0.5f)),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = 6.dp)
+            .clickable { onEdit() }
     ) {
-        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Icon(
-                        Icons.Default.AutoAwesome,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.tertiary,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Text(
-                        "Default Section: Dynamic Random Data Sheet",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+            modifier = Modifier.padding(14.dp)
+        ) {
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(fieldLabel, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = if (values.isNotEmpty()) Color(0xFF10B981).copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant
+                    ) {
+                        Text(
+                            text = if (values.isNotEmpty()) "${values.size} items stored" else "Empty (Uses Default)",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (values.isNotEmpty()) Color(0xFF10B981) else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
                 }
 
-                OutlinedButton(
-                    onClick = {
-                        sampleList = List(3) { AutomationDataGenerator.generateSingleRandomRecord() }
-                    },
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                ) {
-                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(12.dp))
-                    Spacer(modifier = Modifier.width(3.dp))
-                    Text("Preview New", fontSize = 10.sp)
+                if (values.isNotEmpty()) {
+                    Text(
+                        text = values.take(3).joinToString(" • ") + if (values.size > 3) " • +${values.size - 3} more" else "",
+                        fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                } else {
+                    Text("Tap to paste or upload 10s of items", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
 
-            Text(
-                text = "How Default works: Unlike your custom Data Sheets (like 'XYZ Data'), the Default Data Sheet dynamically generates brand-new, unique values for email, username, password, phone, DOB, and address on every single iteration. When a field IS present in your custom Data Sheet, Default is NOT used unless your stored list finishes and you choose 'Continue Using Default'.",
-                fontSize = 11.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            Button(
+                onClick = onEdit,
+                shape = RoundedCornerShape(8.dp),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+            ) {
+                Text(if (values.isNotEmpty()) "Edit" else "+ Paste", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
 
-            sampleList.forEachIndexed { idx, rec ->
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
-                    modifier = Modifier.fillMaxWidth()
+/**
+ * TAB 3: Activity Logs
+ */
+@Composable
+private fun EasyLogsTab(
+    logMessages: List<String>,
+    executionStatus: AutomationStatus
+) {
+    val emerald = Color(0xFF10B981)
+
+    LazyColumn(
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.fillMaxSize()
+    ) {
+        item {
+            Card(
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier.padding(12.dp)
                 ) {
-                    Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text("Execution Engine Status:", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = if (executionStatus == AutomationStatus.PLAYING) emerald.copy(alpha = 0.2f) else MaterialTheme.colorScheme.surfaceVariant
+                    ) {
                         Text(
-                            "Random Run #${idx + 1} (Generated on the fly):",
-                            fontSize = 10.sp,
+                            text = executionStatus.name,
+                            fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        Text(
-                            "email: ${rec.email}  |  username: ${rec.username}",
-                            fontSize = 9.sp,
-                            fontFamily = FontFamily.Monospace
-                        )
-                        Text(
-                            "password: ${rec.password}  |  phone: ${rec.countryCode} ${rec.phoneNumber}",
-                            fontSize = 9.sp,
-                            fontFamily = FontFamily.Monospace
+                            color = if (executionStatus == AutomationStatus.PLAYING) emerald else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                         )
                     }
+                }
+            }
+        }
+
+        if (logMessages.isEmpty()) {
+            item {
+                Text(
+                    text = "No logs yet. Run a workflow to view step execution, element matching, and 1-by-1 data fills.",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 16.dp)
+                )
+            }
+        } else {
+            items(logMessages) { msg ->
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = msg,
+                        fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                    )
                 }
             }
         }
@@ -1246,102 +1490,337 @@ private fun DefaultRandomDataSheetSection() {
 }
 
 /**
- * Data Field Card with indexed stored values (#1, #2, #3, #4...)
+ * Friendly, easy Add Step Dialog with human categories (Type, Click, Toggle, Wait)
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun DataFieldCard(
-    fieldKey: String,
-    fieldLabel: String,
-    values: List<String>,
-    onEdit: () -> Unit
+fun EasyAddStepDialog(
+    availableFieldKeys: List<String>,
+    onDismiss: () -> Unit,
+    onAdd: (AutomationStep) -> Unit
 ) {
-    Card(
-        shape = RoundedCornerShape(10.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onEdit() }
-    ) {
-        Column(modifier = Modifier.padding(10.dp)) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(text = fieldLabel, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    Surface(
-                        shape = RoundedCornerShape(4.dp),
-                        color = if (values.isNotEmpty()) Color(0xFF10B981).copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant
-                    ) {
-                        Text(
-                            text = if (values.isNotEmpty()) "${values.size} stored (Used 1 by 1)" else "Empty (Uses Default)",
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = if (values.isNotEmpty()) Color(0xFF10B981) else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
-                        )
-                    }
-                }
+    var selectedCategory by remember { mutableStateOf(AutomationActionType.INPUT) }
+    var elementLabel by remember { mutableStateOf("") }
+    var selector by remember { mutableStateOf("") }
+    var selectedVarKey by remember { mutableStateOf("email") }
+    var customValue by remember { mutableStateOf("") }
+    var delayMsStr by remember { mutableStateOf("800") }
+    var fieldMenuOpen by remember { mutableStateOf(false) }
 
-                IconButton(onClick = onEdit, modifier = Modifier.size(24.dp)) {
-                    Icon(Icons.Default.Edit, contentDescription = "Edit Values", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(14.dp))
-                }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Icon(Icons.Default.Add, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                Text("Add Step to Flow", fontSize = 16.sp, fontWeight = FontWeight.Bold)
             }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("Choose action type:", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
 
-            if (values.isEmpty()) {
-                Text(
-                    text = "No stored values in this field. Tap to paste or upload 10s of $fieldKey items.",
-                    fontSize = 10.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 2.dp)
-                )
-            } else {
-                LazyRow(
+                // Category chips
+                Row(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 6.dp)
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    itemsIndexed(values.take(8)) { idx, valStr ->
-                        Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f)
+                    FilterChip(
+                        selected = selectedCategory == AutomationActionType.INPUT,
+                        onClick = { selectedCategory = AutomationActionType.INPUT },
+                        label = { Text("Type") },
+                        leadingIcon = { Icon(Icons.Default.Keyboard, contentDescription = null, modifier = Modifier.size(14.dp)) }
+                    )
+                    FilterChip(
+                        selected = selectedCategory == AutomationActionType.CLICK,
+                        onClick = { selectedCategory = AutomationActionType.CLICK },
+                        label = { Text("Click") },
+                        leadingIcon = { Icon(Icons.Default.TouchApp, contentDescription = null, modifier = Modifier.size(14.dp)) }
+                    )
+                    FilterChip(
+                        selected = selectedCategory == AutomationActionType.CHECKBOX,
+                        onClick = { selectedCategory = AutomationActionType.CHECKBOX },
+                        label = { Text("Check") },
+                        leadingIcon = { Icon(Icons.Default.CheckBox, contentDescription = null, modifier = Modifier.size(14.dp)) }
+                    )
+                    FilterChip(
+                        selected = selectedCategory == AutomationActionType.WAIT,
+                        onClick = { selectedCategory = AutomationActionType.WAIT },
+                        label = { Text("Wait") },
+                        leadingIcon = { Icon(Icons.Default.HourglassBottom, contentDescription = null, modifier = Modifier.size(14.dp)) }
+                    )
+                }
+
+                OutlinedTextField(
+                    value = elementLabel,
+                    onValueChange = { elementLabel = it },
+                    label = { Text("Step Name / Description", fontSize = 11.sp) },
+                    placeholder = { Text("e.g. Email Field, Submit Button") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                if (selectedCategory != AutomationActionType.WAIT) {
+                    OutlinedTextField(
+                        value = selector,
+                        onValueChange = { selector = it },
+                        label = { Text("Target Element (ID, Class, or Selector)", fontSize = 11.sp) },
+                        placeholder = { Text("e.g. #email, input[name='email'], .btn-submit") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+
+                if (selectedCategory == AutomationActionType.INPUT) {
+                    ExposedDropdownMenuBox(
+                        expanded = fieldMenuOpen,
+                        onExpandedChange = { fieldMenuOpen = it }
+                    ) {
+                        OutlinedTextField(
+                            value = if (selectedVarKey.isNotBlank()) "Fill from My Data: '$selectedVarKey'" else "Type static custom value",
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("Value to Type", fontSize = 11.sp) },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = fieldMenuOpen) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .menuAnchor(MenuAnchorType.PrimaryNotEditable)
+                        )
+                        ExposedDropdownMenu(
+                            expanded = fieldMenuOpen,
+                            onDismissRequest = { fieldMenuOpen = false }
                         ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
-                            ) {
-                                Text(
-                                    text = "#${idx + 1}",
-                                    fontSize = 8.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                                Text(
-                                    text = valStr,
-                                    fontSize = 9.sp,
-                                    fontFamily = FontFamily.Monospace
+                            DropdownMenuItem(
+                                text = { Text("Static Custom Text...", fontSize = 12.sp) },
+                                onClick = {
+                                    selectedVarKey = ""
+                                    fieldMenuOpen = false
+                                }
+                            )
+                            availableFieldKeys.forEach { key ->
+                                DropdownMenuItem(
+                                    text = { Text("My Data: $key (1-by-1)", fontSize = 12.sp) },
+                                    onClick = {
+                                        selectedVarKey = key
+                                        fieldMenuOpen = false
+                                    }
                                 )
                             }
                         }
                     }
-                    if (values.size > 8) {
-                        item {
-                            Text(
-                                "+${values.size - 8} more",
-                                fontSize = 9.sp,
-                                color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.padding(vertical = 3.dp)
-                            )
+
+                    if (selectedVarKey.isBlank()) {
+                        OutlinedTextField(
+                            value = customValue,
+                            onValueChange = { customValue = it },
+                            label = { Text("Custom Text to Type", fontSize = 11.sp) },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
+
+                OutlinedTextField(
+                    value = delayMsStr,
+                    onValueChange = { delayMsStr = it },
+                    label = { Text("Delay after step (ms)", fontSize = 11.sp) },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val step = AutomationStep(
+                        actionType = selectedCategory,
+                        selector = selector.trim(),
+                        elementDescription = elementLabel.trim().ifBlank { "${selectedCategory.name}: ${selector.take(20)}" },
+                        variableKey = if (selectedCategory == AutomationActionType.INPUT && selectedVarKey.isNotBlank()) selectedVarKey else null,
+                        value = if (selectedVarKey.isBlank()) customValue.trim() else "{{$selectedVarKey}}",
+                        delayMs = delayMsStr.toLongOrNull() ?: 800L
+                    )
+                    onAdd(step)
+                },
+                enabled = selector.isNotBlank() || selectedCategory == AutomationActionType.WAIT
+            ) {
+                Text("Add Step")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
+}
+
+/**
+ * Flow Settings Dialog (Simple popup to edit repeats, data sheet, order)
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun FlowSettingsDialog(
+    script: AutomationScript,
+    dataSheets: List<DataSheet>,
+    onDismiss: () -> Unit,
+    onSave: (AutomationScript) -> Unit
+) {
+    var repeatCount by remember { mutableIntStateOf(script.repeatCount) }
+    var selectedSheetId by remember { mutableStateOf(script.dataSheetId) }
+    var iterationOrder by remember { mutableStateOf(script.iterationOrder) }
+    var sheetMenuOpen by remember { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Flow Settings", fontSize = 16.sp, fontWeight = FontWeight.Bold) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                // Repeat Stepper
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("How many times should this workflow run?", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Each run takes the next row 1-by-1", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(
+                                onClick = { if (repeatCount > 1) repeatCount-- },
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+                            ) { Text("-", fontSize = 14.sp) }
+
+                            Text("${repeatCount}x", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+
+                            OutlinedButton(
+                                onClick = { repeatCount++ },
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp)
+                            ) { Text("+", fontSize = 14.sp) }
                         }
                     }
                 }
+
+                // Data Sheet Selector
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Data Sheet to use:", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    ExposedDropdownMenuBox(
+                        expanded = sheetMenuOpen,
+                        onExpandedChange = { sheetMenuOpen = it }
+                    ) {
+                        val activeSheet = dataSheets.firstOrNull { it.id == selectedSheetId }
+                        val label = activeSheet?.let { "${it.name} (${it.totalRows()} rows stored)" }
+                            ?: "Default Generator (Random Every Time)"
+
+                        OutlinedTextField(
+                            value = label,
+                            onValueChange = {},
+                            readOnly = true,
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = sheetMenuOpen) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .menuAnchor(MenuAnchorType.PrimaryNotEditable)
+                        )
+                        ExposedDropdownMenu(
+                            expanded = sheetMenuOpen,
+                            onDismissRequest = { sheetMenuOpen = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Default Generator (Random Every Time)", fontSize = 12.sp) },
+                                onClick = {
+                                    selectedSheetId = null
+                                    sheetMenuOpen = false
+                                }
+                            )
+                            dataSheets.forEach { sheet ->
+                                DropdownMenuItem(
+                                    text = { Text("${sheet.name} (${sheet.totalRows()} rows stored)", fontSize = 12.sp) },
+                                    onClick = {
+                                        selectedSheetId = sheet.id
+                                        sheetMenuOpen = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Order
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("1-by-1 Consumption Order:", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        FilterChip(
+                            selected = iterationOrder == DataIterationOrder.TOP_TO_BOTTOM,
+                            onClick = { iterationOrder = DataIterationOrder.TOP_TO_BOTTOM },
+                            label = { Text("Top to Bottom") }
+                        )
+                        FilterChip(
+                            selected = iterationOrder == DataIterationOrder.RANDOM,
+                            onClick = { iterationOrder = DataIterationOrder.RANDOM },
+                            label = { Text("Random") }
+                        )
+                    }
+                }
             }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    onSave(
+                        script.copy(
+                            repeatCount = repeatCount,
+                            dataSheetId = selectedSheetId,
+                            iterationOrder = iterationOrder
+                        )
+                    )
+                }
+            ) {
+                Text("Save Settings")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
         }
-    }
+    )
+}
+
+/**
+ * Dialog to rename script and target website
+ */
+@Composable
+fun RenameScriptDialog(
+    currentName: String,
+    currentWebsite: String,
+    onDismiss: () -> Unit,
+    onConfirm: (newName: String, newWebsite: String) -> Unit
+) {
+    var name by remember { mutableStateOf(currentName) }
+    var website by remember { mutableStateOf(currentWebsite) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Rename Workflow", fontSize = 16.sp, fontWeight = FontWeight.Bold) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Workflow Name", fontSize = 11.sp) },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = website,
+                    onValueChange = { website = it },
+                    label = { Text("Target Website (* for any)", fontSize = 11.sp) },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { onConfirm(name.trim(), website.trim().ifBlank { "*" }) },
+                enabled = name.isNotBlank()
+            ) {
+                Text("Save")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
 }
 
 /**
@@ -1358,7 +1837,6 @@ fun EditFieldValuesDialog(
     val context = LocalContext.current
     var rawText by remember { mutableStateOf(currentValues.joinToString("\n")) }
 
-    // File Picker Launcher for uploading .txt / .csv lists of emails, usernames, passwords, etc.
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri ->
@@ -1378,57 +1856,62 @@ fun EditFieldValuesDialog(
         title = {
             Text(
                 "Manage '$fieldKey' in $sheetName",
-                fontSize = 15.sp,
+                fontSize = 16.sp,
                 fontWeight = FontWeight.Bold
             )
         },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
-                    text = "Paste manually or upload a file (.txt / .csv) with 10s of '$fieldKey' entries. These will be consumed 1 by 1 (Default is not used while these are present).",
-                    fontSize = 11.sp,
+                    text = "Paste manually or upload a file (.txt / .csv) with 10s of '$fieldKey' entries. Each value will be used 1 by 1 on recurring runs.",
+                    fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
-                // Upload File & Quick Append 10 Sample Items Row
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     OutlinedButton(
                         onClick = { filePickerLauncher.launch("text/*") },
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                        modifier = Modifier.weight(1f)
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                        modifier = Modifier.weight(1f).height(40.dp)
                     ) {
-                        Icon(Icons.Default.FileUpload, contentDescription = null, modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Upload File (.txt/.csv)", fontSize = 10.sp)
+                        Icon(Icons.Default.FileUpload, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Upload File", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                     }
 
-                    OutlinedButton(
+                    Button(
                         onClick = {
                             val generatedBatch = (1..10).map {
                                 AutomationDataGenerator.generateSingleFieldValue(fieldKey)
                             }.joinToString("\n")
                             rawText = if (rawText.isBlank()) generatedBatch else "$rawText\n$generatedBatch"
                         },
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                        modifier = Modifier.weight(1f)
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                        ),
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                        modifier = Modifier.weight(1f).height(40.dp)
                     ) {
-                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(3.dp))
-                        Text("+10 Sample Items", fontSize = 10.sp)
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("+10 Sample Items", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
                 }
 
                 OutlinedTextField(
                     value = rawText,
                     onValueChange = { rawText = it },
-                    label = { Text("Stored '$fieldKey' List (1 per line or comma-separated)", fontSize = 11.sp) },
+                    label = { Text("Stored '$fieldKey' Values (1 per line)", fontSize = 11.sp) },
                     placeholder = { Text("item1\nitem2\nitem3\nitem4") },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(190.dp)
+                        .height(180.dp)
                 )
 
                 val detectedCount = rawText.lines()
@@ -1443,18 +1926,18 @@ fun EditFieldValuesDialog(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
-                        text = "Total stored items: $detectedCount (Used 1 by 1)",
-                        fontSize = 11.sp,
+                        text = "Total stored values: $detectedCount (Used 1 by 1)",
+                        fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.primary
                     )
                     if (rawText.isNotBlank()) {
-                        Text(
-                            text = "Clear All",
-                            fontSize = 10.sp,
-                            color = MaterialTheme.colorScheme.error,
-                            modifier = Modifier.clickable { rawText = "" }
-                        )
+                        TextButton(
+                            onClick = { rawText = "" },
+                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Text("Clear All", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error)
+                        }
                     }
                 }
             }
@@ -1479,42 +1962,45 @@ fun EditFieldValuesDialog(
 }
 
 /**
- * TAB 2: Live Logs
+ * Dialog to add a Navigate step
  */
 @Composable
-private fun LogsTabContent(
-    logMessages: List<String>
+fun AddNavigateStepDialog(
+    onDismiss: () -> Unit,
+    onAdd: (url: String) -> Unit
 ) {
-    LazyColumn(
-        contentPadding = PaddingValues(12.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
-        modifier = Modifier.fillMaxSize()
-    ) {
-        if (logMessages.isEmpty()) {
-            item {
+    var urlInput by remember { mutableStateOf("https://") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Add Web Page Transition", fontSize = 16.sp, fontWeight = FontWeight.Bold) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    text = "No execution logs yet. Run an automation script to inspect 1-by-1 field consumption and page actions.",
+                    text = "Automate moving from 1 website to another or opening the next page:",
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-            }
-        } else {
-            items(logMessages) { msg ->
-                Surface(
-                    shape = RoundedCornerShape(6.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                OutlinedTextField(
+                    value = urlInput,
+                    onValueChange = { urlInput = it },
+                    label = { Text("Website or Page URL", fontSize = 11.sp) },
                     modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(
-                        text = msg,
-                        fontSize = 10.sp,
-                        fontFamily = FontFamily.Monospace,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                    )
-                }
+                )
             }
+        },
+        confirmButton = {
+            Button(
+                onClick = { onAdd(urlInput.trim()) },
+                enabled = urlInput.isNotBlank() && urlInput != "https://"
+            ) {
+                Text("Add Step")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
         }
-    }
+    )
 }
 
 /**
@@ -1539,20 +2025,16 @@ fun NewScriptDialog(
     var order by remember { mutableStateOf(DataIterationOrder.TOP_TO_BOTTOM) }
     var policy by remember { mutableStateOf(DataExhaustionPolicy.ADD_NEW) }
 
-    var sheetMenuOpen by remember { mutableStateOf(false) }
-    var orderMenuOpen by remember { mutableStateOf(false) }
-    var policyMenuOpen by remember { mutableStateOf(false) }
-
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Create Website Automation Script", fontSize = 16.sp, fontWeight = FontWeight.Bold) },
+        title = { Text("Create New Workflow", fontSize = 16.sp, fontWeight = FontWeight.Bold) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
-                    label = { Text("Script Name", fontSize = 11.sp) },
-                    placeholder = { Text("E.g. Website X Registration") },
+                    label = { Text("Workflow Name", fontSize = 11.sp) },
+                    placeholder = { Text("E.g. Registration Flow") },
                     modifier = Modifier.fillMaxWidth()
                 )
 
@@ -1560,98 +2042,9 @@ fun NewScriptDialog(
                     value = website,
                     onValueChange = { website = it },
                     label = { Text("Target Website Domain (* for any)", fontSize = 11.sp) },
-                    placeholder = { Text("x.com or github.com") },
+                    placeholder = { Text("x.com or *") },
                     modifier = Modifier.fillMaxWidth()
                 )
-
-                ExposedDropdownMenuBox(
-                    expanded = sheetMenuOpen,
-                    onExpandedChange = { sheetMenuOpen = it }
-                ) {
-                    val label = dataSheets.firstOrNull { it.id == sheetId }?.name ?: "Default (Random Every Time)"
-                    OutlinedTextField(
-                        value = label,
-                        onValueChange = {},
-                        readOnly = true,
-                        label = { Text("Data Sheet", fontSize = 11.sp) },
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = sheetMenuOpen) },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .menuAnchor(MenuAnchorType.PrimaryNotEditable)
-                    )
-                    ExposedDropdownMenu(expanded = sheetMenuOpen, onDismissRequest = { sheetMenuOpen = false }) {
-                        DropdownMenuItem(
-                            text = { Text("Default (Random Every Time)", fontSize = 11.sp) },
-                            onClick = {
-                                sheetId = null
-                                sheetMenuOpen = false
-                            }
-                        )
-                        dataSheets.forEach { sheet ->
-                            DropdownMenuItem(
-                                text = { Text("${sheet.name} (${sheet.totalRows()} rows)", fontSize = 11.sp) },
-                                onClick = {
-                                    sheetId = sheet.id
-                                    sheetMenuOpen = false
-                                }
-                            )
-                        }
-                    }
-                }
-
-                ExposedDropdownMenuBox(
-                    expanded = orderMenuOpen,
-                    onExpandedChange = { orderMenuOpen = it }
-                ) {
-                    OutlinedTextField(
-                        value = order.label,
-                        onValueChange = {},
-                        readOnly = true,
-                        label = { Text("1-by-1 Order", fontSize = 11.sp) },
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = orderMenuOpen) },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .menuAnchor(MenuAnchorType.PrimaryNotEditable)
-                    )
-                    ExposedDropdownMenu(expanded = orderMenuOpen, onDismissRequest = { orderMenuOpen = false }) {
-                        DataIterationOrder.entries.forEach { ord ->
-                            DropdownMenuItem(
-                                text = { Text(ord.label, fontSize = 11.sp) },
-                                onClick = {
-                                    order = ord
-                                    orderMenuOpen = false
-                                }
-                            )
-                        }
-                    }
-                }
-
-                ExposedDropdownMenuBox(
-                    expanded = policyMenuOpen,
-                    onExpandedChange = { policyMenuOpen = it }
-                ) {
-                    OutlinedTextField(
-                        value = policy.label,
-                        onValueChange = {},
-                        readOnly = true,
-                        label = { Text("When Stored Data Finishes", fontSize = 11.sp) },
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = policyMenuOpen) },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .menuAnchor(MenuAnchorType.PrimaryNotEditable)
-                    )
-                    ExposedDropdownMenu(expanded = policyMenuOpen, onDismissRequest = { policyMenuOpen = false }) {
-                        DataExhaustionPolicy.entries.forEach { pol ->
-                            DropdownMenuItem(
-                                text = { Text(pol.label, fontSize = 11.sp) },
-                                onClick = {
-                                    policy = pol
-                                    policyMenuOpen = false
-                                }
-                            )
-                        }
-                    }
-                }
             }
         },
         confirmButton = {
@@ -1659,179 +2052,7 @@ fun NewScriptDialog(
                 onClick = { onCreate(name, website, sheetId, order, policy) },
                 enabled = name.isNotBlank()
             ) {
-                Text("Create Script")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
-        }
-    )
-}
-
-/**
- * Dialog to add an element step in Studio
- */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun AddCustomStepDialog(
-    availableFieldKeys: List<String>,
-    onDismiss: () -> Unit,
-    onAdd: (action: AutomationActionType, selector: String, desc: String, varKey: String?, delay: Long) -> Unit
-) {
-    var selectedAction by remember { mutableStateOf(AutomationActionType.INPUT) }
-    var selector by remember { mutableStateOf("") }
-    var desc by remember { mutableStateOf("") }
-    var varKey by remember { mutableStateOf("email") }
-    var delayStr by remember { mutableStateOf("800") }
-    var actionMenuOpen by remember { mutableStateOf(false) }
-    var fieldMenuOpen by remember { mutableStateOf(false) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Add Captured Element Step", fontSize = 16.sp, fontWeight = FontWeight.Bold) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                ExposedDropdownMenuBox(
-                    expanded = actionMenuOpen,
-                    onExpandedChange = { actionMenuOpen = it }
-                ) {
-                    OutlinedTextField(
-                        value = selectedAction.name,
-                        onValueChange = {},
-                        readOnly = true,
-                        label = { Text("Action Type", fontSize = 11.sp) },
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = actionMenuOpen) },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .menuAnchor(MenuAnchorType.PrimaryNotEditable)
-                    )
-                    ExposedDropdownMenu(expanded = actionMenuOpen, onDismissRequest = { actionMenuOpen = false }) {
-                        AutomationActionType.entries.forEach { act ->
-                            DropdownMenuItem(
-                                text = { Text(act.name, fontSize = 11.sp) },
-                                onClick = {
-                                    selectedAction = act
-                                    actionMenuOpen = false
-                                }
-                            )
-                        }
-                    }
-                }
-
-                OutlinedTextField(
-                    value = selector,
-                    onValueChange = { selector = it },
-                    label = { Text("Element CSS Selector", fontSize = 11.sp) },
-                    placeholder = { Text("#email, input[name='username']") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                OutlinedTextField(
-                    value = desc,
-                    onValueChange = { desc = it },
-                    label = { Text("Step Description", fontSize = 11.sp) },
-                    placeholder = { Text("Fill Email") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                // Select Field from My Data
-                ExposedDropdownMenuBox(
-                    expanded = fieldMenuOpen,
-                    onExpandedChange = { fieldMenuOpen = it }
-                ) {
-                    OutlinedTextField(
-                        value = varKey,
-                        onValueChange = { varKey = it },
-                        label = { Text("My Data Field Key (Leave blank for clicks)", fontSize = 11.sp) },
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = fieldMenuOpen) },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .menuAnchor(MenuAnchorType.PrimaryEditable)
-                    )
-                    ExposedDropdownMenu(expanded = fieldMenuOpen, onDismissRequest = { fieldMenuOpen = false }) {
-                        DropdownMenuItem(
-                            text = { Text("None (Click / Submit / Wait)", fontSize = 11.sp) },
-                            onClick = {
-                                varKey = ""
-                                fieldMenuOpen = false
-                            }
-                        )
-                        availableFieldKeys.forEach { key ->
-                            DropdownMenuItem(
-                                text = { Text(key, fontSize = 11.sp) },
-                                onClick = {
-                                    varKey = key
-                                    fieldMenuOpen = false
-                                }
-                            )
-                        }
-                    }
-                }
-
-                OutlinedTextField(
-                    value = delayStr,
-                    onValueChange = { delayStr = it },
-                    label = { Text("Delay (ms)", fontSize = 11.sp) },
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = {
-                    onAdd(
-                        selectedAction,
-                        selector,
-                        desc,
-                        varKey.trim().ifBlank { null },
-                        delayStr.toLongOrNull() ?: 800L
-                    )
-                },
-                enabled = selector.isNotBlank() || selectedAction == AutomationActionType.WAIT
-            ) {
-                Text("Add Step")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
-        }
-    )
-}
-
-/**
- * Dialog to add a Navigate step
- */
-@Composable
-fun AddNavigateStepDialog(
-    onDismiss: () -> Unit,
-    onAdd: (url: String) -> Unit
-) {
-    var urlInput by remember { mutableStateOf("https://") }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Add Website / Page Transition", fontSize = 16.sp, fontWeight = FontWeight.Bold) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    text = "Automate moving from 1 website to another or from 1 page to another:",
-                    fontSize = 11.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                OutlinedTextField(
-                    value = urlInput,
-                    onValueChange = { urlInput = it },
-                    label = { Text("Next Website or Page URL", fontSize = 11.sp) },
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = { onAdd(urlInput.trim()) },
-                enabled = urlInput.isNotBlank() && urlInput != "https://"
-            ) {
-                Text("Add Navigation Step")
+                Text("Create")
             }
         },
         dismissButton = {
@@ -1843,7 +2064,6 @@ fun AddNavigateStepDialog(
 /**
  * Dialog to create a new Data Sheet (e.g. "XYZ Data")
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NewDataSheetDialog(
     onDismiss: () -> Unit,
@@ -1852,14 +2072,12 @@ fun NewDataSheetDialog(
     var name by remember { mutableStateOf("") }
     var order by remember { mutableStateOf(DataIterationOrder.TOP_TO_BOTTOM) }
     var policy by remember { mutableStateOf(DataExhaustionPolicy.ADD_NEW) }
-    var orderMenuOpen by remember { mutableStateOf(false) }
-    var policyMenuOpen by remember { mutableStateOf(false) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Create New Data Sheet", fontSize = 16.sp, fontWeight = FontWeight.Bold) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
@@ -1867,48 +2085,11 @@ fun NewDataSheetDialog(
                     placeholder = { Text("E.g. XYZ Data") },
                     modifier = Modifier.fillMaxWidth()
                 )
-
-                ExposedDropdownMenuBox(
-                    expanded = orderMenuOpen,
-                    onExpandedChange = { orderMenuOpen = it }
-                ) {
-                    OutlinedTextField(
-                        value = order.label,
-                        onValueChange = {},
-                        readOnly = true,
-                        label = { Text("1-by-1 Consumption Order", fontSize = 11.sp) },
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = orderMenuOpen) },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .menuAnchor(MenuAnchorType.PrimaryNotEditable)
-                    )
-                    ExposedDropdownMenu(expanded = orderMenuOpen, onDismissRequest = { orderMenuOpen = false }) {
-                        DataIterationOrder.entries.forEach { ord ->
-                            DropdownMenuItem(text = { Text(ord.label, fontSize = 11.sp) }, onClick = { order = ord; orderMenuOpen = false })
-                        }
-                    }
-                }
-
-                ExposedDropdownMenuBox(
-                    expanded = policyMenuOpen,
-                    onExpandedChange = { policyMenuOpen = it }
-                ) {
-                    OutlinedTextField(
-                        value = policy.label,
-                        onValueChange = {},
-                        readOnly = true,
-                        label = { Text("When Stored Data Finishes", fontSize = 11.sp) },
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = policyMenuOpen) },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .menuAnchor(MenuAnchorType.PrimaryNotEditable)
-                    )
-                    ExposedDropdownMenu(expanded = policyMenuOpen, onDismissRequest = { policyMenuOpen = false }) {
-                        DataExhaustionPolicy.entries.forEach { pol ->
-                            DropdownMenuItem(text = { Text(pol.label, fontSize = 11.sp) }, onClick = { policy = pol; policyMenuOpen = false })
-                        }
-                    }
-                }
+                Text(
+                    text = "A Data Sheet stores lists of emails, usernames, passwords, etc., used 1-by-1 sequentially on each recurring run.",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         },
         confirmButton = {
@@ -1916,7 +2097,7 @@ fun NewDataSheetDialog(
                 onClick = { onCreate(name, order, policy) },
                 enabled = name.isNotBlank()
             ) {
-                Text("Create Data Sheet")
+                Text("Create Sheet")
             }
         },
         dismissButton = {
@@ -1942,7 +2123,7 @@ fun AddCustomFieldDialog(
             OutlinedTextField(
                 value = fieldKey,
                 onValueChange = { fieldKey = it },
-                label = { Text("Field Name", fontSize = 11.sp) },
+                label = { Text("Field Key Name", fontSize = 11.sp) },
                 placeholder = { Text("e.g. email, username, password, company") },
                 modifier = Modifier.fillMaxWidth()
             )
@@ -1952,7 +2133,7 @@ fun AddCustomFieldDialog(
                 onClick = { onAdd(fieldKey.trim()) },
                 enabled = fieldKey.isNotBlank()
             ) {
-                Text("Add Field & Enter Values")
+                Text("Add Field")
             }
         },
         dismissButton = {

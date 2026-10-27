@@ -4,7 +4,6 @@ import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import com.example.model.AutomationActionType
 import com.example.model.AutomationDataGenerator
-import com.example.model.AutomationDataRecord
 import com.example.model.AutomationExecutionState
 import com.example.model.AutomationScript
 import com.example.model.AutomationStatus
@@ -24,6 +23,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONArray
 import java.net.URI
 import java.util.UUID
@@ -35,277 +35,23 @@ class AutomationEngine(
     private val _executionState = MutableStateFlow(AutomationExecutionState())
     val executionState: StateFlow<AutomationExecutionState> = _executionState.asStateFlow()
 
-    // 1. "My Data" Data Sheets - e.g. "XYZ Data" with email, username, password sections
-    private val _dataSheets = MutableStateFlow<List<DataSheet>>(
-        listOf(
-            DataSheet(
-                id = "sheet_xyz",
-                name = "XYZ Data",
-                fields = mapOf(
-                    "email" to listOf(
-                        "alex.lead.01@example.com",
-                        "jordan.corp.02@example.com",
-                        "casey.alpha.03@example.com",
-                        "morgan.tech.04@example.com"
-                    ),
-                    "username" to listOf(
-                        "alex_lead01",
-                        "jordan_corp02",
-                        "casey_alpha03",
-                        "morgan_tech04"
-                    ),
-                    "password" to listOf(
-                        "P@ssw0rd!Xyz1",
-                        "P@ssw0rd!Xyz2",
-                        "P@ssw0rd!Xyz3",
-                        "P@ssw0rd!Xyz4"
-                    ),
-                    "phoneNumber" to listOf(
-                        "5550191001",
-                        "5550191002",
-                        "5550191003",
-                        "5550191004"
-                    ),
-                    "firstName" to listOf("Alex", "Jordan", "Casey", "Morgan"),
-                    "lastName" to listOf("Vance", "Mercer", "Sterling", "Kovacs"),
-                    "countryCode" to listOf("+1", "+44", "+1", "+49"),
-                    "gender" to listOf("Male", "Female", "Male", "Female"),
-                    "dob" to listOf("1995-04-12", "1997-08-23", "1992-11-05", "1999-01-30"),
-                    "address" to listOf(
-                        "120 Market Street",
-                        "450 Broadway Ave",
-                        "780 Sunset Blvd",
-                        "310 Pine Street"
-                    ),
-                    "city" to listOf("San Francisco", "New York", "Los Angeles", "Seattle"),
-                    "state" to listOf("CA", "NY", "CA", "WA"),
-                    "zipCode" to listOf("94105", "10001", "90028", "98101"),
-                    "fileName" to listOf("id_document.pdf", "avatar.png", "resume.pdf", "passport.pdf")
-                ),
-                iterationOrder = DataIterationOrder.TOP_TO_BOTTOM,
-                exhaustionPolicy = DataExhaustionPolicy.ADD_NEW
-            )
-        )
-    )
+    // 1. "My Data" Data Sheets - Starts empty for fresh app
+    private val _dataSheets = MutableStateFlow<List<DataSheet>>(emptyList())
     val dataSheets: StateFlow<List<DataSheet>> = _dataSheets.asStateFlow()
 
-    // 2. Saved Scripts - Website-specific scripts list
-    private val defaultInitialSteps = listOf(
-        AutomationStep(
-            actionType = AutomationActionType.INPUT,
-            selector = "input[type=\"email\"], input[name*=\"email\"], #email",
-            elementDescription = "Fill Email Address",
-            value = "{{email}}",
-            variableKey = "email",
-            delayMs = 800L
-        ),
-        AutomationStep(
-            actionType = AutomationActionType.INPUT,
-            selector = "input[name*=\"user\"], input[name*=\"login\"], #username",
-            elementDescription = "Fill Username",
-            value = "{{username}}",
-            variableKey = "username",
-            delayMs = 800L
-        ),
-        AutomationStep(
-            actionType = AutomationActionType.INPUT,
-            selector = "input[type=\"password\"]:not([name*=\"confirm\"]):not([id*=\"confirm\"]), #password",
-            elementDescription = "Fill Secure Password",
-            value = "{{password}}",
-            variableKey = "password",
-            delayMs = 800L
-        ),
-        AutomationStep(
-            actionType = AutomationActionType.INPUT,
-            selector = "input[name*=\"confirm\"], #confirmPassword, input[placeholder*=\"Confirm\" i]",
-            elementDescription = "Confirm Password",
-            value = "{{confirmPassword}}",
-            variableKey = "confirmPassword",
-            delayMs = 700L
-        ),
-        AutomationStep(
-            actionType = AutomationActionType.SELECT_COUNTRY_CODE,
-            selector = ".iti__selected-flag, select[name*=\"country_code\"], #country_code",
-            elementDescription = "Select Country Code",
-            value = "{{countryCode}}",
-            variableKey = "countryCode",
-            delayMs = 750L
-        ),
-        AutomationStep(
-            actionType = AutomationActionType.INPUT,
-            selector = "input[type=\"tel\"], input[name*=\"phone\"], #phone",
-            elementDescription = "Fill Phone Number",
-            value = "{{phoneNumber}}",
-            variableKey = "phoneNumber",
-            delayMs = 750L
-        ),
-        AutomationStep(
-            actionType = AutomationActionType.SELECT_DROPDOWN,
-            selector = "select[name*=\"gender\"], #gender, [role=\"combobox\"][name*=\"gender\"]",
-            elementDescription = "Select Gender Dropdown",
-            value = "{{gender}}",
-            variableKey = "gender",
-            delayMs = 700L
-        ),
-        AutomationStep(
-            actionType = AutomationActionType.SELECT_DATE,
-            selector = "input[type=\"date\"], [data-datepicker], input[name*=\"dob\"]",
-            elementDescription = "Select Date of Birth (Calendar)",
-            value = "{{dob}}",
-            variableKey = "dob",
-            delayMs = 800L
-        ),
-        AutomationStep(
-            actionType = AutomationActionType.INPUT,
-            selector = "input[name*=\"zip\"], input[name*=\"postal\"], input[name*=\"pin\"], #zip",
-            elementDescription = "Fill ZIP / PIN Code",
-            value = "{{zipCode}}",
-            variableKey = "zipCode",
-            delayMs = 700L
-        ),
-        AutomationStep(
-            actionType = AutomationActionType.UPLOAD_FILE,
-            selector = "input[type=\"file\"], .dropzone",
-            elementDescription = "Upload Document / Avatar",
-            value = "{{fileName}}",
-            variableKey = "fileName",
-            delayMs = 900L
-        ),
-        AutomationStep(
-            actionType = AutomationActionType.CLICK,
-            selector = "input[type=\"checkbox\"], #terms, [name*=\"terms\"]",
-            elementDescription = "Accept Terms & Policies",
-            delayMs = 600L
-        ),
-        AutomationStep(
-            actionType = AutomationActionType.SUBMIT,
-            selector = "button[type=\"submit\"], .btn-primary, #submit-btn",
-            elementDescription = "Click Submit / Create Account",
-            delayMs = 1500L
-        )
-    )
-
-    private val multiPageSteps = listOf(
-        AutomationStep(
-            actionType = AutomationActionType.INPUT,
-            selector = "input[type=\"email\"], #email",
-            elementDescription = "Page 1: Enter Email (1st Data)",
-            value = "{{email}}",
-            variableKey = "email",
-            delayMs = 800L
-        ),
-        AutomationStep(
-            actionType = AutomationActionType.CLICK,
-            selector = "button[type=\"submit\"], #next-btn, .next-step",
-            elementDescription = "Page 1: Click Continue / Next Page",
-            delayMs = 1200L
-        ),
-        AutomationStep(
-            actionType = AutomationActionType.WAIT,
-            selector = "",
-            elementDescription = "Wait for Page 2 to Load",
-            delayMs = 1400L
-        ),
-        AutomationStep(
-            actionType = AutomationActionType.INPUT,
-            selector = "input[name*=\"user\"], #username",
-            elementDescription = "Page 2: Enter Username",
-            value = "{{username}}",
-            variableKey = "username",
-            delayMs = 800L
-        ),
-        AutomationStep(
-            actionType = AutomationActionType.INPUT,
-            selector = "input[type=\"password\"], #password",
-            elementDescription = "Page 2: Enter Password",
-            value = "{{password}}",
-            variableKey = "password",
-            delayMs = 800L
-        ),
-        AutomationStep(
-            actionType = AutomationActionType.SUBMIT,
-            selector = "button[type=\"submit\"], #finish-btn",
-            elementDescription = "Page 2: Complete Registration",
-            delayMs = 1500L
-        )
-    )
-
-    private val _savedScripts = MutableStateFlow<List<AutomationScript>>(
-        listOf(
-            AutomationScript(
-                id = "script_all_in_one",
-                name = "Universal Form & Account Automation",
-                targetWebsite = "*",
-                steps = defaultInitialSteps,
-                dataSheetId = "sheet_xyz",
-                repeatCount = 5,
-                iterationOrder = DataIterationOrder.TOP_TO_BOTTOM,
-                exhaustionPolicy = DataExhaustionPolicy.ADD_NEW,
-                rotateProxyOnRepeat = true
-            ),
-            AutomationScript(
-                id = "script_multipage",
-                name = "Multi-Page & Cross-Site Workflow",
-                targetWebsite = "*",
-                steps = multiPageSteps,
-                dataSheetId = "sheet_xyz",
-                repeatCount = 4,
-                iterationOrder = DataIterationOrder.TOP_TO_BOTTOM,
-                exhaustionPolicy = DataExhaustionPolicy.ADD_NEW
-            ),
-            AutomationScript(
-                id = "script_github",
-                name = "GitHub Sign-up Automation",
-                targetWebsite = "github.com",
-                targetUrl = "https://github.com/signup",
-                steps = listOf(
-                    AutomationStep(
-                        actionType = AutomationActionType.INPUT,
-                        selector = "#email, input[name=\"email\"]",
-                        elementDescription = "Enter Email",
-                        value = "{{email}}",
-                        variableKey = "email",
-                        delayMs = 900L
-                    ),
-                    AutomationStep(
-                        actionType = AutomationActionType.CLICK,
-                        selector = "button[data-continue-to=\"password-container\"]",
-                        elementDescription = "Continue to Password",
-                        delayMs = 1000L
-                    ),
-                    AutomationStep(
-                        actionType = AutomationActionType.INPUT,
-                        selector = "#password, input[name=\"password\"]",
-                        elementDescription = "Create Password",
-                        value = "{{password}}",
-                        variableKey = "password",
-                        delayMs = 900L
-                    ),
-                    AutomationStep(
-                        actionType = AutomationActionType.CLICK,
-                        selector = "button[data-continue-to=\"username-container\"]",
-                        elementDescription = "Continue to Username",
-                        delayMs = 1000L
-                    ),
-                    AutomationStep(
-                        actionType = AutomationActionType.INPUT,
-                        selector = "#login, input[name=\"login\"]",
-                        elementDescription = "Enter Username",
-                        value = "{{username}}",
-                        variableKey = "username",
-                        delayMs = 900L
-                    )
-                ),
-                dataSheetId = "sheet_xyz",
-                repeatCount = 4,
-                iterationOrder = DataIterationOrder.TOP_TO_BOTTOM,
-                exhaustionPolicy = DataExhaustionPolicy.ADD_NEW
-            )
-        )
-    )
+    // 2. Saved Scripts - Starts empty for fresh app; engine cannot start until a script is created
+    private val _savedScripts = MutableStateFlow<List<AutomationScript>>(emptyList())
     val savedScripts: StateFlow<List<AutomationScript>> = _savedScripts.asStateFlow()
 
-    private val _currentScript = MutableStateFlow<AutomationScript>(_savedScripts.value.first())
+    private val _currentScript = MutableStateFlow(
+        AutomationScript(
+            id = UUID.randomUUID().toString(),
+            name = "New Automation Flow",
+            targetWebsite = "*",
+            steps = emptyList(),
+            repeatCount = 1
+        )
+    )
     val currentScript: StateFlow<AutomationScript> = _currentScript.asStateFlow()
 
     private val _scannedElements = MutableStateFlow<List<ScannedElement>>(emptyList())
@@ -314,6 +60,7 @@ class AutomationEngine(
     private var playbackJob: Job? = null
     private var exhaustionDecisionDeferred: CompletableDeferred<ExhaustionDecision>? = null
     private var lastKnownPageUrl: String = ""
+    private var autoReadyOnNextScan: Boolean = true
 
     var onRotateProxy: (() -> Unit)? = null
     var webViewProvider: (() -> WebView?)? = null
@@ -339,12 +86,15 @@ class AutomationEngine(
                 "SELECT_DATE" -> AutomationActionType.SELECT_DATE
                 "UPLOAD_FILE" -> AutomationActionType.UPLOAD_FILE
                 "SUBMIT" -> AutomationActionType.SUBMIT
+                "CHECKBOX" -> AutomationActionType.CHECKBOX
+                "RADIO" -> AutomationActionType.RADIO
                 else -> AutomationActionType.CLICK
             }
 
-            // Only elements and their semantic field keys are captured (no personal raw data)
+            // Only elements and their semantic field keys are captured (no user typing required)
             val resolvedKey = fieldKeyFromJs.ifBlank {
-                detectVariableKeyFromSelector(selector, description) ?: if (type == AutomationActionType.INPUT) "email" else ""
+                detectVariableKeyFromSelector(selector, description)
+                    ?: if (type == AutomationActionType.INPUT) "username" else ""
             }.ifBlank { null }
 
             val newStep = AutomationStep(
@@ -354,19 +104,51 @@ class AutomationEngine(
                 value = if (resolvedKey != null) "{{$resolvedKey}}" else "",
                 variableKey = resolvedKey,
                 pageUrl = lastKnownPageUrl,
-                delayMs = 800L
+                delayMs = 750L
             )
 
             scope.launch {
                 val currentSteps = _currentScript.value.steps
-                // Prevent duplicate consecutive capture of the exact same selector + actionType
-                val lastStep = currentSteps.lastOrNull()
-                if (lastStep != null && lastStep.selector == newStep.selector && lastStep.actionType == newStep.actionType) {
-                    return@launch
+                // Prevent duplicate capture of the exact same input/checkbox/radio selector
+                val existingIdx = currentSteps.indexOfFirst {
+                    it.selector == newStep.selector &&
+                            it.pageUrl == newStep.pageUrl &&
+                            (it.actionType == newStep.actionType ||
+                                    it.actionType == AutomationActionType.INPUT ||
+                                    it.actionType == AutomationActionType.CHECKBOX ||
+                                    it.actionType == AutomationActionType.RADIO)
                 }
-                val updatedSteps = currentSteps + newStep
-                _currentScript.value = _currentScript.value.copy(steps = updatedSteps)
-                addLog("Captured element: $description ($selector) -> ${resolvedKey?.let { "{{$it}}" } ?: type.name}")
+
+                val updatedSteps = if (existingIdx >= 0 && type != AutomationActionType.CLICK) {
+                    currentSteps.toMutableList().apply { set(existingIdx, newStep.copy(id = currentSteps[existingIdx].id)) }
+                } else {
+                    val lastStep = currentSteps.lastOrNull()
+                    if (lastStep != null && lastStep.selector == newStep.selector && lastStep.actionType == newStep.actionType) {
+                        return@launch
+                    }
+                    currentSteps + newStep
+                }
+
+                val domain = extractDomain(lastKnownPageUrl)
+                val updatedScriptName = if (_currentScript.value.name == "New Automation Flow" && domain.isNotBlank() && !domain.contains("home")) {
+                    "$domain Automation"
+                } else {
+                    _currentScript.value.name
+                }
+                val updatedTargetWebsite = if (_currentScript.value.targetWebsite == "*" && domain.isNotBlank() && !domain.contains("home")) {
+                    domain
+                } else {
+                    _currentScript.value.targetWebsite
+                }
+
+                _currentScript.value = _currentScript.value.copy(
+                    name = updatedScriptName,
+                    targetWebsite = updatedTargetWebsite,
+                    targetUrl = lastKnownPageUrl.ifBlank { _currentScript.value.targetUrl },
+                    steps = updatedSteps
+                )
+                syncCurrentScriptToSavedScripts()
+                addLog("Grabbed ready element: $description -> ${resolvedKey?.let { "Data '{{$it}}'" } ?: type.name}")
             }
         }
 
@@ -411,7 +193,18 @@ class AutomationEngine(
                         )
                     }
                     _scannedElements.value = elements
-                    addLog("Grabbed ${elements.size} elements on page (only elements captured; values fill from My Data)")
+
+                    // Automatically convert grabbed elements into ready-to-use script steps if requested or if script is empty
+                    if (elements.isNotEmpty() && (autoReadyOnNextScan || _currentScript.value.steps.isEmpty())) {
+                        autoReadyOnNextScan = false
+                        buildReadyStepsFromGrabbedElements(elements)
+                    } else {
+                        addLog("Grabbed ${elements.size} elements on page (ready to use with Data Sheet or Default)")
+                    }
+
+                    if (_executionState.value.status == AutomationStatus.SCANNING) {
+                        _executionState.value = _executionState.value.copy(status = AutomationStatus.RECORDING)
+                    }
                 } catch (e: Exception) {
                     addLog("Scanner parse error: ${e.message}")
                 }
@@ -420,6 +213,104 @@ class AutomationEngine(
     }
 
     val jsInterface = AutomationJsInterface()
+
+    /**
+     * Converts grabbed page elements directly into an ordered, ready-to-use workflow:
+     * 1. All Input / Dropdown / Date / Country / Upload fields (bound to Data Sheet variables)
+     * 2. Checkboxes & Radio buttons (e.g., Terms & Conditions, options)
+     * 3. Primary Submit / Next / Continue button
+     */
+    private fun buildReadyStepsFromGrabbedElements(elements: List<ScannedElement>) {
+        if (elements.isEmpty()) return
+
+        val inputAndSelectElements = elements.filter {
+            it.isInput ||
+                    it.semanticType == ElementSemanticType.DROPDOWN ||
+                    it.semanticType == ElementSemanticType.GENDER ||
+                    it.semanticType == ElementSemanticType.COUNTRY_CODE ||
+                    it.semanticType == ElementSemanticType.DOB ||
+                    it.semanticType == ElementSemanticType.DOB_DAY ||
+                    it.semanticType == ElementSemanticType.DOB_MONTH ||
+                    it.semanticType == ElementSemanticType.DOB_YEAR ||
+                    it.semanticType == ElementSemanticType.FILE_UPLOAD
+        }
+
+        val checkAndRadioElements = elements.filter {
+            it.semanticType == ElementSemanticType.CHECKBOX_TERMS ||
+                    it.semanticType == ElementSemanticType.CHECKBOX ||
+                    it.semanticType == ElementSemanticType.RADIO_OPTION
+        }
+
+        // Pick the primary submit or next button (or first generic button if no explicit submit/next exists)
+        val primarySubmitOrNext = elements.firstOrNull { it.semanticType == ElementSemanticType.SUBMIT_BUTTON }
+            ?: elements.firstOrNull { it.semanticType == ElementSemanticType.NEXT_BUTTON }
+            ?: elements.firstOrNull { it.isButton && it.semanticType == ElementSemanticType.GENERIC_BUTTON }
+
+        val orderedActionable = buildList {
+            addAll(inputAndSelectElements)
+            addAll(checkAndRadioElements)
+            if (primarySubmitOrNext != null) add(primarySubmitOrNext)
+        }.distinctBy { it.selector }
+
+        val targetList = orderedActionable.ifEmpty { elements }
+
+        val readySteps = targetList.map { element ->
+            val (actionType, varKey, defaultVal, desc) = mapScannedElementDetails(element)
+            AutomationStep(
+                actionType = actionType,
+                selector = element.selector,
+                elementDescription = desc,
+                value = defaultVal,
+                variableKey = varKey,
+                pageUrl = element.pageUrl.ifBlank { lastKnownPageUrl },
+                delayMs = if (actionType == AutomationActionType.SUBMIT) 1300L else 750L
+            )
+        }
+
+        val existingSteps = _currentScript.value.steps
+        val hasMultiPageNavigate = existingSteps.any { it.actionType == AutomationActionType.NAVIGATE }
+        val finalSteps = if (hasMultiPageNavigate) {
+            // Keep steps from earlier pages and append new page's steps
+            val existingSelectorsOnPage = existingSteps.filter { it.pageUrl == lastKnownPageUrl }.map { it.selector }.toSet()
+            existingSteps + readySteps.filter { it.selector !in existingSelectorsOnPage }
+        } else {
+            readySteps
+        }
+
+        val domain = extractDomain(lastKnownPageUrl)
+        val updatedName = if (_currentScript.value.name == "New Automation Flow" && domain.isNotBlank() && !domain.contains("home")) {
+            "$domain Automation"
+        } else {
+            _currentScript.value.name
+        }
+        val updatedSite = if (_currentScript.value.targetWebsite == "*" && domain.isNotBlank() && !domain.contains("home")) {
+            domain
+        } else {
+            _currentScript.value.targetWebsite
+        }
+
+        _currentScript.value = _currentScript.value.copy(
+            name = updatedName,
+            targetWebsite = updatedSite,
+            targetUrl = lastKnownPageUrl.ifBlank { _currentScript.value.targetUrl },
+            steps = finalSteps,
+            dataSheetId = _currentScript.value.dataSheetId ?: _dataSheets.value.firstOrNull()?.id
+        )
+        syncCurrentScriptToSavedScripts()
+
+        addLog("Created script '${_currentScript.value.name}' with ${readySteps.size} ready elements (fields + checkboxes + buttons)!")
+    }
+
+    private fun syncCurrentScriptToSavedScripts() {
+        val current = _currentScript.value
+        if (current.steps.isEmpty()) return
+        val existingIdx = _savedScripts.value.indexOfFirst { it.id == current.id }
+        if (existingIdx >= 0) {
+            _savedScripts.value = _savedScripts.value.toMutableList().apply { set(existingIdx, current) }
+        } else {
+            _savedScripts.value = listOf(current) + _savedScripts.value
+        }
+    }
 
     private fun detectVariableKeyFromSelector(selector: String, description: String): String? {
         val combined = "$selector $description".lowercase()
@@ -452,17 +343,36 @@ class AutomationEngine(
         val previousUrl = lastKnownPageUrl
         lastKnownPageUrl = url
 
-        // If user is in Create Automation or Recording mode and navigated to a new page/website:
+        // If user is in Create Automation, Recording mode, or HUD is visible with no script created yet:
         if (_executionState.value.hudMode == HudMode.CREATE_AUTOMATION ||
-            _executionState.value.status == AutomationStatus.RECORDING
+            _executionState.value.status == AutomationStatus.RECORDING ||
+            (_executionState.value.isHudVisible && _savedScripts.value.isEmpty())
         ) {
             if (previousUrl.isNotBlank() && !previousUrl.equals(url, ignoreCase = true)) {
-                addLog("Page transition detected: $url (Grabbing new page elements...)")
+                addLog("Page loaded: $url (Grabbing page elements...)")
+                autoReadyOnNextScan = true
             }
             injectJs(AutomationScripts.RECORDING_INJECTION)
-            triggerScan()
+            triggerScan(autoReadySteps = _currentScript.value.steps.isEmpty() || autoReadyOnNextScan)
+
+            // Schedule follow-up scans for dynamic SPA pages that render form fields after onPageFinished
+            scope.launch {
+                delay(900L)
+                if (_currentScript.value.steps.isEmpty() &&
+                    (_executionState.value.hudMode == HudMode.CREATE_AUTOMATION || _executionState.value.isHudVisible)
+                ) {
+                    injectJs(AutomationScripts.RECORDING_INJECTION)
+                    triggerScan(autoReadySteps = true)
+                }
+                delay(1200L)
+                if (_currentScript.value.steps.isEmpty() &&
+                    (_executionState.value.hudMode == HudMode.CREATE_AUTOMATION || _executionState.value.isHudVisible)
+                ) {
+                    injectJs(AutomationScripts.RECORDING_INJECTION)
+                    triggerScan(autoReadySteps = true)
+                }
+            }
         } else if (_executionState.value.isHudVisible && _executionState.value.status == AutomationStatus.IDLE) {
-            // Auto-select website-specific saved script if one matches this domain
             autoSelectScriptForWebsite(url)
         }
     }
@@ -486,19 +396,18 @@ class AutomationEngine(
     fun setHudMode(mode: HudMode, currentUrl: String = lastKnownPageUrl) {
         _executionState.value = _executionState.value.copy(hudMode = mode)
         if (mode == HudMode.CREATE_AUTOMATION) {
-            // If current script is a pre-bundled preset and user starts Create Automation on a website,
-            // update targetWebsite to current domain if needed
             val domain = extractDomain(currentUrl)
             if (domain.isNotBlank() && !domain.contains("home")) {
                 if (_currentScript.value.targetWebsite == "*") {
                     _currentScript.value = _currentScript.value.copy(
+                        name = if (_currentScript.value.name == "New Automation Flow") "$domain Automation" else _currentScript.value.name,
                         targetWebsite = domain,
                         targetUrl = currentUrl
                     )
                 }
             }
-            triggerScan()
             startRecording()
+            triggerScan(autoReadySteps = _currentScript.value.steps.isEmpty())
         } else {
             stopRecording()
         }
@@ -518,22 +427,44 @@ class AutomationEngine(
             exhaustionPolicy = DataExhaustionPolicy.ADD_NEW
         )
         _currentScript.value = fresh
-        triggerScan()
+        autoReadyOnNextScan = true
         startRecording()
-        addLog("Started new script for $domain. Grabbing page elements...")
+        triggerScan(autoReadySteps = true)
+        addLog("Created new script for $domain. Grabbing page elements (no typing needed)...")
     }
 
     fun toggleHud(currentUrl: String = lastKnownPageUrl) {
         val next = !_executionState.value.isHudVisible
-        _executionState.value = _executionState.value.copy(isHudVisible = next)
         if (next && currentUrl.isNotBlank()) {
             lastKnownPageUrl = currentUrl
             autoSelectScriptForWebsite(currentUrl)
         }
+        val hasAnyScript = _savedScripts.value.isNotEmpty() || _currentScript.value.steps.isNotEmpty()
+        val targetMode = if (!hasAnyScript) HudMode.CREATE_AUTOMATION else _executionState.value.hudMode
+
+        _executionState.value = _executionState.value.copy(
+            isHudVisible = next,
+            hudMode = targetMode
+        )
+
+        if (next && !hasAnyScript) {
+            addLog("No scripts found. Create a script by grabbing or tapping page elements (no typing required).")
+            startRecording()
+            triggerScan(autoReadySteps = true)
+        }
     }
 
     fun setHudVisible(visible: Boolean) {
-        _executionState.value = _executionState.value.copy(isHudVisible = visible)
+        val hasAnyScript = _savedScripts.value.isNotEmpty() || _currentScript.value.steps.isNotEmpty()
+        val targetMode = if (visible && !hasAnyScript) HudMode.CREATE_AUTOMATION else _executionState.value.hudMode
+        _executionState.value = _executionState.value.copy(
+            isHudVisible = visible,
+            hudMode = targetMode
+        )
+        if (visible && !hasAnyScript) {
+            startRecording()
+            triggerScan(autoReadySteps = true)
+        }
     }
 
     // Scripts filtering for website
@@ -599,13 +530,19 @@ class AutomationEngine(
         }
         _savedScripts.value = updatedList
         _currentScript.value = newScript
-        addLog("Saved script '${newScript.name}' for website '${newScript.targetWebsite}'")
+        addLog("Saved script '${newScript.name}' (${newScript.steps.size} steps) for '${newScript.targetWebsite}'")
     }
 
     fun deleteScript(scriptId: String) {
         _savedScripts.value = _savedScripts.value.filter { it.id != scriptId }
-        if (_currentScript.value.id == scriptId && _savedScripts.value.isNotEmpty()) {
-            _currentScript.value = _savedScripts.value.first()
+        if (_currentScript.value.id == scriptId) {
+            _currentScript.value = _savedScripts.value.firstOrNull() ?: AutomationScript(
+                id = UUID.randomUUID().toString(),
+                name = "New Automation Flow",
+                targetWebsite = "*",
+                steps = emptyList(),
+                repeatCount = 1
+            )
         }
         addLog("Deleted script.")
     }
@@ -619,11 +556,18 @@ class AutomationEngine(
             _dataSheets.value + sheet
         }
         _dataSheets.value = updated
+        // Automatically link newly created Data Sheet to current script if none was linked
+        if (_currentScript.value.dataSheetId == null) {
+            _currentScript.value = _currentScript.value.copy(dataSheetId = sheet.id)
+        }
         addLog("Saved Data Sheet: '${sheet.name}' (${sheet.fields.keys.size} fields, max ${sheet.totalRows()} rows)")
     }
 
     fun deleteDataSheet(sheetId: String) {
         _dataSheets.value = _dataSheets.value.filter { it.id != sheetId }
+        if (_currentScript.value.dataSheetId == sheetId) {
+            _currentScript.value = _currentScript.value.copy(dataSheetId = _dataSheets.value.firstOrNull()?.id)
+        }
         addLog("Deleted Data Sheet.")
     }
 
@@ -632,7 +576,7 @@ class AutomationEngine(
         return _dataSheets.value.firstOrNull { it.id == id }
     }
 
-    // Recording
+    // Recording (No-Type Element Grabbing)
     fun toggleRecording() {
         if (_executionState.value.status == AutomationStatus.RECORDING) {
             stopRecording()
@@ -646,21 +590,24 @@ class AutomationEngine(
             status = AutomationStatus.RECORDING,
             isHudVisible = true
         )
-        addLog("Recording active: tap any input, dropdown, link, or button on the page to capture its element.")
+        addLog("No-Type Recording active: tap any field, checkbox, or button to grab it (no typing needed; values fill from Data Sheet/Default on start).")
         injectJs(AutomationScripts.RECORDING_INJECTION)
     }
 
     fun stopRecording() {
         if (_executionState.value.status == AutomationStatus.RECORDING) {
             _executionState.value = _executionState.value.copy(status = AutomationStatus.IDLE)
-            addLog("Recording paused. Elements in script: ${_currentScript.value.steps.size}")
+            addLog("Recording paused. Ready elements in script: ${_currentScript.value.steps.size}")
         }
     }
 
-    // Scanner (Grab Elements)
-    fun triggerScan() {
-        _executionState.value = _executionState.value.copy(status = AutomationStatus.SCANNING)
-        addLog("Grabbing elements from current page...")
+    // Scanner (Grab Elements & Ready Use)
+    fun triggerScan(autoReadySteps: Boolean = true) {
+        autoReadyOnNextScan = autoReadySteps
+        if (_executionState.value.status != AutomationStatus.RECORDING) {
+            _executionState.value = _executionState.value.copy(status = AutomationStatus.SCANNING)
+        }
+        addLog("Grabbing page elements and preparing script...")
         injectJs(AutomationScripts.DOM_SCANNER)
     }
 
@@ -688,40 +635,17 @@ class AutomationEngine(
             value = defaultVal,
             variableKey = varKey,
             pageUrl = element.pageUrl.ifBlank { lastKnownPageUrl },
-            delayMs = 850L
+            delayMs = 800L
         )
         _currentScript.value = _currentScript.value.copy(steps = _currentScript.value.steps + newStep)
-        addLog("Added element '$desc' -> bound to ${varKey?.let { "My Data '{{$it}}'" } ?: actionType.name}")
+        syncCurrentScriptToSavedScripts()
+        addLog("Added element '$desc' -> bound to ${varKey?.let { "Data '{{$it}}'" } ?: actionType.name}")
     }
 
     fun autoMapAllScannedElements() {
         val elements = _scannedElements.value
         if (elements.isEmpty()) return
-
-        val newSteps = elements.map { element ->
-            val (actionType, varKey, defaultVal, desc) = mapScannedElementDetails(element)
-            AutomationStep(
-                actionType = actionType,
-                selector = element.selector,
-                elementDescription = desc,
-                value = defaultVal,
-                variableKey = varKey,
-                pageUrl = element.pageUrl.ifBlank { lastKnownPageUrl },
-                delayMs = 800L
-            )
-        }
-
-        // Append to existing steps if user is building a multi-page workflow, or set if empty
-        val combinedSteps = if (_currentScript.value.steps.isNotEmpty() &&
-            _currentScript.value.steps.any { it.actionType == AutomationActionType.NAVIGATE }
-        ) {
-            _currentScript.value.steps + newSteps
-        } else {
-            newSteps
-        }
-
-        _currentScript.value = _currentScript.value.copy(steps = combinedSteps)
-        addLog("Captured ${newSteps.size} elements into script (all inputs linked to My Data fields).")
+        buildReadyStepsFromGrabbedElements(elements)
     }
 
     private fun mapScannedElementDetails(element: ScannedElement): Quad<AutomationActionType, String?, String, String> {
@@ -746,16 +670,28 @@ class AutomationEngine(
             ElementSemanticType.STATE -> Quad(AutomationActionType.INPUT, "state", "{{state}}", "Fill State")
             ElementSemanticType.ZIP_PIN -> Quad(AutomationActionType.INPUT, "zipCode", "{{zipCode}}", "Fill ZIP / PIN Code")
             ElementSemanticType.FILE_UPLOAD -> Quad(AutomationActionType.UPLOAD_FILE, "fileName", "{{fileName}}", "Upload Document")
-            ElementSemanticType.CHECKBOX_TERMS -> Quad(AutomationActionType.CLICK, null, "", "Accept Policies & Terms")
+            ElementSemanticType.CHECKBOX_TERMS -> Quad(AutomationActionType.CHECKBOX, null, "", "Accept Policies & Terms")
+            ElementSemanticType.CHECKBOX -> Quad(
+                AutomationActionType.CHECKBOX,
+                null,
+                "",
+                "Check: ${element.text.ifBlank { element.placeholder.ifBlank { element.nameAttr.ifBlank { "Checkbox" } } }}"
+            )
+            ElementSemanticType.RADIO_OPTION -> Quad(
+                AutomationActionType.RADIO,
+                null,
+                "",
+                "Select Radio: ${element.text.ifBlank { element.placeholder.ifBlank { element.nameAttr.ifBlank { "Option" } } }}"
+            )
             ElementSemanticType.SUBMIT_BUTTON -> Quad(AutomationActionType.SUBMIT, null, "", "Submit / Create Account")
             ElementSemanticType.NEXT_BUTTON -> Quad(AutomationActionType.CLICK, null, "", "Click Next / Continue")
             ElementSemanticType.DROPDOWN -> {
-                val inferredKey = detectVariableKeyFromSelector(element.selector, element.nameAttr + " " + element.idAttr) ?: "gender"
+                val inferredKey = detectVariableKeyFromSelector(element.selector, element.nameAttr + " " + element.idAttr + " " + element.text) ?: "gender"
                 Quad(AutomationActionType.SELECT_DROPDOWN, inferredKey, "{{$inferredKey}}", "Select Dropdown ($inferredKey)")
             }
             ElementSemanticType.GENERIC_BUTTON -> Quad(AutomationActionType.CLICK, null, "", "Click ${element.text.ifBlank { "Button" }}")
             ElementSemanticType.GENERIC_INPUT -> {
-                val inferredKey = detectVariableKeyFromSelector(element.selector, element.placeholder + " " + element.nameAttr) ?: "username"
+                val inferredKey = detectVariableKeyFromSelector(element.selector, element.placeholder + " " + element.nameAttr + " " + element.text) ?: "username"
                 Quad(
                     AutomationActionType.INPUT,
                     inferredKey,
@@ -792,26 +728,53 @@ class AutomationEngine(
 
     /**
      * Playback Execution:
-     * - Consumes stored values from the linked Data Sheet 1 by 1 (never using Default while stored values exist).
-     * - For recurring steps of the same field or across iterations, each step/run consumes the next value 1 by 1
-     *   in Top-to-Bottom, Bottom-to-Top (Vice Versa), or Random non-repeating order.
-     * - When stored values finish (e.g. 4 emails used), triggers Stop, Continue with Default (random), or Prompt to Add New Data.
+     * - STRICT GATE: Cannot start if no script or steps exist; redirects HUD to Create Automation mode.
+     * - Auto-registers newly grabbed script in savedScripts when started.
+     * - Consumes stored values from the linked Data Sheet 1 by 1, or uses Default Generator if no Data Sheet is linked.
+     * - Executes with wait-for-element auto-retry and fallback hint matching so dynamic DOMs succeed reliably.
      */
     fun startPlayback() {
+        // If currentScript has no steps, check if a saved script exists for this website
+        if (_currentScript.value.steps.isEmpty() && _savedScripts.value.isNotEmpty()) {
+            val matched = getScriptsForCurrentUrl(lastKnownPageUrl).firstOrNull() ?: _savedScripts.value.first()
+            _currentScript.value = matched
+        }
+
         val script = _currentScript.value
         if (script.steps.isEmpty()) {
-            addLog("No steps to execute. Grab elements or pick a saved script first.")
+            // Strict gate: When no scripts/steps exist, the engine CANNOT start; user must create one in HUD
+            _executionState.value = _executionState.value.copy(
+                status = AutomationStatus.RECORDING,
+                hudMode = HudMode.CREATE_AUTOMATION,
+                isHudVisible = true
+            )
+            addLog("Cannot start automation: No script created yet. Grab or tap elements on the page in HUD to create one first.")
+            injectJs(AutomationScripts.RECORDING_INJECTION)
+            triggerScan(autoReadySteps = true)
             return
         }
 
+        // Auto-save the current script into savedScripts if it isn't saved yet
+        if (_savedScripts.value.none { it.id == script.id }) {
+            val domain = extractDomain(lastKnownPageUrl).ifBlank { script.targetWebsite.ifBlank { "*" } }
+            val savedCopy = script.copy(
+                name = if (script.name == "New Automation Flow" && domain != "*") "$domain Automation" else script.name,
+                targetWebsite = if (script.targetWebsite == "*" && domain != "*") domain else script.targetWebsite,
+                targetUrl = lastKnownPageUrl.ifBlank { script.targetUrl }
+            )
+            _currentScript.value = savedCopy
+            _savedScripts.value = listOf(savedCopy) + _savedScripts.value
+        }
+
+        val activeScript = _currentScript.value
         stopPlayback()
         _executionState.value = _executionState.value.copy(
             status = AutomationStatus.PLAYING,
             hudMode = HudMode.RUN_AUTOMATION,
             currentIteration = 1,
-            totalIterations = script.repeatCount,
+            totalIterations = activeScript.repeatCount,
             currentStepIndex = 0,
-            totalSteps = script.steps.size,
+            totalSteps = activeScript.steps.size,
             isHudVisible = true,
             isAwaitingExhaustionChoice = false,
             exhaustedFieldKey = null
@@ -825,34 +788,34 @@ class AutomationEngine(
         val fieldsForcedToDefault = mutableSetOf<String>()
 
         playbackJob = scope.launch(Dispatchers.Main) {
-            val initialSheet = getDataSheet(script.dataSheetId)
+            val initialSheet = getDataSheet(activeScript.dataSheetId)
             addLog(
-                "Starting '${script.name}' (${script.repeatCount}x, Order: ${script.iterationOrder.shortLabel}). " +
-                        if (initialSheet != null) "Using Data Sheet: '${initialSheet.name}'" else "Using Default Random Data Generator"
+                "Starting '${activeScript.name}' (${activeScript.repeatCount}x, Order: ${activeScript.iterationOrder.shortLabel}). " +
+                        if (initialSheet != null) "Filling from Data Sheet: '${initialSheet.name}'" else "Filling from Default Data Generator"
             )
 
-            outerLoop@ for (iteration in 1..script.repeatCount) {
+            outerLoop@ for (iteration in 1..activeScript.repeatCount) {
                 if (_executionState.value.status != AutomationStatus.PLAYING &&
                     _executionState.value.status != AutomationStatus.PAUSED
                 ) break
 
                 _executionState.value = _executionState.value.copy(
                     currentIteration = iteration,
-                    totalIterations = script.repeatCount
+                    totalIterations = activeScript.repeatCount
                 )
 
                 // Rotate proxy at each iteration if enabled
-                if (script.rotateProxyOnRepeat) {
+                if (activeScript.rotateProxyOnRepeat) {
                     onRotateProxy?.invoke()
                     addLog("[Run $iteration] Rotated proxy node for clean session")
                     delay(450)
                 }
 
-                // Fresh random synthetic profile from Default generator (only used when field is NOT in Data Sheet or after Continue with Default)
+                // Fresh random synthetic profile from Default generator for this run
                 var currentDefaultRecord = AutomationDataGenerator.generateSingleRandomRecord()
                 var lastResolvedPassword: String? = null
 
-                for ((index, step) in script.steps.withIndex()) {
+                for ((index, step) in activeScript.steps.withIndex()) {
                     if (_executionState.value.status != AutomationStatus.PLAYING &&
                         _executionState.value.status != AutomationStatus.PAUSED
                     ) break@outerLoop
@@ -862,18 +825,18 @@ class AutomationEngine(
                         currentStepDescription = step.elementDescription
                     )
 
-                    val actualDelay = if (script.humanizeDelays) {
-                        (step.delayMs * (Random.nextDouble(0.85, 1.2))).toLong()
+                    val actualDelay = if (activeScript.humanizeDelays) {
+                        (step.delayMs * (Random.nextDouble(0.85, 1.18))).toLong()
                     } else step.delayMs
 
                     delay(actualDelay)
 
                     // Determine which field key this step consumes
                     val stepFieldKey = inferStepFieldKey(step)
+                    val fallbackHint = stepFieldKey ?: step.elementDescription
 
                     val resolvedValue = if (stepFieldKey != null) {
-                        // Special case: if confirmPassword and user has no separate confirmPassword column, reuse lastResolvedPassword
-                        val activeSheetNow = getDataSheet(script.dataSheetId)
+                        val activeSheetNow = getDataSheet(_currentScript.value.dataSheetId)
                         if (stepFieldKey == "confirmPassword" &&
                             (activeSheetNow == null || activeSheetNow.getFieldValues("confirmPassword").isEmpty()) &&
                             lastResolvedPassword != null
@@ -887,7 +850,6 @@ class AutomationEngine(
                                 shuffledOrders = fieldShuffledOrders,
                                 forcedDefaultFields = fieldsForcedToDefault,
                                 defaultFallback = {
-                                    // Generate fresh random value every time Default is used
                                     currentDefaultRecord = AutomationDataGenerator.generateSingleRandomRecord()
                                     val v = AutomationDataGenerator.generateSingleFieldValue(stepFieldKey)
                                     if (stepFieldKey == "password") lastResolvedPassword = v
@@ -895,7 +857,6 @@ class AutomationEngine(
                                 }
                             )
                             if (consumed == null) {
-                                // Stopped by exhaustion policy or user choice
                                 break@outerLoop
                             }
                             if (stepFieldKey == "password") {
@@ -918,24 +879,34 @@ class AutomationEngine(
                             delay(2000L)
                         }
                         AutomationActionType.CLICK -> {
-                            val js = AutomationScripts.createClickScript(step.selector)
-                            injectJs(js)
-                            addLog("[Run $iteration] Clicked: ${step.elementDescription}")
+                            val js = AutomationScripts.createClickScript(step.selector, fallbackHint)
+                            val ok = evaluateJsWithRetry(js)
+                            addLog("[Run $iteration] ${if (ok) "Clicked" else "Attempted click"}: ${step.elementDescription}")
+                        }
+                        AutomationActionType.CHECKBOX -> {
+                            val js = AutomationScripts.createCheckScript(step.selector, isRadio = false, desiredState = true, fallbackHint = fallbackHint)
+                            val ok = evaluateJsWithRetry(js)
+                            addLog("[Run $iteration] ${if (ok) "Checked box" else "Attempted check"}: ${step.elementDescription}")
+                        }
+                        AutomationActionType.RADIO -> {
+                            val js = AutomationScripts.createCheckScript(step.selector, isRadio = true, desiredState = true, fallbackHint = fallbackHint)
+                            val ok = evaluateJsWithRetry(js)
+                            addLog("[Run $iteration] ${if (ok) "Selected radio" else "Attempted radio"}: ${step.elementDescription}")
                         }
                         AutomationActionType.INPUT -> {
-                            val js = AutomationScripts.createInputScript(step.selector, resolvedValue, step.clearBeforeInput)
-                            injectJs(js)
-                            addLog("[Run $iteration] Filled ${step.elementDescription} -> '$resolvedValue'")
+                            val js = AutomationScripts.createInputScript(step.selector, resolvedValue, step.clearBeforeInput, fallbackHint)
+                            val ok = evaluateJsWithRetry(js)
+                            addLog("[Run $iteration] ${if (ok) "Filled" else "Attempted fill"} ${step.elementDescription} -> '$resolvedValue'")
                         }
                         AutomationActionType.SELECT_DROPDOWN -> {
-                            val js = AutomationScripts.createSelectDropdownScript(step.selector, resolvedValue)
-                            injectJs(js)
-                            addLog("[Run $iteration] Selected '$resolvedValue' in ${step.elementDescription}")
+                            val js = AutomationScripts.createSelectDropdownScript(step.selector, resolvedValue, fallbackHint)
+                            val ok = evaluateJsWithRetry(js)
+                            addLog("[Run $iteration] ${if (ok) "Selected" else "Attempted select"} '$resolvedValue' in ${step.elementDescription}")
                         }
                         AutomationActionType.SELECT_COUNTRY_CODE -> {
                             val code = resolvedValue.ifBlank { currentDefaultRecord.countryCode }
                             val js = AutomationScripts.createSelectCountryCodeScript(step.selector, code)
-                            injectJs(js)
+                            evaluateJsWithRetry(js)
                             addLog("[Run $iteration] Selected Country Code '$code'")
                         }
                         AutomationActionType.SELECT_DATE -> {
@@ -945,26 +916,26 @@ class AutomationEngine(
                             val m = parts.getOrNull(1) ?: currentDefaultRecord.dobMonth
                             val d = parts.getOrNull(2) ?: currentDefaultRecord.dobDay
                             val js = AutomationScripts.createSelectDateScript(step.selector, dob, d, m, y)
-                            injectJs(js)
+                            evaluateJsWithRetry(js)
                             addLog("[Run $iteration] Selected Date: '$dob'")
                         }
                         AutomationActionType.UPLOAD_FILE -> {
                             val fileName = resolvedValue.ifBlank { currentDefaultRecord.fileName }
                             val js = AutomationScripts.createFileUploadScript(step.selector, fileName)
-                            injectJs(js)
+                            evaluateJsWithRetry(js)
                             addLog("[Run $iteration] Uploaded Document '$fileName'")
                         }
                         AutomationActionType.SUBMIT -> {
-                            val js = AutomationScripts.createSubmitScript(step.selector)
-                            injectJs(js)
-                            addLog("[Run $iteration] Submitted Form: ${step.elementDescription}")
+                            val js = AutomationScripts.createSubmitScript(step.selector, fallbackHint)
+                            val ok = evaluateJsWithRetry(js)
+                            addLog("[Run $iteration] ${if (ok) "Submitted form" else "Triggered submit"}: ${step.elementDescription}")
                         }
                         AutomationActionType.WAIT -> {
                             addLog("[Run $iteration] Waiting ${step.delayMs}ms")
                         }
                         AutomationActionType.CLEAR -> {
-                            val js = AutomationScripts.createInputScript(step.selector, "", true)
-                            injectJs(js)
+                            val js = AutomationScripts.createInputScript(step.selector, "", true, fallbackHint)
+                            evaluateJsWithRetry(js)
                             addLog("[Run $iteration] Cleared ${step.elementDescription}")
                         }
                         AutomationActionType.SCROLL -> {
@@ -974,15 +945,15 @@ class AutomationEngine(
                     }
                 }
 
-                if (script.clearDataOnComplete && iteration < script.repeatCount) {
+                if (activeScript.clearDataOnComplete && iteration < activeScript.repeatCount) {
                     delay(700)
-                    script.steps.filter { it.actionType == AutomationActionType.INPUT }.forEach { inputStep ->
+                    activeScript.steps.filter { it.actionType == AutomationActionType.INPUT }.forEach { inputStep ->
                         val clearJs = AutomationScripts.createInputScript(inputStep.selector, "", true)
                         injectJs(clearJs)
                     }
                 }
 
-                delay(1100)
+                delay(1000)
             }
 
             _executionState.value = _executionState.value.copy(
@@ -994,6 +965,35 @@ class AutomationEngine(
         }
     }
 
+    /**
+     * Stronger JS Execution with automatic Wait-For-Element retry for dynamic SPAs and delayed renders.
+     */
+    private suspend fun evaluateJsWithRetry(
+        js: String,
+        maxAttempts: Int = 5,
+        retryDelayMs: Long = 350L
+    ): Boolean {
+        val webView = webViewProvider?.invoke() ?: return false
+        for (attempt in 1..maxAttempts) {
+            val deferred = CompletableDeferred<String?>()
+            try {
+                webView.evaluateJavascript(js) { result ->
+                    deferred.complete(result)
+                }
+            } catch (e: Exception) {
+                deferred.complete(null)
+            }
+            val res = withTimeoutOrNull(1800L) { deferred.await() }
+            if (res != null && (res.contains("true", ignoreCase = true) || !res.contains("false", ignoreCase = true))) {
+                return true
+            }
+            if (attempt < maxAttempts) {
+                delay(retryDelayMs)
+            }
+        }
+        return false
+    }
+
     private fun inferStepFieldKey(step: AutomationStep): String? {
         if (!step.variableKey.isNullOrBlank()) return step.variableKey
         val regex = Regex("\\{\\{([a-zA-Z0-9_]+)\\}\\}")
@@ -1003,6 +1003,8 @@ class AutomationEngine(
             AutomationActionType.SELECT_COUNTRY_CODE -> "countryCode"
             AutomationActionType.SELECT_DATE -> "dob"
             AutomationActionType.UPLOAD_FILE -> "fileName"
+            AutomationActionType.INPUT -> detectVariableKeyFromSelector(step.selector, step.elementDescription) ?: "username"
+            AutomationActionType.SELECT_DROPDOWN -> detectVariableKeyFromSelector(step.selector, step.elementDescription) ?: "gender"
             else -> null
         }
     }
@@ -1030,7 +1032,6 @@ class AutomationEngine(
 
         var storedList = activeSheet.getFieldValues(fieldKey)
         if (storedList.isEmpty()) {
-            // Field not present in Data Sheet -> fall back to Default random generator
             val generated = defaultFallback()
             addLog("Field '$fieldKey' not in '${activeSheet.name}' -> Default generated: $generated")
             return generated
@@ -1040,7 +1041,6 @@ class AutomationEngine(
         val policy = script.exhaustionPolicy
         val usageIdx = usageCounters.getOrDefault(fieldKey, 0)
 
-        // Ensure shuffled order is initialized and matches current list size
         val currentShuffled = shuffledOrders[fieldKey]
         val effectiveShuffle = if (currentShuffled == null || currentShuffled.size != storedList.size) {
             storedList.indices.shuffled().also { shuffledOrders[fieldKey] = it }
@@ -1083,7 +1083,6 @@ class AutomationEngine(
                 chosen
             }
             DataExhaustionPolicy.ADD_NEW -> {
-                // Pause and prompt the user in HUD: Stop, Continue Using Default, or Add New Data
                 addLog("All ${storedList.size} '$fieldKey' values in '${activeSheet.name}' have been used 1 by 1. Waiting for user selection (Stop / Continue Default / Add New)...")
                 val deferred = CompletableDeferred<ExhaustionDecision>()
                 exhaustionDecisionDeferred = deferred
@@ -1117,11 +1116,9 @@ class AutomationEngine(
                         generated
                     }
                     is ExhaustionDecision.AddedNewData -> {
-                        // Reload updated sheet and consume the newly added item!
                         val refreshedSheet = getDataSheet(script.dataSheetId)
                         storedList = refreshedSheet?.getFieldValues(fieldKey) ?: emptyList()
                         if (usageIdx < storedList.size) {
-                            // Rebuild shuffle for new indices if needed
                             val newIndices = (usageIdx until storedList.size).toList().shuffled()
                             shuffledOrders[fieldKey] = (effectiveShuffle + newIndices)
                             val picked = storedList[usageIdx]
@@ -1156,11 +1153,13 @@ class AutomationEngine(
     fun updateStep(step: AutomationStep) {
         val updated = _currentScript.value.steps.map { if (it.id == step.id) step else it }
         _currentScript.value = _currentScript.value.copy(steps = updated)
+        syncCurrentScriptToSavedScripts()
         addLog("Updated step: ${step.elementDescription}")
     }
 
     fun addStep(step: AutomationStep) {
         _currentScript.value = _currentScript.value.copy(steps = _currentScript.value.steps + step)
+        syncCurrentScriptToSavedScripts()
         addLog("Added step: ${step.elementDescription}")
     }
 
@@ -1173,12 +1172,14 @@ class AutomationEngine(
         val item = list.removeAt(idx)
         list.add(targetIdx, item)
         _currentScript.value = _currentScript.value.copy(steps = list)
+        syncCurrentScriptToSavedScripts()
     }
 
     fun removeStep(stepId: String) {
         _currentScript.value = _currentScript.value.copy(
             steps = _currentScript.value.steps.filter { it.id != stepId }
         )
+        syncCurrentScriptToSavedScripts()
         addLog("Removed step.")
     }
 
@@ -1189,7 +1190,6 @@ class AutomationEngine(
 
     fun updateCurrentScript(script: AutomationScript) {
         _currentScript.value = script
-        // Also sync back if this script is already in savedScripts
         val idx = _savedScripts.value.indexOfFirst { it.id == script.id }
         if (idx >= 0) {
             _savedScripts.value = _savedScripts.value.toMutableList().apply { set(idx, script) }
@@ -1204,9 +1204,9 @@ class AutomationEngine(
     }
 
     private fun injectJs(script: String) {
-        scope.launch(Dispatchers.Main) {
-            val webView = webViewProvider?.invoke()
-            webView?.evaluateJavascript(script, null)
+        val webView = webViewProvider?.invoke() ?: return
+        webView.post {
+            webView.evaluateJavascript(script, null)
         }
     }
 }

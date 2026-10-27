@@ -6,6 +6,8 @@ import kotlin.random.Random
 enum class AutomationActionType {
     CLICK,
     INPUT,
+    CHECKBOX,
+    RADIO,
     SELECT_DROPDOWN,
     SELECT_COUNTRY_CODE,
     SELECT_DATE,
@@ -65,6 +67,8 @@ enum class ElementSemanticType {
     STATE,
     ZIP_PIN,
     FILE_UPLOAD,
+    CHECKBOX,
+    RADIO_OPTION,
     CHECKBOX_TERMS,
     SUBMIT_BUTTON,
     NEXT_BUTTON,

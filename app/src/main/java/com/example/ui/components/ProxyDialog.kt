@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.VpnLock
@@ -34,6 +33,10 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.ui.theme.ExpressiveChipShape
+import com.example.ui.theme.ExpressiveDialogShape
+import com.example.ui.theme.ExpressivePillShape
+import com.example.ui.theme.ExpressiveSquircleShape
 
 data class ProxyServer(
     val name: String,
@@ -41,6 +44,9 @@ data class ProxyServer(
     val pingMs: Int
 )
 
+/**
+ * Material 3 Expressive Proxy Configuration Dialog
+ */
 @Composable
 fun ProxyDialog(
     isEnabled: Boolean,
@@ -59,18 +65,19 @@ fun ProxyDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
+        shape = ExpressiveDialogShape,
         icon = {
             Surface(
-                shape = CircleShape,
+                shape = ExpressiveChipShape,
                 color = if (isEnabled) Color(0xFF10B981).copy(alpha = 0.2f) else MaterialTheme.colorScheme.surfaceVariant,
-                modifier = Modifier.size(48.dp)
+                modifier = Modifier.size(52.dp)
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Icon(
                         imageVector = Icons.Default.VpnLock,
                         contentDescription = "Proxy",
                         tint = if (isEnabled) Color(0xFF10B981) else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(24.dp)
+                        modifier = Modifier.size(26.dp)
                     )
                 }
             }
@@ -78,8 +85,7 @@ fun ProxyDialog(
         title = {
             Text(
                 text = "Secure Web Proxy",
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold
+                style = MaterialTheme.typography.titleLarge
             )
         },
         text = {
@@ -93,13 +99,12 @@ fun ProxyDialog(
                     Column {
                         Text(
                             text = if (isEnabled) "Proxy Status: Active" else "Proxy Status: Disabled",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.SemiBold,
+                            style = MaterialTheme.typography.titleSmall,
                             color = if (isEnabled) Color(0xFF10B981) else MaterialTheme.colorScheme.onSurface
                         )
                         Text(
                             text = "Encrypts traffic & hides original IP",
-                            fontSize = 11.sp,
+                            style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
@@ -112,8 +117,7 @@ fun ProxyDialog(
 
                 Text(
                     text = "Select Server Location:",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold,
+                    style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 8.dp)
                 )
@@ -121,15 +125,16 @@ fun ProxyDialog(
                 servers.forEach { server ->
                     val isSelected = server.name == currentNode
                     Card(
-                        shape = RoundedCornerShape(12.dp),
+                        shape = ExpressiveSquircleShape,
                         colors = CardDefaults.cardColors(
-                            containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
-                            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+                            containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                            else MaterialTheme.colorScheme.surfaceContainerHigh
                         ),
-                        border = if (isSelected) BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null,
+                        border = if (isSelected) BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary)
+                        else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
+                            .clip(ExpressiveSquircleShape)
                             .clickable {
                                 onSelectNode(server.name)
                             }
@@ -137,28 +142,35 @@ fun ProxyDialog(
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
                                     text = server.name,
-                                    fontSize = 13.sp,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                    style = MaterialTheme.typography.titleSmall,
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
                                 Text(
                                     text = "${server.location} • ${server.pingMs}ms",
-                                    fontSize = 11.sp,
+                                    style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                             if (isSelected) {
-                                Icon(
-                                    imageVector = Icons.Default.Check,
-                                    contentDescription = "Selected",
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(18.dp)
-                                )
+                                Surface(
+                                    shape = CircleShape,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(22.dp)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            imageVector = Icons.Default.Check,
+                                            contentDescription = "Selected",
+                                            tint = MaterialTheme.colorScheme.onPrimary,
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -166,7 +178,10 @@ fun ProxyDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) {
+            TextButton(
+                onClick = onDismiss,
+                shape = ExpressivePillShape
+            ) {
                 Text("Done")
             }
         }

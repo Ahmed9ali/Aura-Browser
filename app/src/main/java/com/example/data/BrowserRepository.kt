@@ -1,41 +1,30 @@
 package com.example.data
 
+import android.content.Context
+import android.content.SharedPreferences
+import com.example.AuraApplication
 import com.example.model.BookmarkItem
 import com.example.model.BrowserSettings
 import com.example.model.BrowserTab
 import com.example.model.HistoryItem
+import com.example.model.SearchEngine
 import com.example.model.SpeedDial
 import com.example.model.TabGroup
+import com.example.model.ThemeMode
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.util.UUID
 
-class BrowserRepository {
+class BrowserRepository(
+    context: Context? = null
+) {
+    private val prefs: SharedPreferences? = runCatching {
+        val ctx = context ?: AuraApplication.instance
+        ctx?.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    }.getOrNull()
 
-    // Default Tab Groups
-    private val defaultGroups = listOf(
-        TabGroup(
-            id = "group_work",
-            name = "Work & Projects",
-            colorHex = "#6366F1", // Indigo
-            isCollapsed = false
-        ),
-        TabGroup(
-            id = "group_research",
-            name = "Research & Docs",
-            colorHex = "#06B6D4", // Cyan
-            isCollapsed = false
-        ),
-        TabGroup(
-            id = "group_personal",
-            name = "Personal & Social",
-            colorHex = "#10B981", // Emerald
-            isCollapsed = false
-        )
-    )
-
-    // Initial Tabs
+    // Default clean initial tabs (starts with 1 clean home tab)
     private val initialTabs = listOf(
         BrowserTab(
             id = "tab_1",
@@ -43,69 +32,11 @@ class BrowserRepository {
             url = "aura://home",
             groupId = null,
             previewSnippet = "Fast discovery & smart speed dials"
-        ),
-        BrowserTab(
-            id = "tab_2",
-            title = "GitHub",
-            url = "https://github.com",
-            groupId = "group_work",
-            previewSnippet = "GitHub: Where the world builds software"
-        ),
-        BrowserTab(
-            id = "tab_3",
-            title = "Android Developers",
-            url = "https://developer.android.com",
-            groupId = "group_research",
-            previewSnippet = "Official modern Android developer guides and API reference"
-        ),
-        BrowserTab(
-            id = "tab_4",
-            title = "Wikipedia",
-            url = "https://www.wikipedia.org",
-            groupId = "group_research",
-            previewSnippet = "The Free Encyclopedia"
         )
     )
 
-    // Initial Bookmarks
-    private val initialBookmarks = listOf(
-        BookmarkItem(
-            id = UUID.randomUUID().toString(),
-            title = "GitHub - AI & Dev",
-            url = "https://github.com",
-            folder = "Favorites"
-        ),
-        BookmarkItem(
-            id = UUID.randomUUID().toString(),
-            title = "Wikipedia - The Free Encyclopedia",
-            url = "https://www.wikipedia.org",
-            folder = "Favorites"
-        ),
-        BookmarkItem(
-            id = UUID.randomUUID().toString(),
-            title = "Android Developers Documentation",
-            url = "https://developer.android.com",
-            folder = "Work"
-        ),
-        BookmarkItem(
-            id = UUID.randomUUID().toString(),
-            title = "MDN Web Docs - HTML, CSS & JS",
-            url = "https://developer.mozilla.org",
-            folder = "Work"
-        ),
-        BookmarkItem(
-            id = UUID.randomUUID().toString(),
-            title = "Hacker News",
-            url = "https://news.ycombinator.com",
-            folder = "Reading List"
-        ),
-        BookmarkItem(
-            id = UUID.randomUUID().toString(),
-            title = "Reddit - The front page of the internet",
-            url = "https://www.reddit.com",
-            folder = "Reading List"
-        )
-    )
+    // Clean initial groups (empty for fresh app)
+    private val defaultGroups = emptyList<TabGroup>()
 
     // Default Speed Dials for Home Screen
     val defaultSpeedDials = listOf(
@@ -122,7 +53,7 @@ class BrowserRepository {
     private val _speedDials = MutableStateFlow<List<SpeedDial>>(defaultSpeedDials)
     val speedDials: StateFlow<List<SpeedDial>> = _speedDials.asStateFlow()
 
-    // Observable states
+    // Observable states - Fresh and clean initial state
     private val _tabs = MutableStateFlow<List<BrowserTab>>(initialTabs)
     val tabs: StateFlow<List<BrowserTab>> = _tabs.asStateFlow()
 
@@ -132,22 +63,54 @@ class BrowserRepository {
     private val _tabGroups = MutableStateFlow<List<TabGroup>>(defaultGroups)
     val tabGroups: StateFlow<List<TabGroup>> = _tabGroups.asStateFlow()
 
-    private val _bookmarks = MutableStateFlow<List<BookmarkItem>>(initialBookmarks)
+    private val _bookmarks = MutableStateFlow<List<BookmarkItem>>(emptyList())
     val bookmarks: StateFlow<List<BookmarkItem>> = _bookmarks.asStateFlow()
 
-    private val _history = MutableStateFlow<List<HistoryItem>>(
-        listOf(
-            HistoryItem(title = "GitHub: Build software", url = "https://github.com", visitCount = 14),
-            HistoryItem(title = "Wikipedia Encyclopedia", url = "https://www.wikipedia.org", visitCount = 8),
-            HistoryItem(title = "Android Jetpack Docs", url = "https://developer.android.com", visitCount = 12),
-            HistoryItem(title = "Stack Overflow Community", url = "https://stackoverflow.com", visitCount = 9),
-            HistoryItem(title = "Reddit Discussions", url = "https://www.reddit.com", visitCount = 6)
-        )
-    )
+    private val _history = MutableStateFlow<List<HistoryItem>>(emptyList())
     val history: StateFlow<List<HistoryItem>> = _history.asStateFlow()
 
-    private val _settings = MutableStateFlow(BrowserSettings())
+    private val _settings = MutableStateFlow(loadSavedSettings())
     val settings: StateFlow<BrowserSettings> = _settings.asStateFlow()
+
+    // Settings Persistence
+    private fun loadSavedSettings(): BrowserSettings {
+        val sp = prefs ?: return BrowserSettings()
+        val engineStr = sp.getString(KEY_SEARCH_ENGINE, SearchEngine.GOOGLE.name)
+        val engine = runCatching { SearchEngine.valueOf(engineStr ?: SearchEngine.GOOGLE.name) }
+            .getOrDefault(SearchEngine.GOOGLE)
+        val themeStr = sp.getString(KEY_THEME_MODE, ThemeMode.SYSTEM.name)
+        val theme = runCatching { ThemeMode.valueOf(themeStr ?: ThemeMode.SYSTEM.name) }
+            .getOrDefault(ThemeMode.SYSTEM)
+
+        return BrowserSettings(
+            searchEngine = engine,
+            suggestionsEnabled = sp.getBoolean(KEY_SUGGESTIONS_ENABLED, true),
+            adShieldEnabled = sp.getBoolean(KEY_AD_SHIELD_ENABLED, true),
+            desktopModeDefault = sp.getBoolean(KEY_DESKTOP_MODE_DEFAULT, false),
+            themeMode = theme,
+            javaScriptEnabled = sp.getBoolean(KEY_JAVASCRIPT_ENABLED, true),
+            doNotTrack = sp.getBoolean(KEY_DO_NOT_TRACK, true),
+            showTabGroups = sp.getBoolean(KEY_SHOW_TAB_GROUPS, true),
+            showSpeedDials = sp.getBoolean(KEY_SHOW_SPEED_DIALS, true),
+            showDiscoverFeed = sp.getBoolean(KEY_SHOW_DISCOVER_FEED, true)
+        )
+    }
+
+    private fun persistSettings(newSettings: BrowserSettings) {
+        prefs?.edit()?.apply {
+            putString(KEY_SEARCH_ENGINE, newSettings.searchEngine.name)
+            putString(KEY_THEME_MODE, newSettings.themeMode.name)
+            putBoolean(KEY_SUGGESTIONS_ENABLED, newSettings.suggestionsEnabled)
+            putBoolean(KEY_AD_SHIELD_ENABLED, newSettings.adShieldEnabled)
+            putBoolean(KEY_DESKTOP_MODE_DEFAULT, newSettings.desktopModeDefault)
+            putBoolean(KEY_JAVASCRIPT_ENABLED, newSettings.javaScriptEnabled)
+            putBoolean(KEY_DO_NOT_TRACK, newSettings.doNotTrack)
+            putBoolean(KEY_SHOW_TAB_GROUPS, newSettings.showTabGroups)
+            putBoolean(KEY_SHOW_SPEED_DIALS, newSettings.showSpeedDials)
+            putBoolean(KEY_SHOW_DISCOVER_FEED, newSettings.showDiscoverFeed)
+            apply()
+        }
+    }
 
     // Tab Management Operations
     fun openNewTab(url: String = "aura://home", title: String = "New Tab", groupId: String? = null): String {
@@ -166,7 +129,6 @@ class BrowserRepository {
     fun selectTab(tabId: String) {
         if (_tabs.value.any { it.id == tabId }) {
             _activeTabId.value = tabId
-            // Update last accessed
             _tabs.value = _tabs.value.map {
                 if (it.id == tabId) it.copy(lastAccessedAt = System.currentTimeMillis()) else it
             }
@@ -176,7 +138,6 @@ class BrowserRepository {
     fun closeTab(tabId: String) {
         val currentTabs = _tabs.value
         if (currentTabs.size <= 1) {
-            // Keep at least one tab open
             val freshTab = BrowserTab(
                 id = UUID.randomUUID().toString(),
                 title = "Aura Home",
@@ -191,7 +152,6 @@ class BrowserRepository {
         val newTabs = currentTabs.filter { it.id != tabId }
         _tabs.value = newTabs
 
-        // If the active tab was closed, switch to adjacent tab
         if (_activeTabId.value == tabId) {
             val nextIndex = (closingIndex - 1).coerceAtLeast(0)
             _activeTabId.value = newTabs[nextIndex].id
@@ -241,7 +201,6 @@ class BrowserRepository {
             }
         }
 
-        // Add to history if valid web url
         if (url != null && !url.startsWith("aura://") && url != "about:blank") {
             addToHistory(title ?: url, url)
         }
@@ -273,12 +232,10 @@ class BrowserRepository {
     fun deleteGroup(groupId: String, keepTabs: Boolean = true) {
         _tabGroups.value = _tabGroups.value.filter { it.id != groupId }
         if (keepTabs) {
-            // Ungroup tabs that were in this group
             _tabs.value = _tabs.value.map {
                 if (it.groupId == groupId) it.copy(groupId = null) else it
             }
         } else {
-            // Close tabs in this group
             closeAllTabsInGroup(groupId)
         }
     }
@@ -320,6 +277,10 @@ class BrowserRepository {
     }
 
     // History Operations
+    fun recordVisit(url: String, title: String = "") {
+        addToHistory(title.ifBlank { url }, url)
+    }
+
     private fun addToHistory(title: String, url: String) {
         val currentHistory = _history.value.toMutableList()
         val existingIndex = currentHistory.indexOfFirst { it.url == url }
@@ -361,21 +322,23 @@ class BrowserRepository {
         _history.value = _history.value.filter { it.id != id }
     }
 
-    // Settings Operations
+    // Settings Operations - Persisted across app restarts
     fun updateSettings(transform: (BrowserSettings) -> BrowserSettings) {
-        _settings.value = transform(_settings.value)
+        val updated = transform(_settings.value)
+        _settings.value = updated
+        persistSettings(updated)
     }
 
     fun toggleShowTabGroups() {
-        _settings.value = _settings.value.copy(showTabGroups = !_settings.value.showTabGroups)
+        updateSettings { it.copy(showTabGroups = !it.showTabGroups) }
     }
 
     fun toggleShowSpeedDials() {
-        _settings.value = _settings.value.copy(showSpeedDials = !_settings.value.showSpeedDials)
+        updateSettings { it.copy(showSpeedDials = !it.showSpeedDials) }
     }
 
     fun toggleShowDiscoverFeed() {
-        _settings.value = _settings.value.copy(showDiscoverFeed = !_settings.value.showDiscoverFeed)
+        updateSettings { it.copy(showDiscoverFeed = !it.showDiscoverFeed) }
     }
 
     // Speed Dial Operations
@@ -428,5 +391,19 @@ class BrowserRepository {
 
     fun resetSpeedDials() {
         _speedDials.value = defaultSpeedDials
+    }
+
+    companion object {
+        private const val PREFS_NAME = "aura_browser_settings"
+        private const val KEY_SEARCH_ENGINE = "search_engine"
+        private const val KEY_THEME_MODE = "theme_mode"
+        private const val KEY_SUGGESTIONS_ENABLED = "suggestions_enabled"
+        private const val KEY_AD_SHIELD_ENABLED = "ad_shield_enabled"
+        private const val KEY_DESKTOP_MODE_DEFAULT = "desktop_mode_default"
+        private const val KEY_JAVASCRIPT_ENABLED = "javascript_enabled"
+        private const val KEY_DO_NOT_TRACK = "do_not_track"
+        private const val KEY_SHOW_TAB_GROUPS = "show_tab_groups"
+        private const val KEY_SHOW_SPEED_DIALS = "show_speed_dials"
+        private const val KEY_SHOW_DISCOVER_FEED = "show_discover_feed"
     }
 }

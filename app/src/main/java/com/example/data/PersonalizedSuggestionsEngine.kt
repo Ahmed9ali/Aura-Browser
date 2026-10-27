@@ -83,8 +83,8 @@ class PersonalizedSuggestionsEngine {
     )
 
     /**
-     * Generate dynamic personalized search suggestions based on the user's input,
-     * browsing history, bookmarks, domain registry, and discovery topics.
+     * Generate pure search suggestions based on the user's input,
+     * browsing history, bookmarks, and popular domains (without trending or discovery topics).
      */
     fun getSuggestions(
         query: String,
@@ -95,78 +95,36 @@ class PersonalizedSuggestionsEngine {
         val trimmed = query.trim()
         val results = mutableListOf<SearchSuggestion>()
 
-        // 1. If query is empty, show personalized history + trending discovery suggestions
+        // 1. If query is empty, show user's frequent browsing history and bookmarks only
         if (trimmed.isEmpty()) {
-            // If user clicked a discovery category pill, show suggestions for that category
-            if (selectedCategory != null && categorySuggestions.containsKey(selectedCategory)) {
-                categorySuggestions[selectedCategory]?.forEach { item ->
-                    results.add(
-                        SearchSuggestion(
-                            title = item,
-                            query = item,
-                            type = SuggestionType.DISCOVERY,
-                            subtitle = "Explore $selectedCategory topic",
-                            category = selectedCategory
-                        )
-                    )
-                }
-                return results
-            }
-
-            // Top frequent history as personalized suggestions
+            // Frequent history items
             history.sortedByDescending { it.visitCount }
-                .take(3)
+                .take(5)
                 .forEach { h ->
                     results.add(
                         SearchSuggestion(
                             title = h.title.ifBlank { h.url },
                             query = h.url,
-                            type = SuggestionType.PERSONALIZED,
-                            subtitle = "Frequently visited • ${h.visitCount} visits",
+                            type = SuggestionType.HISTORY,
+                            subtitle = "History • ${h.visitCount} visits",
                             targetUrl = h.url
                         )
                     )
                 }
 
-            // Recent bookmarks
-            bookmarks.take(2).forEach { b ->
+            // Saved bookmarks
+            bookmarks.take(3).forEach { b ->
                 results.add(
                     SearchSuggestion(
                         title = b.title,
                         query = b.url,
-                        type = SuggestionType.PERSONALIZED,
-                        subtitle = "Saved in ${b.folder}",
+                        type = SuggestionType.HISTORY,
+                        subtitle = "Bookmark • ${b.folder}",
                         targetUrl = b.url
                     )
                 )
             }
-
-            // Trending web discovery items
-            results.add(
-                SearchSuggestion(
-                    title = "Kotlin Multiplatform & Compose in 2026",
-                    query = "Kotlin Multiplatform latest features",
-                    type = SuggestionType.TRENDING,
-                    subtitle = "Trending in Developer Community"
-                )
-            )
-            results.add(
-                SearchSuggestion(
-                    title = "Modern Browser Tab Workflows & Productivity",
-                    query = "browser tab grouping productivity tips",
-                    type = SuggestionType.TRENDING,
-                    subtitle = "Trending in Productivity"
-                )
-            )
-            results.add(
-                SearchSuggestion(
-                    title = "Open Source AI & Local Inference Guides",
-                    query = "local on device AI guide",
-                    type = SuggestionType.TRENDING,
-                    subtitle = "Trending in Tech"
-                )
-            )
-            return results
+            return results.distinctBy { it.targetUrl ?: it.query }
         }
 
         val lowerQuery = trimmed.lowercase(Locale.ROOT)
@@ -193,12 +151,12 @@ class PersonalizedSuggestionsEngine {
         bookmarks.filter {
             it.title.lowercase(Locale.ROOT).contains(lowerQuery) ||
                     it.url.lowercase(Locale.ROOT).contains(lowerQuery)
-        }.take(2).forEach { b ->
+        }.take(3).forEach { b ->
             results.add(
                 SearchSuggestion(
                     title = b.title,
                     query = b.url,
-                    type = SuggestionType.PERSONALIZED,
+                    type = SuggestionType.DOMAIN,
                     subtitle = "Bookmark • ${b.folder}",
                     targetUrl = b.url
                 )
@@ -209,7 +167,7 @@ class PersonalizedSuggestionsEngine {
         history.filter {
             it.title.lowercase(Locale.ROOT).contains(lowerQuery) ||
                     it.url.lowercase(Locale.ROOT).contains(lowerQuery)
-        }.take(3).forEach { h ->
+        }.take(4).forEach { h ->
             results.add(
                 SearchSuggestion(
                     title = h.title.ifBlank { h.url },
@@ -239,29 +197,13 @@ class PersonalizedSuggestionsEngine {
             }
         }
 
-        // 6. Category discovery matches
-        categorySuggestions.values.flatten().filter {
-            it.lowercase(Locale.ROOT).contains(lowerQuery)
-        }.take(2).forEach { suggestion ->
-            if (results.none { it.query.equals(suggestion, ignoreCase = true) }) {
-                results.add(
-                    SearchSuggestion(
-                        title = suggestion,
-                        query = suggestion,
-                        type = SuggestionType.DISCOVERY,
-                        subtitle = "Personalized Discovery Topic"
-                    )
-                )
-            }
-        }
-
-        // 7. General search suggestion
+        // 6. Direct search query suggestion
         results.add(
             SearchSuggestion(
                 title = trimmed,
                 query = trimmed,
-                type = SuggestionType.TRENDING,
-                subtitle = "Search web with chosen search engine"
+                type = SuggestionType.DOMAIN,
+                subtitle = "Search web for \"$trimmed\""
             )
         )
 

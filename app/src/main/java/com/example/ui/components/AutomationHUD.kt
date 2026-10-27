@@ -28,7 +28,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Code
@@ -84,6 +83,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.model.AutomationActionType
+import com.example.model.AutomationDataGenerator
 import com.example.model.AutomationExecutionState
 import com.example.model.AutomationScript
 import com.example.model.AutomationStatus
@@ -94,6 +94,7 @@ import com.example.model.DataSheet
 import com.example.model.ElementSemanticType
 import com.example.model.HudMode
 import com.example.model.ScannedElement
+import java.util.UUID
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -132,6 +133,7 @@ fun AutomationHUD(
     onResolveExhaustionStop: () -> Unit,
     onResolveExhaustionDefault: () -> Unit,
     onResolveExhaustionAddNew: (fieldKey: String, newValues: List<String>) -> Unit,
+    onSaveDataSheet: (DataSheet) -> Unit = {},
     onOpenScriptManager: () -> Unit,
     onCloseHud: () -> Unit,
     modifier: Modifier = Modifier
@@ -142,12 +144,14 @@ fun AutomationHUD(
     var showSaveScriptDialog by remember { mutableStateOf(false) }
     var showAddNavigateDialog by remember { mutableStateOf(false) }
     var showAddNewExhaustedDataDialog by remember { mutableStateOf(false) }
+    var showQuickCreateDataSheetDialog by remember { mutableStateOf(false) }
+    var showNoDataSheetBeforeRunDialog by remember { mutableStateOf(false) }
+    var confirmedDefaultDataForSession by remember { mutableStateOf(false) }
 
     val websiteDomain = remember(currentUrl) {
         currentUrl.removePrefix("https://").removePrefix("http://").removePrefix("www.").substringBefore("/")
     }
 
-    // Available field keys across all Data Sheets + standard fields
     val availableFieldKeys = remember(dataSheets) {
         val standard = listOf(
             "email", "username", "password", "confirmPassword", "phoneNumber",
@@ -156,6 +160,18 @@ fun AutomationHUD(
         )
         val custom = dataSheets.flatMap { it.fields.keys }
         (standard + custom).distinct()
+    }
+
+    val handleRequestStartPlay = {
+        if (currentScript.steps.isEmpty() && savedScripts.isEmpty()) {
+            // Cannot start when no scripts exist — switch to Create mode
+            onSelectMode(HudMode.CREATE_AUTOMATION)
+        } else if (dataSheets.isEmpty() && currentScript.dataSheetId == null && !confirmedDefaultDataForSession) {
+            // No data sheet exists yet — let user either create a Data Sheet or confirm Default Data
+            showNoDataSheetBeforeRunDialog = true
+        } else {
+            onStartPlay()
+        }
     }
 
     val statusColor = when (executionState.status) {
@@ -309,7 +325,7 @@ fun AutomationHUD(
                                         contentDescription = null,
                                         modifier = Modifier.size(14.dp)
                                     )
-                                    Text("Create Automation", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                                    Text("Create Script", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                                 }
                             }
                         )
@@ -337,9 +353,16 @@ fun AutomationHUD(
                             savedScripts = savedScripts,
                             dataSheets = dataSheets,
                             websiteDomain = websiteDomain,
+                            confirmedDefaultData = confirmedDefaultDataForSession,
                             onSelectScript = onSelectScript,
                             onUpdateCurrentScript = onUpdateCurrentScript,
-                            onStartPlay = onStartPlay,
+                            onSwitchToCreateScript = { onSelectMode(HudMode.CREATE_AUTOMATION) },
+                            onOpenCreateDataSheet = { showQuickCreateDataSheetDialog = true },
+                            onConfirmUseDefaultData = {
+                                confirmedDefaultDataForSession = true
+                                onUpdateCurrentScript(currentScript.copy(dataSheetId = null))
+                            },
+                            onStartPlay = handleRequestStartPlay,
                             onStopPlay = onStopPlay,
                             onOpenScriptManager = onOpenScriptManager
                         )
@@ -348,6 +371,8 @@ fun AutomationHUD(
                             executionState = executionState,
                             currentScript = currentScript,
                             scannedElements = scannedElements,
+                            dataSheets = dataSheets,
+                            currentUrl = currentUrl,
                             websiteDomain = websiteDomain,
                             onStartFreshScript = onStartFreshScript,
                             onToggleRecord = onToggleRecord,
@@ -361,12 +386,44 @@ fun AutomationHUD(
                             onDeleteStep = onDeleteStep,
                             onOpenAddNavigate = { showAddNavigateDialog = true },
                             onOpenSaveScript = { showSaveScriptDialog = true },
+                            onOpenCreateDataSheet = { showQuickCreateDataSheetDialog = true },
+                            onNavigateWebViewToUrl = onNavigateWebViewToUrl,
+                            onReadyAndRun = handleRequestStartPlay,
                             onOpenScriptManager = onOpenScriptManager
                         )
                     }
                 }
             }
         }
+    }
+
+    // Prompt if no Data Sheet exists when starting automation
+    if (showNoDataSheetBeforeRunDialog) {
+        DataSheetChoiceBeforeRunDialog(
+            onDismiss = { showNoDataSheetBeforeRunDialog = false },
+            onUseDefaultAndRun = {
+                confirmedDefaultDataForSession = true
+                showNoDataSheetBeforeRunDialog = false
+                onUpdateCurrentScript(currentScript.copy(dataSheetId = null))
+                onStartPlay()
+            },
+            onCreateDataSheet = {
+                showNoDataSheetBeforeRunDialog = false
+                showQuickCreateDataSheetDialog = true
+            }
+        )
+    }
+
+    // Quick Create Data Sheet Dialog right inside HUD
+    if (showQuickCreateDataSheetDialog) {
+        QuickCreateDataSheetDialog(
+            onDismiss = { showQuickCreateDataSheetDialog = false },
+            onSaveSheet = { newSheet ->
+                onSaveDataSheet(newSheet)
+                onUpdateCurrentScript(currentScript.copy(dataSheetId = newSheet.id))
+                showQuickCreateDataSheetDialog = false
+            }
+        )
     }
 
     // Edit Captured Step Dialog in HUD
@@ -466,7 +523,7 @@ fun AutomationHUD(
         val fieldKey = executionState.exhaustedFieldKey ?: "email"
         AddExhaustedFieldDataDialog(
             fieldKey = fieldKey,
-            sheetName = executionState.exhaustedSheetName.ifBlank { "XYZ Data" },
+            sheetName = executionState.exhaustedSheetName.ifBlank { "My Data" },
             onDismiss = { showAddNewExhaustedDataDialog = false },
             onAddAndContinue = { newItems ->
                 showAddNewExhaustedDataDialog = false
@@ -477,7 +534,7 @@ fun AutomationHUD(
 }
 
 /**
- * Interactive Prompt shown in HUD when stored values (e.g. 4 emails in XYZ Data) are all used 1 by 1.
+ * Interactive Prompt shown in HUD when stored values in a Data Sheet are all used 1 by 1.
  */
 @Composable
 private fun DataExhaustedHudPrompt(
@@ -556,7 +613,7 @@ private fun DataExhaustedHudPrompt(
 
 /**
  * Tab Content: Run Automation
- * Filters saved scripts for the current website and lets the user pick Data Sheet, Order, and Exhaustion Policy.
+ * Enforces the Script Creation Gate (cannot start if no script/steps exist) and Data Sheet vs Default choice.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -566,20 +623,25 @@ private fun RunAutomationHudContent(
     savedScripts: List<AutomationScript>,
     dataSheets: List<DataSheet>,
     websiteDomain: String,
+    confirmedDefaultData: Boolean,
     onSelectScript: (AutomationScript) -> Unit,
     onUpdateCurrentScript: (AutomationScript) -> Unit,
+    onSwitchToCreateScript: () -> Unit,
+    onOpenCreateDataSheet: () -> Unit,
+    onConfirmUseDefaultData: () -> Unit,
     onStartPlay: () -> Unit,
     onStopPlay: () -> Unit,
     onOpenScriptManager: () -> Unit
 ) {
     val isPlaying = executionState.status == AutomationStatus.PLAYING || executionState.status == AutomationStatus.PAUSED
+    val hasValidScript = currentScript.steps.isNotEmpty() || savedScripts.any { it.steps.isNotEmpty() }
+
     var scriptMenuExpanded by remember { mutableStateOf(false) }
     var sheetMenuExpanded by remember { mutableStateOf(false) }
     var orderMenuExpanded by remember { mutableStateOf(false) }
     var policyMenuExpanded by remember { mutableStateOf(false) }
     var filterWebsiteOnly by remember { mutableStateOf(true) }
 
-    // Sort & filter scripts for the current website
     val websiteMatchedScripts = remember(savedScripts, websiteDomain, filterWebsiteOnly) {
         val exactSite = savedScripts.filter {
             it.targetWebsite != "*" &&
@@ -596,17 +658,68 @@ private fun RunAutomationHudContent(
         }
     }
 
-    Column(modifier = Modifier.fillMaxWidth()) {
+    val assignedSheet = dataSheets.firstOrNull { it.id == currentScript.dataSheetId }
+
+    Column(
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+        modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+    ) {
+        // Gate 1: When NO scripts exist, engine cannot be started — user must create one in HUD
+        if (!hasValidScript && !isPlaying) {
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = Color(0xFFF59E0B).copy(alpha = 0.14f),
+                border = BorderStroke(1.dp, Color(0xFFF59E0B).copy(alpha = 0.6f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Warning,
+                            contentDescription = null,
+                            tint = Color(0xFFD97706),
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            text = "No Script Created — Engine Cannot Start",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                    Text(
+                        text = "Create a script first by grabbing or tapping page elements (no typing in fields needed). When started, the engine will fill fields and click buttons/boxes from your Data Sheet or Default.",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Button(
+                        onClick = onSwitchToCreateScript,
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                        modifier = Modifier.fillMaxWidth().height(42.dp).testTag("btn_create_first_script_hud")
+                    ) {
+                        Icon(Icons.Default.AutoFixHigh, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("+ Create Script Now (Grab Page Elements)", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+
         // Active Execution Progress Bar
         if (isPlaying) {
             Surface(
-                shape = RoundedCornerShape(10.dp),
+                shape = RoundedCornerShape(12.dp),
                 color = Color(0xFF10B981).copy(alpha = 0.12f),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 8.dp)
+                border = BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.35f)),
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Column(modifier = Modifier.padding(8.dp)) {
+                Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -614,19 +727,26 @@ private fun RunAutomationHudContent(
                     ) {
                         Text(
                             text = "Run ${executionState.currentIteration}/${executionState.totalIterations} • Step ${executionState.currentStepIndex}/${executionState.totalSteps}",
-                            fontSize = 11.sp,
+                            fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color(0xFF10B981)
                         )
                         if (currentScript.rotateProxyOnRepeat) {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                                Icon(Icons.Default.VpnLock, contentDescription = null, tint = Color(0xFF10B981), modifier = Modifier.size(11.dp))
-                                Text("Proxy Rotating", fontSize = 9.sp, color = Color(0xFF10B981))
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = Color(0xFF10B981).copy(alpha = 0.2f)
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                ) {
+                                    Icon(Icons.Default.VpnLock, contentDescription = null, tint = Color(0xFF10B981), modifier = Modifier.size(12.dp))
+                                    Text("Rotating Proxy", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF10B981))
+                                }
                             }
                         }
                     }
-
-                    Spacer(modifier = Modifier.height(4.dp))
 
                     val progress = if (executionState.totalSteps > 0) {
                         executionState.currentStepIndex.toFloat() / executionState.totalSteps.toFloat()
@@ -638,24 +758,23 @@ private fun RunAutomationHudContent(
                         trackColor = MaterialTheme.colorScheme.surfaceVariant,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(4.dp)
-                            .clip(RoundedCornerShape(2.dp))
+                            .height(6.dp)
+                            .clip(RoundedCornerShape(3.dp))
                     )
 
                     if (executionState.currentDataSummary.isNotBlank()) {
                         Text(
-                            text = "Active 1-by-1 Data -> ${executionState.currentDataSummary}",
-                            fontSize = 10.sp,
+                            text = "Filling Data -> ${executionState.currentDataSummary}",
+                            fontSize = 11.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(top = 3.dp)
+                            color = MaterialTheme.colorScheme.primary
                         )
                     }
 
                     if (executionState.currentStepDescription.isNotBlank()) {
                         Text(
                             text = "Action: ${executionState.currentStepDescription}",
-                            fontSize = 10.sp,
+                            fontSize = 11.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
@@ -665,210 +784,280 @@ private fun RunAutomationHudContent(
             }
         }
 
-        // Saved Script Selector for Current Website
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 6.dp)
-        ) {
-            ExposedDropdownMenuBox(
-                expanded = scriptMenuExpanded,
-                onExpandedChange = { scriptMenuExpanded = it },
-                modifier = Modifier.weight(1f)
+        // Script Selector Card with Quick Stepper
+        if (hasValidScript) {
+            Card(
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .menuAnchor(MenuAnchorType.PrimaryNotEditable)
-                        .clickable { scriptMenuExpanded = true }
-                        .padding(horizontal = 8.dp, vertical = 6.dp)
-                ) {
+                Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween,
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ExposedDropdownMenuBox(
+                            expanded = scriptMenuExpanded,
+                            onExpandedChange = { scriptMenuExpanded = it },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .menuAnchor(MenuAnchorType.PrimaryNotEditable)
+                                    .clickable { scriptMenuExpanded = true }
                             ) {
-                                Text(
-                                    text = currentScript.name,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                val isExactSiteMatch = currentScript.targetWebsite != "*" &&
-                                        websiteDomain.contains(currentScript.targetWebsite, ignoreCase = true)
-                                if (isExactSiteMatch) {
-                                    Surface(
-                                        shape = RoundedCornerShape(4.dp),
-                                        color = Color(0xFF10B981).copy(alpha = 0.18f)
-                                    ) {
-                                        Text(
-                                            text = "SITE MATCH",
-                                            fontSize = 8.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = Color(0xFF10B981),
-                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
-                                        )
-                                    }
-                                }
-                            }
-                            Text(
-                                text = "${currentScript.steps.size} steps • Website: ${currentScript.targetWebsite}",
-                                fontSize = 9.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        ExposedDropdownMenuDefaults.TrailingIcon(expanded = scriptMenuExpanded)
-                    }
-                }
-
-                ExposedDropdownMenu(
-                    expanded = scriptMenuExpanded,
-                    onDismissRequest = { scriptMenuExpanded = false }
-                ) {
-                    DropdownMenuItem(
-                        text = {
-                            Text(
-                                text = if (filterWebsiteOnly) "Showing scripts for ${websiteDomain.ifBlank { "this site" }} (Tap for all)"
-                                else "Showing all saved scripts (Tap for site filter)",
-                                fontSize = 10.sp,
-                                color = MaterialTheme.colorScheme.primary,
-                                fontWeight = FontWeight.Bold
-                            )
-                        },
-                        onClick = { filterWebsiteOnly = !filterWebsiteOnly }
-                    )
-                    websiteMatchedScripts.forEach { script ->
-                        val isSiteMatch = script.targetWebsite != "*" &&
-                                websiteDomain.isNotBlank() &&
-                                websiteDomain.contains(script.targetWebsite, ignoreCase = true)
-                        DropdownMenuItem(
-                            text = {
-                                Column {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                    ) {
-                                        Text(script.name, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                                        if (isSiteMatch) {
-                                            Text("• Site Match", fontSize = 9.sp, color = Color(0xFF10B981), fontWeight = FontWeight.Bold)
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Text(
+                                        text = currentScript.name,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    val isExactSiteMatch = currentScript.targetWebsite != "*" &&
+                                            websiteDomain.contains(currentScript.targetWebsite, ignoreCase = true)
+                                    if (isExactSiteMatch) {
+                                        Surface(
+                                            shape = RoundedCornerShape(4.dp),
+                                            color = Color(0xFF10B981).copy(alpha = 0.18f)
+                                        ) {
+                                            Text(
+                                                text = "READY",
+                                                fontSize = 9.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color(0xFF10B981),
+                                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                            )
                                         }
                                     }
-                                    Text(
-                                        "${script.steps.size} steps • Target: ${script.targetWebsite}",
-                                        fontSize = 10.sp,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                }
+                                Text(
+                                    text = "${currentScript.steps.size} grabbed steps • Target: ${currentScript.targetWebsite}",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+
+                            ExposedDropdownMenu(
+                                expanded = scriptMenuExpanded,
+                                onDismissRequest = { scriptMenuExpanded = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = "+ Create New Script for ${websiteDomain.ifBlank { "Page" }}",
+                                            fontSize = 11.sp,
+                                            color = Color(0xFF10B981),
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    },
+                                    onClick = {
+                                        scriptMenuExpanded = false
+                                        onSwitchToCreateScript()
+                                    }
+                                )
+                                if (savedScripts.isNotEmpty()) {
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                text = if (filterWebsiteOnly) "Filter: Only ${websiteDomain.ifBlank { "this site" }} (Tap for all)"
+                                                else "Filter: Showing all scripts (Tap to filter site)",
+                                                fontSize = 11.sp,
+                                                color = MaterialTheme.colorScheme.primary,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        },
+                                        onClick = { filterWebsiteOnly = !filterWebsiteOnly }
                                     )
                                 }
-                            },
-                            onClick = {
-                                onSelectScript(script)
-                                scriptMenuExpanded = false
+                                websiteMatchedScripts.forEach { script ->
+                                    val isSiteMatch = script.targetWebsite != "*" &&
+                                            websiteDomain.isNotBlank() &&
+                                            websiteDomain.contains(script.targetWebsite, ignoreCase = true)
+                                    DropdownMenuItem(
+                                        text = {
+                                            Column {
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                                ) {
+                                                    Text(script.name, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                                    if (isSiteMatch) {
+                                                        Text("• Match", fontSize = 10.sp, color = Color(0xFF10B981), fontWeight = FontWeight.Bold)
+                                                    }
+                                                }
+                                                Text(
+                                                    "${script.steps.size} steps • ${script.targetWebsite}",
+                                                    fontSize = 10.sp,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                        },
+                                        onClick = {
+                                            onSelectScript(script)
+                                            scriptMenuExpanded = false
+                                        }
+                                    )
+                                }
                             }
-                        )
-                    }
-                }
-            }
+                        }
 
-            // Repeat Counter Stepper right in HUD
-            Surface(
-                shape = RoundedCornerShape(8.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp)
-                ) {
-                    Text(
-                        text = "−",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(4.dp))
-                            .clickable {
-                                val next = (currentScript.repeatCount - 1).coerceAtLeast(1)
-                                onUpdateCurrentScript(currentScript.copy(repeatCount = next))
+                        // Stepper: repeat count
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.surface,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                            ) {
+                                IconButton(
+                                    onClick = {
+                                        val next = (currentScript.repeatCount - 1).coerceAtLeast(1)
+                                        onUpdateCurrentScript(currentScript.copy(repeatCount = next))
+                                    },
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Text("−", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                                }
+                                Text(
+                                    text = "${currentScript.repeatCount}x",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(horizontal = 6.dp)
+                                )
+                                IconButton(
+                                    onClick = {
+                                        val next = currentScript.repeatCount + 1
+                                        onUpdateCurrentScript(currentScript.copy(repeatCount = next))
+                                    },
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Text("+", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                                }
                             }
-                            .padding(horizontal = 6.dp, vertical = 2.dp)
-                    )
-                    Text(
-                        text = "${currentScript.repeatCount}x",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(horizontal = 2.dp)
-                    )
-                    Text(
-                        text = "+",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(4.dp))
-                            .clickable {
-                                val next = currentScript.repeatCount + 1
-                                onUpdateCurrentScript(currentScript.copy(repeatCount = next))
-                            }
-                            .padding(horizontal = 6.dp, vertical = 2.dp)
-                    )
+                        }
+                    }
                 }
             }
         }
 
-        // Quick Data Sheet, Iteration Order & Exhaustion Policy Row in HUD
-        val assignedSheet = dataSheets.firstOrNull { it.id == currentScript.dataSheetId }
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 6.dp)
+        // Gate 2: Data Sheet Selector or Create Data Sheet / Use Default
+        Card(
+            shape = RoundedCornerShape(12.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = if (assignedSheet != null) Color(0xFF6366F1).copy(alpha = 0.08f) else MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.35f)
+            ),
+            border = BorderStroke(1.dp, if (assignedSheet != null) Color(0xFF6366F1).copy(alpha = 0.3f) else MaterialTheme.colorScheme.tertiary.copy(alpha = 0.35f)),
+            modifier = Modifier.fillMaxWidth()
         ) {
-            // Data Sheet Selector Pill
-            Box(modifier = Modifier.weight(1.2f)) {
-                Surface(
-                    shape = RoundedCornerShape(6.dp),
-                    color = if (assignedSheet != null) Color(0xFF6366F1).copy(alpha = 0.14f) else MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.5f),
-                    border = BorderStroke(1.dp, if (assignedSheet != null) Color(0xFF6366F1).copy(alpha = 0.4f) else MaterialTheme.colorScheme.tertiary.copy(alpha = 0.4f)),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { sheetMenuExpanded = true }
+            Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier.fillMaxWidth().clickable { sheetMenuExpanded = true }
                 ) {
-                    Text(
-                        text = assignedSheet?.let { "Data: ${it.name} (${it.totalRows()})" } ?: "Data: Default (Random)",
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (assignedSheet != null) Color(0xFF6366F1) else MaterialTheme.colorScheme.onTertiaryContainer,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = when {
+                                assignedSheet != null -> "Data Sheet: ${assignedSheet.name}"
+                                dataSheets.isEmpty() && !confirmedDefaultData -> "No Data Sheet Created (Create or Use Default)"
+                                else -> "Data Source: Default Generator"
+                            },
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (assignedSheet != null) Color(0xFF4F46E5) else MaterialTheme.colorScheme.tertiary
+                        )
+                        Text(
+                            text = if (assignedSheet != null) {
+                                "${assignedSheet.totalRows()} rows stored • Fills fields 1 by 1 on each run"
+                            } else {
+                                "Fills grabbed fields & checkboxes using Data Sheet or Default random values"
+                            },
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Icon(
+                        imageVector = Icons.Default.KeyboardArrowDown,
+                        contentDescription = "Select sheet",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp)
                     )
                 }
+
+                // Quick buttons when no Data Sheet exists yet
+                if (dataSheets.isEmpty() && assignedSheet == null) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Button(
+                            onClick = onOpenCreateDataSheet,
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF6366F1)),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                            modifier = Modifier.weight(1f).height(34.dp).testTag("btn_hud_create_datasheet")
+                        ) {
+                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Create Data Sheet", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                        OutlinedButton(
+                            onClick = onConfirmUseDefaultData,
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                            modifier = Modifier.weight(1f).height(34.dp).testTag("btn_hud_use_default_data")
+                        ) {
+                            Text(
+                                text = if (confirmedDefaultData) "✓ Using Default Data" else "Use Default Data",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                }
+
                 androidx.compose.material3.DropdownMenu(
                     expanded = sheetMenuExpanded,
                     onDismissRequest = { sheetMenuExpanded = false }
                 ) {
                     DropdownMenuItem(
-                        text = { Text("Default (Random Every Step)", fontSize = 11.sp) },
+                        text = {
+                            Text("+ Create New Data Sheet", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF6366F1))
+                        },
                         onClick = {
-                            onUpdateCurrentScript(currentScript.copy(dataSheetId = null))
+                            sheetMenuExpanded = false
+                            onOpenCreateDataSheet()
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = {
+                            Column {
+                                Text("Use Default Random Generator", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                Text("Generates synthetic email, username, password & profile each run", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        },
+                        onClick = {
+                            onConfirmUseDefaultData()
                             sheetMenuExpanded = false
                         }
                     )
                     dataSheets.forEach { sheet ->
                         DropdownMenuItem(
-                            text = { Text("${sheet.name} (${sheet.totalRows()} rows)", fontSize = 11.sp) },
+                            text = {
+                                Column {
+                                    Text(sheet.name, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    Text("${sheet.fields.keys.size} fields • ${sheet.totalRows()} rows stored (1 by 1)", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            },
                             onClick = {
                                 onUpdateCurrentScript(currentScript.copy(dataSheetId = sheet.id))
                                 sheetMenuExpanded = false
@@ -877,33 +1066,41 @@ private fun RunAutomationHudContent(
                     }
                 }
             }
+        }
 
-            // Iteration Order Pill (Top->Bottom, Bottom->Top, Random)
-            Box(modifier = Modifier.weight(1f)) {
-                Surface(
-                    shape = RoundedCornerShape(6.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { orderMenuExpanded = true }
+        // Two-Column Configuration: 1-by-1 Order and When Finished Policy
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Surface(
+                shape = RoundedCornerShape(10.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable { orderMenuExpanded = true }
+                    .padding(vertical = 2.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
                 ) {
-                    Text(
-                        text = "Order: ${currentScript.iterationOrder.shortLabel}",
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)
-                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("1-by-1 Order", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(currentScript.iterationOrder.label, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    Icon(Icons.Default.KeyboardArrowDown, contentDescription = null, modifier = Modifier.size(16.dp))
                 }
+
                 androidx.compose.material3.DropdownMenu(
                     expanded = orderMenuExpanded,
                     onDismissRequest = { orderMenuExpanded = false }
                 ) {
                     DataIterationOrder.entries.forEach { ord ->
                         DropdownMenuItem(
-                            text = { Text(ord.label, fontSize = 11.sp) },
+                            text = { Text(ord.label, fontSize = 12.sp) },
                             onClick = {
                                 onUpdateCurrentScript(currentScript.copy(iterationOrder = ord))
                                 orderMenuExpanded = false
@@ -913,32 +1110,34 @@ private fun RunAutomationHudContent(
                 }
             }
 
-            // Exhaustion Policy Pill (Ask/Add New, Default, Stop, Loop)
-            Box(modifier = Modifier.weight(1f)) {
-                Surface(
-                    shape = RoundedCornerShape(6.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { policyMenuExpanded = true }
+            Surface(
+                shape = RoundedCornerShape(10.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable { policyMenuExpanded = true }
+                    .padding(vertical = 2.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
                 ) {
-                    Text(
-                        text = "End: ${currentScript.exhaustionPolicy.shortLabel}",
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)
-                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("When Finished", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(currentScript.exhaustionPolicy.label, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    Icon(Icons.Default.KeyboardArrowDown, contentDescription = null, modifier = Modifier.size(16.dp))
                 }
+
                 androidx.compose.material3.DropdownMenu(
                     expanded = policyMenuExpanded,
                     onDismissRequest = { policyMenuExpanded = false }
                 ) {
                     DataExhaustionPolicy.entries.forEach { pol ->
                         DropdownMenuItem(
-                            text = { Text(pol.label, fontSize = 11.sp) },
+                            text = { Text(pol.label, fontSize = 12.sp) },
                             onClick = {
                                 onUpdateCurrentScript(currentScript.copy(exhaustionPolicy = pol))
                                 policyMenuExpanded = false
@@ -949,57 +1148,65 @@ private fun RunAutomationHudContent(
             }
         }
 
-        // Action Buttons Row
+        // Action Buttons Row (Strict gate: disabled when no script exists)
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier.fillMaxWidth().padding(top = 2.dp)
         ) {
             Button(
                 onClick = { if (isPlaying) onStopPlay() else onStartPlay() },
+                enabled = isPlaying || hasValidScript,
                 colors = ButtonDefaults.buttonColors(
                     containerColor = if (isPlaying) Color(0xFFEF4444) else Color(0xFF10B981),
                     contentColor = Color.White
                 ),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
                 modifier = Modifier
                     .weight(1f)
+                    .height(48.dp)
                     .testTag("btn_hud_run_automation")
             ) {
                 Icon(
                     imageVector = if (isPlaying) Icons.Default.Stop else Icons.Default.PlayArrow,
                     contentDescription = null,
-                    modifier = Modifier.size(16.dp)
+                    modifier = Modifier.size(20.dp)
                 )
-                Spacer(modifier = Modifier.width(6.dp))
+                Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = if (isPlaying) "Stop Automation" else "Run Automation (${currentScript.repeatCount}x)",
-                    fontSize = 12.sp,
+                    text = when {
+                        isPlaying -> "Stop Automation"
+                        !hasValidScript -> "Create Script First"
+                        else -> "Run Automation (${currentScript.repeatCount}x)"
+                    },
+                    fontSize = 13.sp,
                     fontWeight = FontWeight.Bold
                 )
             }
 
             OutlinedButton(
                 onClick = onOpenScriptManager,
-                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
-                modifier = Modifier.testTag("btn_hud_manage_studio")
+                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
+                modifier = Modifier.height(48.dp).testTag("btn_hud_manage_studio")
             ) {
-                Icon(Icons.Default.Code, contentDescription = null, modifier = Modifier.size(14.dp))
-                Spacer(modifier = Modifier.width(4.dp))
-                Text("Manage Script & Data", fontSize = 11.sp)
+                Icon(Icons.Default.Code, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Studio", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
             }
         }
     }
 }
 
 /**
- * Tab Content: Create Automation (Grabbing Elements & Inline HUD Editing)
+ * Tab Content: Create Automation (No-Type Element Grabbing & Instant Ready Use)
  */
 @Composable
 private fun CreateAutomationHudContent(
     executionState: AutomationExecutionState,
     currentScript: AutomationScript,
     scannedElements: List<ScannedElement>,
+    dataSheets: List<DataSheet>,
+    currentUrl: String,
     websiteDomain: String,
     onStartFreshScript: () -> Unit,
     onToggleRecord: () -> Unit,
@@ -1013,103 +1220,227 @@ private fun CreateAutomationHudContent(
     onDeleteStep: (String) -> Unit,
     onOpenAddNavigate: () -> Unit,
     onOpenSaveScript: () -> Unit,
+    onOpenCreateDataSheet: () -> Unit,
+    onNavigateWebViewToUrl: (String) -> Unit,
+    onReadyAndRun: () -> Unit,
     onOpenScriptManager: () -> Unit
 ) {
     val isRecording = executionState.status == AutomationStatus.RECORDING
+    val isOnHomeScreen = currentUrl.isBlank() || currentUrl.startsWith("aura://")
+    var targetSiteInput by remember { mutableStateOf("") }
 
-    Column(modifier = Modifier.fillMaxWidth()) {
-        // Quick Action Tools Row: New Script, Grab Elements, Record, + Website/Page, Save
+    Column(modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
+        // If user clicked the Robot icon on the Main Screen (aura://home), let them enter a website URL right here to open & auto-create script
+        if (isOnHomeScreen) {
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)),
+                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = "Step 1: Open a Website to Create Your Script",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        OutlinedTextField(
+                            value = targetSiteInput,
+                            onValueChange = { targetSiteInput = it },
+                            placeholder = { Text("Enter website URL (e.g. github.com/signup)", fontSize = 11.sp) },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Button(
+                            onClick = {
+                                val raw = targetSiteInput.trim()
+                                if (raw.isNotBlank()) {
+                                    onNavigateWebViewToUrl(raw)
+                                }
+                            },
+                            enabled = targetSiteInput.isNotBlank(),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp)
+                        ) {
+                            Text("Open & Grab", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
+
+        // No-Type Recording Helper Banner
+        Surface(
+            shape = RoundedCornerShape(10.dp),
+            color = Color(0xFF10B981).copy(alpha = 0.12f),
+            border = BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.35f)),
+            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp)
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "No Typing Required — Tap or Grab Elements",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF059669)
+                    )
+                    Text(
+                        text = "Tapped/grabbed fields, checkboxes & buttons are auto-mapped to fill from your Data Sheet or Default on start.",
+                        fontSize = 10.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                if (dataSheets.isEmpty()) {
+                    TextButton(
+                        onClick = onOpenCreateDataSheet,
+                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        Text("+ Data Sheet", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+
+        // Row 1: Primary active capture controls
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            modifier = Modifier.fillMaxWidth()
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)
         ) {
-            // New Clean Script for this Website
-            OutlinedButton(
-                onClick = onStartFreshScript,
-                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp),
-                modifier = Modifier.weight(0.85f).testTag("btn_new_script_hud")
-            ) {
-                Icon(Icons.Default.NoteAdd, contentDescription = null, modifier = Modifier.size(12.dp))
-                Spacer(modifier = Modifier.width(2.dp))
-                Text("New", fontSize = 10.sp)
-            }
-
-            // Grab Elements
-            OutlinedButton(
-                onClick = { onTriggerScan() },
-                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp),
-                modifier = Modifier.weight(0.95f).testTag("btn_grab_elements")
-            ) {
-                Icon(
-                    imageVector = Icons.Default.DocumentScanner,
-                    contentDescription = null,
-                    tint = Color(0xFF06B6D4),
-                    modifier = Modifier.size(12.dp)
-                )
-                Spacer(modifier = Modifier.width(2.dp))
-                Text("Grab", fontSize = 10.sp)
-            }
-
-            // Live Record
             Button(
                 onClick = onToggleRecord,
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = if (isRecording) Color(0xFFEF4444) else MaterialTheme.colorScheme.surfaceVariant,
-                    contentColor = if (isRecording) Color.White else MaterialTheme.colorScheme.onSurface
+                    containerColor = if (isRecording) Color(0xFFEF4444) else MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = if (isRecording) Color.White else MaterialTheme.colorScheme.onPrimaryContainer
                 ),
-                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp),
-                modifier = Modifier.weight(1f).testTag("btn_record_clicks")
+                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
+                modifier = Modifier.weight(1f).height(44.dp).testTag("btn_record_clicks")
             ) {
                 Icon(
                     imageVector = if (isRecording) Icons.Default.Stop else Icons.Default.FiberManualRecord,
                     contentDescription = null,
                     tint = if (isRecording) Color.White else Color(0xFFEF4444),
-                    modifier = Modifier.size(12.dp)
+                    modifier = Modifier.size(16.dp)
                 )
-                Spacer(modifier = Modifier.width(2.dp))
-                Text(if (isRecording) "Rec On" else "Record", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = if (isRecording) "Tap Elements (Live)" else "Tap to Grab Mode",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold
+                )
             }
 
-            // + Navigate to another Page / Website
-            OutlinedButton(
-                onClick = onOpenAddNavigate,
-                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp),
-                modifier = Modifier.weight(1.05f).testTag("btn_add_navigate_step")
-            ) {
-                Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, modifier = Modifier.size(12.dp))
-                Spacer(modifier = Modifier.width(2.dp))
-                Text("+ Page", fontSize = 10.sp)
-            }
-
-            // Save Script
             Button(
-                onClick = onOpenSaveScript,
-                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp),
-                modifier = Modifier.weight(0.9f).testTag("btn_save_script_hud")
+                onClick = { onTriggerScan() },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFF06B6D4).copy(alpha = 0.18f),
+                    contentColor = Color(0xFF0891B2)
+                ),
+                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
+                modifier = Modifier.weight(1f).height(44.dp).testTag("btn_grab_elements")
             ) {
-                Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(12.dp))
-                Spacer(modifier = Modifier.width(2.dp))
-                Text("Save", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                Icon(
+                    imageVector = Icons.Default.DocumentScanner,
+                    contentDescription = null,
+                    tint = Color(0xFF0891B2),
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = "Grab Elements",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold
+                )
             }
         }
 
-        // Scanned DOM Elements Strip (shows grabbed elements & allows editing or adding them in HUD)
+        // Row 2: Workflow Actions: New Script, + Next Page / URL, Save Script
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)
+        ) {
+            OutlinedButton(
+                onClick = onStartFreshScript,
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+                modifier = Modifier.weight(1f).testTag("btn_new_script_hud")
+            ) {
+                Icon(Icons.Default.NoteAdd, contentDescription = null, modifier = Modifier.size(14.dp))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Reset Script", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+            }
+
+            OutlinedButton(
+                onClick = onOpenAddNavigate,
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+                modifier = Modifier.weight(1.1f).testTag("btn_add_navigate_step")
+            ) {
+                Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, modifier = Modifier.size(14.dp))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("+ Next Page", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+            }
+
+            Button(
+                onClick = onOpenSaveScript,
+                enabled = currentScript.steps.isNotEmpty(),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                modifier = Modifier.weight(1.1f).testTag("btn_save_script_hud")
+            ) {
+                Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(14.dp))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Save Script", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+
+        // Instant "Ready — Start Automation Now" button once elements are grabbed
+        if (currentScript.steps.isNotEmpty()) {
+            Button(
+                onClick = onReadyAndRun,
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981), contentColor = Color.White),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 6.dp)
+                    .height(42.dp)
+                    .testTag("btn_ready_start_from_create")
+            ) {
+                Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = "Ready (${currentScript.steps.size} Elements) — Start Automation Now",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+
+        // Scanned DOM Elements Strip
         if (scannedElements.isNotEmpty()) {
-            Column(modifier = Modifier.padding(top = 8.dp)) {
+            Column(modifier = Modifier.padding(top = 4.dp)) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(bottom = 4.dp)
+                        .padding(bottom = 6.dp)
                 ) {
                     Text(
-                        text = "Grabbed Page Elements (${scannedElements.size}) • Tap + or Edit",
-                        fontSize = 10.sp,
+                        text = "Detected Page Elements (${scannedElements.size})",
+                        fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFF06B6D4)
+                        color = Color(0xFF0891B2)
                     )
 
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -1122,29 +1453,30 @@ private fun CreateAutomationHudContent(
                         ) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(3.dp),
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                             ) {
-                                Icon(Icons.Default.AutoFixHigh, contentDescription = null, tint = Color(0xFF6366F1), modifier = Modifier.size(11.dp))
-                                Text("Capture All Elements", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color(0xFF6366F1))
+                                Icon(Icons.Default.AutoFixHigh, contentDescription = null, tint = Color(0xFF6366F1), modifier = Modifier.size(13.dp))
+                                Text("Rebuild Ready Steps", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF6366F1))
                             }
                         }
 
                         Text(
                             text = "Hide",
-                            fontSize = 9.sp,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier
                                 .clip(RoundedCornerShape(4.dp))
                                 .clickable { onClearScan() }
-                                .padding(horizontal = 4.dp, vertical = 2.dp)
+                                .padding(horizontal = 6.dp, vertical = 4.dp)
                         )
                     }
                 }
 
                 LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    modifier = Modifier.fillMaxWidth()
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)
                 ) {
                     items(scannedElements) { element ->
                         ScannedElementCard(
@@ -1157,54 +1489,54 @@ private fun CreateAutomationHudContent(
             }
         }
 
-        // Editable Captured Script Steps List in HUD
-        Column(modifier = Modifier.padding(top = 8.dp)) {
+        // Captured Script Steps List in HUD
+        Column(modifier = Modifier.padding(top = 4.dp)) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(bottom = 4.dp)
+                    .padding(bottom = 6.dp)
             ) {
                 Text(
-                    text = "Captured Elements in Script (${currentScript.steps.size})",
-                    fontSize = 11.sp,
+                    text = "Ready Script Elements (${currentScript.steps.size})",
+                    fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
                     text = "Manage in Studio →",
-                    fontSize = 10.sp,
+                    fontSize = 11.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier
                         .clip(RoundedCornerShape(4.dp))
                         .clickable { onOpenScriptManager() }
-                        .padding(horizontal = 4.dp, vertical = 1.dp)
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
                 )
             }
 
             if (currentScript.steps.isEmpty()) {
                 Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(vertical = 4.dp)
                 ) {
                     Text(
-                        text = "No elements captured yet. Tap 'Grab' or tap elements on the webpage to capture them. Only elements are stored; form values will be filled from 'My Data'.",
-                        fontSize = 10.sp,
+                        text = "No elements grabbed yet. Tap 'Grab Elements' to auto-prepare all fields, checkboxes, and buttons on the page, or simply tap elements on the page directly (no typing required).",
+                        fontSize = 11.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(8.dp)
+                        modifier = Modifier.padding(12.dp)
                     )
                 }
             } else {
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(max = 135.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                        .heightIn(max = 165.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     itemsIndexed(currentScript.steps) { index, step ->
                         EditableHudStepCard(
@@ -1224,6 +1556,184 @@ private fun CreateAutomationHudContent(
 }
 
 /**
+ * Dialog shown when user clicks Run Automation and no Data Sheet exists yet:
+ * User can either Create a Data Sheet or Use Default Data.
+ */
+@Composable
+fun DataSheetChoiceBeforeRunDialog(
+    onDismiss: () -> Unit,
+    onUseDefaultAndRun: () -> Unit,
+    onCreateDataSheet: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Choose Data Source to Fill Fields", fontSize = 16.sp, fontWeight = FontWeight.Bold) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = "No custom Data Sheet has been created yet. How should the automation engine fill your grabbed fields?",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("• Create Data Sheet: Paste your own emails, usernames, passwords & phone numbers (used 1 by 1).", fontSize = 11.sp)
+                        Text("• Use Default Data: Automatically generate realistic random credentials for every run.", fontSize = 11.sp)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = onCreateDataSheet) {
+                    Text("+ Create Data Sheet", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+                Button(
+                    onClick = onUseDefaultAndRun,
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981))
+                ) {
+                    Text("Use Default & Run", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
+}
+
+/**
+ * Quick Dialog to create a Data Sheet directly from the HUD
+ */
+@Composable
+fun QuickCreateDataSheetDialog(
+    onDismiss: () -> Unit,
+    onSaveSheet: (DataSheet) -> Unit
+) {
+    var sheetName by remember { mutableStateOf("My Data Sheet") }
+    var emailsRaw by remember { mutableStateOf("") }
+    var usernamesRaw by remember { mutableStateOf("") }
+    var passwordsRaw by remember { mutableStateOf("") }
+    var phonesRaw by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Create Data Sheet (Used 1 by 1)", fontSize = 16.sp, fontWeight = FontWeight.Bold) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    OutlinedTextField(
+                        value = sheetName,
+                        onValueChange = { sheetName = it },
+                        label = { Text("Sheet Name", fontSize = 11.sp) },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    TextButton(
+                        onClick = {
+                            val records = List(5) { AutomationDataGenerator.generateSingleRandomRecord() }
+                            emailsRaw = records.joinToString("\n") { it.email }
+                            usernamesRaw = records.joinToString("\n") { it.username }
+                            passwordsRaw = records.joinToString("\n") { it.password }
+                            phonesRaw = records.joinToString("\n") { it.phoneNumber }
+                        }
+                    ) {
+                        Text("Auto-Fill 5 Rows", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                OutlinedTextField(
+                    value = emailsRaw,
+                    onValueChange = { emailsRaw = it },
+                    label = { Text("Emails (1 per line or comma-separated)", fontSize = 11.sp) },
+                    placeholder = { Text("user1@mail.com\nuser2@mail.com") },
+                    maxLines = 3,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                OutlinedTextField(
+                    value = usernamesRaw,
+                    onValueChange = { usernamesRaw = it },
+                    label = { Text("Usernames (1 per line)", fontSize = 11.sp) },
+                    placeholder = { Text("alex_01\nalex_02") },
+                    maxLines = 2,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    OutlinedTextField(
+                        value = passwordsRaw,
+                        onValueChange = { passwordsRaw = it },
+                        label = { Text("Passwords", fontSize = 11.sp) },
+                        placeholder = { Text("Pass#1234") },
+                        maxLines = 2,
+                        modifier = Modifier.weight(1f)
+                    )
+                    OutlinedTextField(
+                        value = phonesRaw,
+                        onValueChange = { phonesRaw = it },
+                        label = { Text("Phones", fontSize = 11.sp) },
+                        placeholder = { Text("4155551234") },
+                        maxLines = 2,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    fun parseList(raw: String) = raw.lines()
+                        .flatMap { it.split(",") }
+                        .map { it.trim() }
+                        .filter { it.isNotBlank() }
+
+                    val fieldsMap = mutableMapOf<String, List<String>>()
+                    parseList(emailsRaw).takeIf { it.isNotEmpty() }?.let { fieldsMap["email"] = it }
+                    parseList(usernamesRaw).takeIf { it.isNotEmpty() }?.let { fieldsMap["username"] = it }
+                    parseList(passwordsRaw).takeIf { it.isNotEmpty() }?.let {
+                        fieldsMap["password"] = it
+                        fieldsMap["confirmPassword"] = it
+                    }
+                    parseList(phonesRaw).takeIf { it.isNotEmpty() }?.let { fieldsMap["phoneNumber"] = it }
+
+                    if (fieldsMap.isEmpty()) {
+                        val generated = List(4) { AutomationDataGenerator.generateSingleRandomRecord() }
+                        fieldsMap["email"] = generated.map { it.email }
+                        fieldsMap["username"] = generated.map { it.username }
+                        fieldsMap["password"] = generated.map { it.password }
+                        fieldsMap["confirmPassword"] = generated.map { it.password }
+                        fieldsMap["phoneNumber"] = generated.map { it.phoneNumber }
+                    }
+
+                    onSaveSheet(
+                        DataSheet(
+                            id = UUID.randomUUID().toString(),
+                            name = sheetName.ifBlank { "My Data Sheet" },
+                            fields = fieldsMap
+                        )
+                    )
+                }
+            ) {
+                Text("Save & Link Data Sheet")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
+}
+
+/**
  * Step Card with direct Edit, Reorder, and Delete buttons in HUD
  */
 @Composable
@@ -1239,7 +1749,9 @@ private fun EditableHudStepCard(
     val actionColor = when (step.actionType) {
         AutomationActionType.INPUT -> Color(0xFF3B82F6)
         AutomationActionType.CLICK -> Color(0xFF10B981)
-        AutomationActionType.NAVIGATE -> Color(0xFF8B5CF6)
+        AutomationActionType.CHECKBOX -> Color(0xFF06B6D4)
+        AutomationActionType.RADIO -> Color(0xFF8B5CF6)
+        AutomationActionType.NAVIGATE -> Color(0xFFEC4899)
         AutomationActionType.SELECT_DROPDOWN -> Color(0xFFD946EF)
         AutomationActionType.SELECT_COUNTRY_CODE -> Color(0xFF10B981)
         AutomationActionType.SELECT_DATE -> Color(0xFF0284C7)
@@ -1251,9 +1763,9 @@ private fun EditableHudStepCard(
     }
 
     Surface(
-        shape = RoundedCornerShape(8.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
-        border = BorderStroke(1.dp, actionColor.copy(alpha = 0.3f)),
+        shape = RoundedCornerShape(10.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+        border = BorderStroke(1.dp, actionColor.copy(alpha = 0.35f)),
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onEdit() }
@@ -1261,37 +1773,37 @@ private fun EditableHudStepCard(
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.weight(1f)
             ) {
                 Surface(
-                    shape = RoundedCornerShape(4.dp),
-                    color = actionColor.copy(alpha = 0.2f)
+                    shape = RoundedCornerShape(6.dp),
+                    color = actionColor.copy(alpha = 0.18f)
                 ) {
                     Text(
                         text = "${index + 1}. ${step.actionType.name}",
-                        fontSize = 9.sp,
+                        fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
                         color = actionColor,
-                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
                     )
                 }
 
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = step.elementDescription.ifBlank { step.selector },
-                        fontSize = 10.sp,
+                        fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurface,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                     val dataBindingLabel = if (!step.variableKey.isNullOrBlank()) {
-                        "My Data Field: {{${step.variableKey}}} • ${step.selector}"
+                        "Fills from Data Sheet/Default: {{${step.variableKey}}} • ${step.selector}"
                     } else if (step.actionType == AutomationActionType.NAVIGATE) {
                         "Target URL: ${step.value.ifBlank { step.selector }}"
                     } else {
@@ -1299,7 +1811,7 @@ private fun EditableHudStepCard(
                     }
                     Text(
                         text = dataBindingLabel,
-                        fontSize = 8.sp,
+                        fontSize = 10.sp,
                         color = MaterialTheme.colorScheme.primary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -1309,35 +1821,35 @@ private fun EditableHudStepCard(
 
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (index > 0) {
-                    IconButton(onClick = onMoveUp, modifier = Modifier.size(22.dp)) {
-                        Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Move Up", modifier = Modifier.size(13.dp))
+                    IconButton(onClick = onMoveUp, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Move Up", modifier = Modifier.size(18.dp))
                     }
                 }
                 if (index < totalCount - 1) {
-                    IconButton(onClick = onMoveDown, modifier = Modifier.size(22.dp)) {
-                        Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Move Down", modifier = Modifier.size(13.dp))
+                    IconButton(onClick = onMoveDown, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Move Down", modifier = Modifier.size(18.dp))
                     }
                 }
                 IconButton(
                     onClick = onEdit,
-                    modifier = Modifier.size(24.dp).testTag("btn_edit_step_$index")
+                    modifier = Modifier.size(32.dp).testTag("btn_edit_step_$index")
                 ) {
                     Icon(
                         imageVector = Icons.Default.Edit,
                         contentDescription = "Edit Step",
                         tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(13.dp)
+                        modifier = Modifier.size(16.dp)
                     )
                 }
                 IconButton(
                     onClick = onDelete,
-                    modifier = Modifier.size(24.dp).testTag("btn_del_step_$index")
+                    modifier = Modifier.size(32.dp).testTag("btn_delete_step_$index")
                 ) {
                     Icon(
                         imageVector = Icons.Default.Delete,
                         contentDescription = "Delete Step",
                         tint = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.size(13.dp)
+                        modifier = Modifier.size(16.dp)
                     )
                 }
             }
@@ -1347,7 +1859,6 @@ private fun EditableHudStepCard(
 
 /**
  * Dialog to edit a captured step directly inside the HUD or Manage Script screen.
- * Includes quick-pick chips for binding the element to any "My Data" field key!
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -1373,7 +1884,6 @@ fun StepEditDialog(
         title = { Text("Edit Captured Element Step", fontSize = 16.sp, fontWeight = FontWeight.Bold) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                // Action Type Dropdown
                 ExposedDropdownMenuBox(
                     expanded = actionMenuOpen,
                     onExpandedChange = { actionMenuOpen = it }
@@ -1418,7 +1928,6 @@ fun StepEditDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
 
-                // Bind to "My Data" Field Key
                 Text(
                     text = "Bind to 'My Data' Field (used 1 by 1 on repeat):",
                     fontSize = 11.sp,
@@ -1685,7 +2194,6 @@ fun SaveScriptDialog(
                     )
                 }
 
-                // Select Data Sheet ("My Data" vs "Default")
                 ExposedDropdownMenuBox(
                     expanded = sheetMenuOpen,
                     onExpandedChange = { sheetMenuOpen = it }
@@ -1726,7 +2234,6 @@ fun SaveScriptDialog(
                     }
                 }
 
-                // Select 1-by-1 Order
                 ExposedDropdownMenuBox(
                     expanded = orderMenuOpen,
                     onExpandedChange = { orderMenuOpen = it }
@@ -1757,7 +2264,6 @@ fun SaveScriptDialog(
                     }
                 }
 
-                // Select Exhaustion Policy
                 ExposedDropdownMenuBox(
                     expanded = policyMenuOpen,
                     onExpandedChange = { policyMenuOpen = it }
@@ -1941,6 +2447,8 @@ fun ScannedElementCard(
         ElementSemanticType.ADDRESS, ElementSemanticType.ADDRESS_LINE_2, ElementSemanticType.CITY, ElementSemanticType.STATE -> Pair("ADDRESS", Color(0xFF64748B))
         ElementSemanticType.ZIP_PIN -> Pair("ZIP", Color(0xFF6366F1))
         ElementSemanticType.CHECKBOX_TERMS -> Pair("TERMS", Color(0xFF059669))
+        ElementSemanticType.CHECKBOX -> Pair("CHECKBOX", Color(0xFF06B6D4))
+        ElementSemanticType.RADIO_OPTION -> Pair("RADIO", Color(0xFF8B5CF6))
         ElementSemanticType.SUBMIT_BUTTON -> Pair("SUBMIT", Color(0xFF10B981))
         ElementSemanticType.NEXT_BUTTON -> Pair("NEXT", Color(0xFF0284C7))
         ElementSemanticType.DROPDOWN -> Pair("SELECT", Color(0xFFD946EF))
@@ -1951,14 +2459,14 @@ fun ScannedElementCard(
     Card(
         shape = RoundedCornerShape(10.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
         ),
-        border = BorderStroke(1.dp, badgeColor.copy(alpha = 0.4f)),
+        border = BorderStroke(1.dp, badgeColor.copy(alpha = 0.45f)),
         modifier = modifier
-            .width(178.dp)
+            .width(195.dp)
             .clickable { onEdit() }
     ) {
-        Column(modifier = Modifier.padding(6.dp)) {
+        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -1970,40 +2478,38 @@ fun ScannedElementCard(
                 ) {
                     Text(
                         text = badgeText,
-                        fontSize = 8.sp,
+                        fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
                         color = badgeColor,
-                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                     )
                 }
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     IconButton(
                         onClick = onEdit,
-                        modifier = Modifier.size(20.dp)
+                        modifier = Modifier.size(28.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.Edit,
                             contentDescription = "Edit grabbed element",
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(12.dp)
+                            modifier = Modifier.size(15.dp)
                         )
                     }
                     IconButton(
                         onClick = onAdd,
-                        modifier = Modifier.size(22.dp)
+                        modifier = Modifier.size(28.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.Add,
                             contentDescription = "Add element to script",
                             tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(14.dp)
+                            modifier = Modifier.size(18.dp)
                         )
                     }
                 }
             }
-
-            Spacer(modifier = Modifier.height(2.dp))
 
             val displayTitle = element.placeholder.ifBlank {
                 element.nameAttr.ifBlank {
@@ -2013,7 +2519,7 @@ fun ScannedElementCard(
 
             Text(
                 text = displayTitle,
-                fontSize = 10.sp,
+                fontSize = 12.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
@@ -2022,7 +2528,7 @@ fun ScannedElementCard(
 
             Text(
                 text = element.selector,
-                fontSize = 8.sp,
+                fontSize = 10.sp,
                 fontFamily = FontFamily.Monospace,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,

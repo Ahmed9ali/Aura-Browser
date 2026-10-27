@@ -12,6 +12,7 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -20,9 +21,15 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.ui.components.AuraToastBanner
+import com.example.ui.components.AutomationHUD
 import com.example.model.AutomationActionType
 import com.example.model.AutomationStatus
 import com.example.model.AutomationStep
@@ -46,6 +53,16 @@ import com.example.viewmodel.BrowserViewModel
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        try {
+            val webViewDir = java.io.File(applicationContext.dataDir, "app_webview")
+            if (webViewDir.exists()) {
+                webViewDir.listFiles()?.forEach { f ->
+                    if (f.name.contains("variations", ignoreCase = true) || f.name.contains("seed", ignoreCase = true)) {
+                        f.delete()
+                    }
+                }
+            }
+        } catch (_: Exception) {}
         enableEdgeToEdge()
         setContent {
             val viewModel: BrowserViewModel = viewModel()
@@ -69,6 +86,7 @@ fun BrowserApp(
     viewModel: BrowserViewModel,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val activeTab = uiState.activeTab
     val activeGroup = uiState.tabGroups.find { it.id == activeTab?.groupId }
@@ -117,6 +135,13 @@ fun BrowserApp(
                     },
                     onToggleAutomation = {
                         viewModel.toggleAutomationHud()
+                    },
+                    onCopyUrl = {
+                        activeTab?.let { tab ->
+                            if (!tab.url.startsWith("aura://")) {
+                                viewModel.copyToClipboard(context, tab.url)
+                            }
+                        }
                     }
                 )
             }
@@ -145,7 +170,15 @@ fun BrowserApp(
             )
         },
         snackbarHost = {
-            SnackbarHost(hostState = snackbarHostState)
+            SnackbarHost(
+                hostState = snackbarHostState,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 8.dp)
+                    .testTag("aura_snackbar_host")
+            ) { snackbarData ->
+                AuraToastBanner(message = snackbarData.visuals.message)
+            }
         },
         modifier = modifier.fillMaxSize()
     ) { innerPadding ->
@@ -190,6 +223,8 @@ fun BrowserApp(
                             selectedCategory = uiState.selectedCategory,
                             currentSearchEngine = uiState.settings.searchEngine,
                             history = uiState.history,
+                            dismissedClipboardTexts = uiState.dismissedClipboardTexts,
+                            onDismissClipboard = { text -> viewModel.dismissClipboardText(text) },
                             onQueryChange = { q -> viewModel.updateSearchQuery(q) },
                             onCategorySelect = { cat -> viewModel.selectCategory(cat) },
                             onSearchEngineSelect = { engine -> viewModel.setSearchEngine(engine) },
@@ -232,7 +267,8 @@ fun BrowserApp(
                             onOpenBookmark = { url -> viewModel.loadUrl(url) },
                             onOpenInNewTab = { url, title -> viewModel.openNewTab(url = url, title = title) },
                             onDeleteBookmark = { id -> viewModel.removeBookmark(id) },
-                            onAddBookmark = { title, url, folder -> viewModel.addBookmark(title, url, folder) }
+                            onAddBookmark = { title, url, folder -> viewModel.addBookmark(title, url, folder) },
+                            onCopyUrl = { url -> viewModel.copyToClipboard(context, url) }
                         )
                     }
 
@@ -244,6 +280,7 @@ fun BrowserApp(
                             onDeleteHistoryItem = { id -> viewModel.removeHistoryItem(id) },
                             onClearAllHistory = { viewModel.clearHistory() },
                             onClearTodayHistory = { viewModel.clearTodayHistory() },
+                            onCopyUrl = { url -> viewModel.copyToClipboard(context, url) },
                             onNavigateBack = {
                                 if (activeTab != null && !activeTab.url.startsWith("aura://") && activeTab.url != "about:blank") {
                                     viewModel.navigateTo(NavScreen.WEB_PAGE)
@@ -350,6 +387,76 @@ fun BrowserApp(
                             viewModel.navigateTo(NavScreen.HOME)
                         }
                     }
+                }
+            }
+
+            // Show Floating Automation HUD on the Main Screen (HOME) when user clicks the Robot icon
+            if (uiState.currentScreen == NavScreen.HOME && automationExecutionState.isHudVisible) {
+                val script by viewModel.automationEngine.currentScript.collectAsStateWithLifecycle()
+                val savedScripts by viewModel.automationEngine.savedScripts.collectAsStateWithLifecycle()
+                val dataSheets by viewModel.automationEngine.dataSheets.collectAsStateWithLifecycle()
+                val scannedElements by viewModel.automationEngine.scannedElements.collectAsStateWithLifecycle()
+                val homeUrl = activeTab?.url ?: "aura://home"
+
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 12.dp)
+                ) {
+                    AutomationHUD(
+                        executionState = automationExecutionState,
+                        currentScript = script,
+                        savedScripts = savedScripts,
+                        dataSheets = dataSheets,
+                        currentUrl = homeUrl,
+                        scannedElements = scannedElements,
+                        onSelectMode = { mode -> viewModel.automationEngine.setHudMode(mode, homeUrl) },
+                        onSelectScript = { viewModel.automationEngine.selectScript(it) },
+                        onUpdateCurrentScript = { viewModel.automationEngine.updateCurrentScript(it) },
+                        onStartFreshScript = { viewModel.automationEngine.startFreshRecordingScript(homeUrl) },
+                        onSaveCurrentScript = { name, web, sheetId, order, policy, repeatCount ->
+                            viewModel.automationEngine.saveCurrentAsScript(name, web, sheetId, order, policy, repeatCount)
+                        },
+                        onUpdateStep = { viewModel.automationEngine.updateStep(it) },
+                        onMoveStep = { stepId, dir -> viewModel.automationEngine.moveStep(stepId, dir) },
+                        onDeleteStep = { viewModel.automationEngine.removeStep(it) },
+                        onAddStep = { viewModel.automationEngine.addStep(it) },
+                        onUpdateScannedElement = { viewModel.automationEngine.updateScannedElement(it) },
+                        onToggleRecord = { viewModel.automationEngine.toggleRecording() },
+                        onStartPlay = {
+                            val targetUrl = script.targetUrl.ifBlank {
+                                if (script.targetWebsite != "*" && script.targetWebsite.isNotBlank()) {
+                                    "https://${script.targetWebsite}"
+                                } else ""
+                            }
+                            if (targetUrl.isNotBlank() && !targetUrl.startsWith("aura://")) {
+                                viewModel.loadUrl(targetUrl)
+                            }
+                            viewModel.automationEngine.startPlayback()
+                        },
+                        onStopPlay = { viewModel.automationEngine.stopPlayback() },
+                        onTriggerScan = {
+                            if (homeUrl.startsWith("aura://")) {
+                                viewModel.showMessage("Open a website first to grab its page elements")
+                            } else {
+                                viewModel.automationEngine.triggerScan()
+                            }
+                        },
+                        onClearScan = { viewModel.automationEngine.clearScanHighlights() },
+                        onAddScannedElement = { element -> viewModel.automationEngine.addScannedElementToScript(element) },
+                        onAutoMapAllScanned = { viewModel.automationEngine.autoMapAllScannedElements() },
+                        onNavigateWebViewToUrl = { targetUrl ->
+                            viewModel.executeSearch(targetUrl)
+                        },
+                        onResolveExhaustionStop = { viewModel.automationEngine.resolveExhaustionWithStop() },
+                        onResolveExhaustionDefault = { viewModel.automationEngine.resolveExhaustionWithDefault() },
+                        onResolveExhaustionAddNew = { fieldKey, newValues ->
+                            viewModel.automationEngine.resolveExhaustionWithNewData(fieldKey, newValues)
+                        },
+                        onSaveDataSheet = { sheet -> viewModel.automationEngine.saveDataSheet(sheet) },
+                        onOpenScriptManager = { viewModel.openAutomationManager() },
+                        onCloseHud = { viewModel.automationEngine.setHudVisible(false) }
+                    )
                 }
             }
         }

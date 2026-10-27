@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -12,7 +13,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
@@ -61,7 +61,17 @@ import com.example.model.SpeedDial
 import com.example.model.ThemeMode
 import com.example.ui.components.ManageSpeedDialsDialog
 import com.example.ui.components.SpeedDialEditDialog
+import com.example.ui.theme.ExpressiveCardShape
+import com.example.ui.theme.ExpressiveChipShape
+import com.example.ui.theme.ExpressiveDialogShape
+import com.example.ui.theme.ExpressivePillShape
+import com.example.ui.theme.ExpressiveSquircleShape
 
+/**
+ * Material 3 Expressive Settings Screen
+ * Features expressive rounded container sections, squircle icon badges,
+ * and high-contrast tonal surface layering.
+ */
 @Composable
 fun SettingsScreen(
     settings: BrowserSettings,
@@ -96,28 +106,42 @@ fun SettingsScreen(
         // Settings Header
         Surface(
             color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 2.dp,
+            tonalElevation = 3.dp,
             modifier = Modifier.fillMaxWidth()
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 14.dp)
+                    .padding(horizontal = 18.dp, vertical = 14.dp)
             ) {
-                Icon(
-                    imageVector = Icons.Default.Settings,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(24.dp)
-                )
-                Text(
-                    text = "Browser Customization",
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
+                Surface(
+                    shape = ExpressiveChipShape,
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.Settings,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
+                Column {
+                    Text(
+                        text = "Browser Customization",
+                        style = MaterialTheme.typography.titleLarge,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "Settings, preferences & layout controls",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
         }
 
@@ -129,20 +153,23 @@ fun SettingsScreen(
             // Search & Discovery Section
             item {
                 SettingsSectionCard(title = "Search & Suggestions Engine") {
-                    // Search Engine Picker
                     SettingsClickableRow(
                         icon = Icons.Default.Search,
+                        badgeColor = Color(0xFF0284C7),
                         title = "Default Search Engine",
                         subtitle = settings.searchEngine.displayName,
                         onClick = { showEngineDialog = true },
                         testTag = "setting_search_engine"
                     )
 
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                    HorizontalDivider(
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                        modifier = Modifier.padding(horizontal = 16.dp)
+                    )
 
-                    // Suggestions Engine Toggle
                     SettingsSwitchRow(
                         icon = Icons.Default.Psychology,
+                        badgeColor = Color(0xFF8B5CF6),
                         title = "Personalized Suggestions",
                         subtitle = "Real-time query discovery and smart domain completion",
                         checked = settings.suggestionsEnabled,
@@ -157,6 +184,7 @@ fun SettingsScreen(
                 SettingsSectionCard(title = "Privacy & Security") {
                     SettingsSwitchRow(
                         icon = Icons.Default.Security,
+                        badgeColor = Color(0xFF6366F1),
                         title = "Ad & Tracker Shield",
                         subtitle = "Block third-party tracking scripts and intrusive ads",
                         checked = settings.adShieldEnabled,
@@ -164,10 +192,14 @@ fun SettingsScreen(
                         testTag = "setting_toggle_shield"
                     )
 
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                    HorizontalDivider(
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                        modifier = Modifier.padding(horizontal = 16.dp)
+                    )
 
                     SettingsClickableRow(
                         icon = Icons.Default.DeleteSweep,
+                        badgeColor = Color(0xFFF43F5E),
                         title = "Clear Browsing Data",
                         subtitle = "Clear browsing history and cached data",
                         onClick = { showClearConfirmDialog = true },
@@ -181,6 +213,7 @@ fun SettingsScreen(
                 SettingsSectionCard(title = "Browsing Experience") {
                     SettingsClickableRow(
                         icon = Icons.Default.DarkMode,
+                        badgeColor = Color(0xFFF59E0B),
                         title = "Theme Appearance",
                         subtitle = when (settings.themeMode) {
                             ThemeMode.SYSTEM -> "System Default"
@@ -191,10 +224,14 @@ fun SettingsScreen(
                         testTag = "setting_theme_mode"
                     )
 
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                    HorizontalDivider(
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                        modifier = Modifier.padding(horizontal = 16.dp)
+                    )
 
                     SettingsSwitchRow(
                         icon = Icons.Default.Computer,
+                        badgeColor = Color(0xFF0D9488),
                         title = "Desktop Site by Default",
                         subtitle = "Request desktop version of web pages automatically",
                         checked = settings.desktopModeDefault,
@@ -207,9 +244,9 @@ fun SettingsScreen(
             // Home Screen Customization Section
             item {
                 SettingsSectionCard(title = "Home Screen Customization") {
-                    // Tab Groups toggle
                     SettingsSwitchRow(
                         icon = Icons.Default.Layers,
+                        badgeColor = Color(0xFF06B6D4),
                         title = "Tab Groups",
                         subtitle = "Show active tab groups and quick switch row on home",
                         checked = settings.showTabGroups,
@@ -217,11 +254,14 @@ fun SettingsScreen(
                         testTag = "setting_toggle_tab_groups"
                     )
 
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                    HorizontalDivider(
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                        modifier = Modifier.padding(horizontal = 16.dp)
+                    )
 
-                    // Speed Dials toggle
                     SettingsSwitchRow(
                         icon = Icons.Default.GridView,
+                        badgeColor = Color(0xFF10B981),
                         title = "Speed Dials",
                         subtitle = "Display website shortcuts grid on home screen",
                         checked = settings.showSpeedDials,
@@ -229,11 +269,14 @@ fun SettingsScreen(
                         testTag = "setting_toggle_speed_dials"
                     )
 
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                    HorizontalDivider(
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                        modifier = Modifier.padding(horizontal = 16.dp)
+                    )
 
-                    // Discover Feed toggle
                     SettingsSwitchRow(
                         icon = Icons.Default.RssFeed,
+                        badgeColor = Color(0xFFF97316),
                         title = "Discover Feed",
                         subtitle = "Show curated tech and web discovery stories",
                         checked = settings.showDiscoverFeed,
@@ -241,11 +284,14 @@ fun SettingsScreen(
                         testTag = "setting_toggle_discover_feed"
                     )
 
-                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                    HorizontalDivider(
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                        modifier = Modifier.padding(horizontal = 16.dp)
+                    )
 
-                    // Manage Speed Dials Row
                     SettingsClickableRow(
                         icon = Icons.Default.Edit,
+                        badgeColor = MaterialTheme.colorScheme.primary,
                         title = "Manage Speed Dials",
                         subtitle = "${speedDials.size} shortcuts configured • Add, edit, or remove",
                         onClick = { showManageSpeedDials = true },
@@ -257,45 +303,53 @@ fun SettingsScreen(
             // About Section
             item {
                 Card(
-                    shape = RoundedCornerShape(16.dp),
+                    shape = ExpressiveCardShape,
                     colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerLow
                     ),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
+                    Column(modifier = Modifier.padding(18.dp)) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Info,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(20.dp)
-                            )
+                            Surface(
+                                shape = ExpressiveChipShape,
+                                color = MaterialTheme.colorScheme.primaryContainer,
+                                modifier = Modifier.size(34.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Default.Info,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
                             Text(
                                 text = "About Aura Browser",
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold,
+                                style = MaterialTheme.typography.titleMedium,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                         }
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(10.dp))
                         Text(
-                            text = "Version 1.0 • Built with Jetpack Compose & Material 3",
-                            fontSize = 12.sp,
+                            text = "Version 1.0 • Built with Jetpack Compose & Material 3 Expressive",
+                            style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = "Features tab grouping, fast speed dials, customized suggestions engine, and integrated web browsing.",
-                            fontSize = 12.sp,
+                            text = "Features tab grouping, fast speed dials, customized suggestions engine, autonomous web automation, and hardened browsing.",
+                            style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
-                Spacer(modifier = Modifier.height(80.dp))
+                Spacer(modifier = Modifier.height(90.dp))
             }
         }
     }
@@ -304,109 +358,152 @@ fun SettingsScreen(
     if (showEngineDialog) {
         AlertDialog(
             onDismissRequest = { showEngineDialog = false },
-            title = { Text("Choose Search Engine", fontWeight = FontWeight.Bold) },
+            shape = ExpressiveDialogShape,
+            title = { Text("Choose Search Engine", style = MaterialTheme.typography.titleLarge) },
             text = {
-                Column {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     SearchEngine.values().forEach { engine ->
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
+                        Surface(
+                            shape = ExpressiveSquircleShape,
+                            color = if (settings.searchEngine == engine) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                            else Color.Transparent,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(8.dp))
+                                .clip(ExpressiveSquircleShape)
                                 .clickable {
                                     onSetSearchEngine(engine)
                                     showEngineDialog = false
                                 }
-                                .padding(vertical = 4.dp)
                         ) {
-                            RadioButton(
-                                selected = settings.searchEngine == engine,
-                                onClick = {
-                                    onSetSearchEngine(engine)
-                                    showEngineDialog = false
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                            ) {
+                                RadioButton(
+                                    selected = settings.searchEngine == engine,
+                                    onClick = {
+                                        onSetSearchEngine(engine)
+                                        showEngineDialog = false
+                                    }
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Column {
+                                    Text(
+                                        text = engine.displayName,
+                                        style = MaterialTheme.typography.titleSmall,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Text(
+                                        text = engine.homeUrl,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
                                 }
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(text = engine.displayName, fontSize = 14.sp)
+                            }
                         }
                     }
                 }
             },
             confirmButton = {},
             dismissButton = {
-                TextButton(onClick = { showEngineDialog = false }) {
-                    Text("Close")
+                TextButton(
+                    onClick = { showEngineDialog = false },
+                    shape = ExpressivePillShape
+                ) {
+                    Text("Cancel")
                 }
             }
         )
     }
 
-    // Theme Selection Dialog
+    // Theme Mode Selection Dialog
     if (showThemeDialog) {
         AlertDialog(
             onDismissRequest = { showThemeDialog = false },
-            title = { Text("Appearance Theme", fontWeight = FontWeight.Bold) },
+            shape = ExpressiveDialogShape,
+            title = { Text("Theme Appearance", style = MaterialTheme.typography.titleLarge) },
             text = {
-                Column {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     ThemeMode.values().forEach { mode ->
                         val label = when (mode) {
-                            ThemeMode.SYSTEM -> "System Default"
-                            ThemeMode.DARK -> "Dark Theme"
-                            ThemeMode.LIGHT -> "Light Theme"
+                            ThemeMode.SYSTEM -> "System Default (Auto)"
+                            ThemeMode.LIGHT -> "Light Mode"
+                            ThemeMode.DARK -> "Dark Mode"
                         }
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
+                        Surface(
+                            shape = ExpressiveSquircleShape,
+                            color = if (settings.themeMode == mode) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                            else Color.Transparent,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(8.dp))
+                                .clip(ExpressiveSquircleShape)
                                 .clickable {
                                     onSetThemeMode(mode)
                                     showThemeDialog = false
                                 }
-                                .padding(vertical = 4.dp)
                         ) {
-                            RadioButton(
-                                selected = settings.themeMode == mode,
-                                onClick = {
-                                    onSetThemeMode(mode)
-                                    showThemeDialog = false
-                                }
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(text = label, fontSize = 14.sp)
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
+                            ) {
+                                RadioButton(
+                                    selected = settings.themeMode == mode,
+                                    onClick = {
+                                        onSetThemeMode(mode)
+                                        showThemeDialog = false
+                                    }
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = label,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
                         }
                     }
                 }
             },
             confirmButton = {},
             dismissButton = {
-                TextButton(onClick = { showThemeDialog = false }) {
-                    Text("Close")
+                TextButton(
+                    onClick = { showThemeDialog = false },
+                    shape = ExpressivePillShape
+                ) {
+                    Text("Cancel")
                 }
             }
         )
     }
 
-    // Clear Data Confirmation Dialog
+    // Clear Browsing Data Dialog
     if (showClearConfirmDialog) {
         AlertDialog(
             onDismissRequest = { showClearConfirmDialog = false },
-            title = { Text("Clear Browsing History?", fontWeight = FontWeight.Bold) },
+            shape = ExpressiveDialogShape,
+            title = { Text("Clear Browsing Data", style = MaterialTheme.typography.titleLarge) },
             text = {
-                Text("This will delete your browsing history and recent search queries.")
+                Text(
+                    text = "This will remove your browsing history and clean cached site storage. Your speed dials and bookmarks will remain intact.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
             },
             confirmButton = {
                 TextButton(
                     onClick = {
                         onClearBrowsingData()
                         showClearConfirmDialog = false
-                    }
+                    },
+                    shape = ExpressivePillShape
                 ) {
-                    Text("Clear", color = MaterialTheme.colorScheme.error)
+                    Text("Clear Now", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showClearConfirmDialog = false }) {
+                TextButton(
+                    onClick = { showClearConfirmDialog = false },
+                    shape = ExpressivePillShape
+                ) {
                     Text("Cancel")
                 }
             }
@@ -419,9 +516,11 @@ fun SettingsScreen(
             speedDials = speedDials,
             onDismiss = { showManageSpeedDials = false },
             onAddNew = {
+                showManageSpeedDials = false
                 showAddSpeedDialDialog = true
             },
             onEdit = { dial ->
+                showManageSpeedDials = false
                 speedDialToEdit = dial
             },
             onDelete = { id ->
@@ -467,17 +566,16 @@ fun SettingsSectionCard(
     Column {
         Text(
             text = title,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.SemiBold,
+            style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
+            modifier = Modifier.padding(start = 6.dp, bottom = 8.dp)
         )
         Card(
-            shape = RoundedCornerShape(16.dp),
+            shape = ExpressiveCardShape,
             colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surface
+                containerColor = MaterialTheme.colorScheme.surfaceContainerLow
             ),
-            elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
             modifier = Modifier.fillMaxWidth()
         ) {
             Column {
@@ -490,6 +588,7 @@ fun SettingsSectionCard(
 @Composable
 fun SettingsClickableRow(
     icon: ImageVector,
+    badgeColor: Color = MaterialTheme.colorScheme.primary,
     title: String,
     subtitle: String,
     onClick: () -> Unit,
@@ -504,16 +603,16 @@ fun SettingsClickableRow(
             .testTag(testTag)
     ) {
         Surface(
-            shape = CircleShape,
-            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
-            modifier = Modifier.size(36.dp)
+            shape = ExpressiveSquircleShape,
+            color = badgeColor.copy(alpha = 0.16f),
+            modifier = Modifier.size(38.dp)
         ) {
             Box(contentAlignment = Alignment.Center) {
                 Icon(
                     imageVector = icon,
                     contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(18.dp)
+                    tint = badgeColor,
+                    modifier = Modifier.size(20.dp)
                 )
             }
         }
@@ -523,13 +622,12 @@ fun SettingsClickableRow(
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = title,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Medium,
+                style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.onSurface
             )
             Text(
                 text = subtitle,
-                fontSize = 12.sp,
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
@@ -539,6 +637,7 @@ fun SettingsClickableRow(
 @Composable
 fun SettingsSwitchRow(
     icon: ImageVector,
+    badgeColor: Color = MaterialTheme.colorScheme.primary,
     title: String,
     subtitle: String,
     checked: Boolean,
@@ -553,16 +652,16 @@ fun SettingsSwitchRow(
             .testTag(testTag)
     ) {
         Surface(
-            shape = CircleShape,
-            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
-            modifier = Modifier.size(36.dp)
+            shape = ExpressiveSquircleShape,
+            color = badgeColor.copy(alpha = 0.16f),
+            modifier = Modifier.size(38.dp)
         ) {
             Box(contentAlignment = Alignment.Center) {
                 Icon(
                     imageVector = icon,
                     contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(18.dp)
+                    tint = badgeColor,
+                    modifier = Modifier.size(20.dp)
                 )
             }
         }
@@ -572,13 +671,12 @@ fun SettingsSwitchRow(
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = title,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Medium,
+                style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.onSurface
             )
             Text(
                 text = subtitle,
-                fontSize = 12.sp,
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }

@@ -113,11 +113,11 @@ fun SpeedDialEditDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
+        shape = com.example.ui.theme.ExpressiveDialogShape,
         title = {
             Text(
                 text = if (initialDial == null) "Add Speed Dial Shortcut" else "Edit Speed Dial Shortcut",
-                fontWeight = FontWeight.Bold,
-                fontSize = 18.sp
+                style = MaterialTheme.typography.titleLarge
             )
         },
         text = {
@@ -296,6 +296,7 @@ fun ManageSpeedDialsDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
+        shape = com.example.ui.theme.ExpressiveDialogShape,
         title = {
             Row(
                 verticalAlignment = Alignment.CenterVertically,

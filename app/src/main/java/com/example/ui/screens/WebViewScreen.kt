@@ -159,7 +159,6 @@ fun WebViewScreen(
                     settings.apply {
                         javaScriptEnabled = true
                         domStorageEnabled = true
-                        databaseEnabled = true
                         allowContentAccess = true
                         allowFileAccess = false
                         builtInZoomControls = true
@@ -167,6 +166,10 @@ fun WebViewScreen(
                         setSupportZoom(true)
                         mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
                         cacheMode = WebSettings.LOAD_DEFAULT
+
+                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                            safeBrowsingEnabled = false
+                        }
 
                         if (isDesktopMode) {
                             userAgentString = desktopUserAgent
@@ -242,6 +245,25 @@ fun WebViewScreen(
                                 errorMessage = error?.description?.toString() ?: "Failed to load page"
                                 onWebStateChanged(null, null, 100, false, null, null)
                             }
+                        }
+
+                        override fun onReceivedSslError(
+                            view: WebView?,
+                            handler: android.webkit.SslErrorHandler?,
+                            error: android.net.http.SslError?
+                        ) {
+                            // Default to super which handles SSL validation safely
+                            super.onReceivedSslError(view, handler, error)
+                        }
+
+                        override fun onRenderProcessGone(
+                            view: WebView?,
+                            detail: android.webkit.RenderProcessGoneDetail?
+                        ): Boolean {
+                            // Prevent app crash if Chromium renderer terminates or restarts
+                            hasError = true
+                            errorMessage = "Page renderer reloaded. Tap 'Try Again'."
+                            return true
                         }
                     }
 
@@ -404,6 +426,7 @@ fun WebViewScreen(
                         onResolveExhaustionAddNew = { fieldKey, newValues ->
                             automationEngine.resolveExhaustionWithNewData(fieldKey, newValues)
                         },
+                        onSaveDataSheet = { sheet -> automationEngine.saveDataSheet(sheet) },
                         onOpenScriptManager = onOpenScriptManager,
                         onCloseHud = { automationEngine.setHudVisible(false) }
                     )

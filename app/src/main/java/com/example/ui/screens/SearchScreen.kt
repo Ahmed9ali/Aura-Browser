@@ -76,12 +76,14 @@ import com.example.model.SuggestionType
 fun SearchScreen(
     query: String,
     suggestions: List<SearchSuggestion>,
-    discoveryCategories: List<String>,
-    selectedCategory: String?,
+    discoveryCategories: List<String> = emptyList(),
+    selectedCategory: String? = null,
     currentSearchEngine: SearchEngine,
     history: List<HistoryItem>,
+    dismissedClipboardTexts: Set<String> = emptySet(),
+    onDismissClipboard: (String) -> Unit = {},
     onQueryChange: (String) -> Unit,
-    onCategorySelect: (String) -> Unit,
+    onCategorySelect: (String) -> Unit = {},
     onSearchEngineSelect: (SearchEngine) -> Unit,
     onExecuteSearch: (String) -> Unit,
     onSelectSuggestion: (SearchSuggestion) -> Unit,
@@ -94,26 +96,31 @@ fun SearchScreen(
     val clipboardManager = LocalClipboardManager.current
     var clipboardLink by remember { mutableStateOf<String?>(null) }
     var isClipboardDismissed by remember { mutableStateOf(false) }
-    var usedClipboardText by remember { mutableStateOf<String?>(null) }
 
     fun checkClipboardForLink() {
         if (isClipboardDismissed) return
         try {
             val clipText = clipboardManager.getText()?.text?.trim()
-            if (!clipText.isNullOrBlank() && clipText != usedClipboardText) {
+            if (!clipText.isNullOrBlank() && !dismissedClipboardTexts.contains(clipText) && clipText != query) {
                 val isLikelyUrl = clipText.startsWith("http://", ignoreCase = true) ||
                         clipText.startsWith("https://", ignoreCase = true) ||
                         clipText.startsWith("www.", ignoreCase = true) ||
                         clipText.startsWith("aura://", ignoreCase = true) ||
                         (clipText.contains(".") && !clipText.contains(" ") && clipText.length >= 4)
-                if (isLikelyUrl && clipText != query) {
+                if (isLikelyUrl) {
                     clipboardLink = clipText
-                } else if (!isLikelyUrl && clipText.length in 3..120 && clipText != query && query.isEmpty()) {
+                } else if (clipText.length in 3..120 && query.isEmpty()) {
                     // Also accept copied query snippet
                     clipboardLink = clipText
+                } else {
+                    clipboardLink = null
                 }
+            } else {
+                clipboardLink = null
             }
-        } catch (_: Exception) {}
+        } catch (_: Exception) {
+            clipboardLink = null
+        }
     }
 
     LaunchedEffect(Unit) {
@@ -162,16 +169,8 @@ fun SearchScreen(
         suggestions.filter { it.type == SuggestionType.DOMAIN }
     }
 
-    val personalizedItems = remember(suggestions) {
-        suggestions.filter { it.type == SuggestionType.PERSONALIZED }
-    }
-
-    val trendingAndDiscoveryItems = remember(suggestions) {
-        suggestions.filter { it.type == SuggestionType.TRENDING || it.type == SuggestionType.DISCOVERY }
-    }
-
-    val otherItems = remember(suggestions, historySuggestions, domainItems, personalizedItems, trendingAndDiscoveryItems) {
-        val groupedSet = (historySuggestions + domainItems + personalizedItems + trendingAndDiscoveryItems).toSet()
+    val otherItems = remember(suggestions, historySuggestions, domainItems) {
+        val groupedSet = (historySuggestions + domainItems).toSet()
         suggestions.filterNot { it in groupedSet }
     }
 
@@ -193,6 +192,8 @@ fun SearchScreen(
                     onValueChange = { newQuery ->
                         onQueryChange(newQuery)
                         if (clipboardLink == newQuery) {
+                            clipboardLink?.let { onDismissClipboard(it) }
+                            clipboardLink = null
                             isClipboardDismissed = true
                         }
                     },
@@ -238,12 +239,12 @@ fun SearchScreen(
                             if (query.isNotBlank()) onExecuteSearch(query)
                         }
                     ),
-                    shape = RoundedCornerShape(22.dp),
+                    shape = com.example.ui.theme.ExpressivePillShape,
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                         unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
                         focusedBorderColor = MaterialTheme.colorScheme.primary,
-                        unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
                         focusedTextColor = MaterialTheme.colorScheme.onSurface,
                         unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
                         cursorColor = MaterialTheme.colorScheme.primary
@@ -264,27 +265,26 @@ fun SearchScreen(
                 ) {
                     Text(
                         text = "Engine:",
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontWeight = FontWeight.Medium
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
 
                     SearchEngine.values().forEach { engine ->
                         val isSelected = engine == currentSearchEngine
                         Surface(
-                            shape = RoundedCornerShape(12.dp),
+                            shape = com.example.ui.theme.ExpressivePillShape,
                             color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
                             modifier = Modifier
-                                .clip(RoundedCornerShape(12.dp))
+                                .clip(com.example.ui.theme.ExpressivePillShape)
                                 .clickable { onSearchEngineSelect(engine) }
                                 .testTag("search_engine_${engine.name.lowercase()}")
                         ) {
                             Text(
                                 text = engine.displayName,
-                                fontSize = 11.sp,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                                 color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
                             )
                         }
                     }
@@ -293,92 +293,100 @@ fun SearchScreen(
         }
 
         // Dedicated "Paste link" quick action banner below search bar when a link is copied
-        if (!clipboardLink.isNullOrBlank() && !isClipboardDismissed && clipboardLink != query) {
+        if (!clipboardLink.isNullOrBlank() && !isClipboardDismissed && !dismissedClipboardTexts.contains(clipboardLink)) {
             Surface(
-                shape = RoundedCornerShape(18.dp),
+                shape = com.example.ui.theme.ExpressiveCardShape,
                 color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f),
                 border = BorderStroke(1.2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)),
                 tonalElevation = 2.dp,
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 8.dp)
-                    .clip(RoundedCornerShape(18.dp))
-                    .clickable {
-                        clipboardLink?.let { link ->
-                            usedClipboardText = link
-                            clipboardLink = null
-                            isClipboardDismissed = true
-                            onQueryChange(link)
-                            onExecuteSearch(link)
-                        }
-                    }
+                    .clip(com.example.ui.theme.ExpressiveCardShape)
                     .testTag("paste_link_card")
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
                 ) {
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(38.dp)
+                    // Clickable Content Area to Paste
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable {
+                                clipboardLink?.let { link ->
+                                    onDismissClipboard(link)
+                                    clipboardLink = null
+                                    isClipboardDismissed = true
+                                    onQueryChange(link)
+                                    onExecuteSearch(link)
+                                }
+                            }
                     ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = Icons.Default.ContentPaste,
-                                contentDescription = "Paste Link",
-                                tint = MaterialTheme.colorScheme.onPrimary,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.width(12.dp))
-
-                    Column(modifier = Modifier.weight(1f)) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            modifier = Modifier.fillMaxWidth()
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(38.dp)
                         ) {
-                            Text(
-                                text = "Copied link detected",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.primary,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f, fill = false)
-                            )
-                            Surface(
-                                shape = RoundedCornerShape(6.dp),
-                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
-                            ) {
-                                Text(
-                                    text = "Clipboard",
-                                    fontSize = 9.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    maxLines = 1,
-                                    softWrap = false,
-                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.ContentPaste,
+                                    contentDescription = "Paste Link",
+                                    tint = MaterialTheme.colorScheme.onPrimary,
+                                    modifier = Modifier.size(20.dp)
                                 )
                             }
                         }
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = clipboardLink ?: "",
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
+
+                        Spacer(modifier = Modifier.width(12.dp))
+
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = "Copied link detected",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f, fill = false)
+                                )
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                                ) {
+                                    Text(
+                                        text = "Clipboard",
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        maxLines = 1,
+                                        softWrap = false,
+                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = clipboardLink ?: "",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
                     }
 
                     Spacer(modifier = Modifier.width(8.dp))
 
-                    // Explicit "Paste link" button
+                    // Explicit "Paste" button
                     Surface(
                         shape = RoundedCornerShape(12.dp),
                         color = MaterialTheme.colorScheme.primary,
@@ -386,7 +394,7 @@ fun SearchScreen(
                             .clip(RoundedCornerShape(12.dp))
                             .clickable {
                                 clipboardLink?.let { link ->
-                                    usedClipboardText = link
+                                    onDismissClipboard(link)
                                     clipboardLink = null
                                     isClipboardDismissed = true
                                     onQueryChange(link)
@@ -407,7 +415,7 @@ fun SearchScreen(
                             )
                             Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                text = "Paste link",
+                                text = "Paste",
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.onPrimary
@@ -415,53 +423,26 @@ fun SearchScreen(
                         }
                     }
 
-                    Spacer(modifier = Modifier.width(4.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
 
+                    // Independent Dismiss Button
                     IconButton(
                         onClick = {
-                            usedClipboardText = clipboardLink
+                            clipboardLink?.let { link ->
+                                onDismissClipboard(link)
+                            }
                             clipboardLink = null
                             isClipboardDismissed = true
                         },
                         modifier = Modifier
-                            .size(32.dp)
+                            .size(36.dp)
                             .testTag("btn_dismiss_paste_link")
                     ) {
                         Icon(
                             imageVector = Icons.Default.Clear,
                             contentDescription = "Dismiss copied link banner",
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-                }
-            }
-        }
-
-        // Discovery Category Pills (Integrated suggestions engine discovery)
-        Column(modifier = Modifier.padding(vertical = 4.dp)) {
-            LazyRow(
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                items(discoveryCategories) { category ->
-                    val isSelected = category == selectedCategory
-                    Surface(
-                        shape = RoundedCornerShape(16.dp),
-                        color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                        border = if (isSelected) BorderStroke(1.dp, MaterialTheme.colorScheme.primary) else null,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(16.dp))
-                            .clickable { onCategorySelect(category) }
-                            .testTag("category_pill_${category.lowercase().replace(" ", "_")}")
-                    ) {
-                        Text(
-                            text = category,
-                            fontSize = 12.sp,
-                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                            color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                            modifier = Modifier.size(18.dp)
                         )
                     }
                 }
@@ -527,51 +508,7 @@ fun SearchScreen(
                 }
             }
 
-            // Group 3: Smart Recommendations
-            if (personalizedItems.isNotEmpty()) {
-                item(key = "group_personalized_header") {
-                    ExpressiveGroupHeader(
-                        title = "Smart Recommendations",
-                        icon = Icons.Default.Star,
-                        iconTint = Color(0xFF6366F1),
-                        badgeText = "Recommended",
-                        testTagPrefix = "personalized"
-                    )
-                }
-
-                item(key = "group_personalized_container") {
-                    ExpressiveGroupContainer(
-                        items = personalizedItems,
-                        onSelectSuggestion = onSelectSuggestion,
-                        onInsertQuery = onQueryChange,
-                        testTagPrefix = "group_suggestions"
-                    )
-                }
-            }
-
-            // Group 4: Trending & Discovery Topics
-            if (trendingAndDiscoveryItems.isNotEmpty()) {
-                item(key = "group_trending_header") {
-                    ExpressiveGroupHeader(
-                        title = "Trending & Topics",
-                        icon = Icons.Default.TrendingUp,
-                        iconTint = Color(0xFFF59E0B),
-                        badgeText = "${trendingAndDiscoveryItems.size} topics",
-                        testTagPrefix = "trending"
-                    )
-                }
-
-                item(key = "group_trending_container") {
-                    ExpressiveGroupContainer(
-                        items = trendingAndDiscoveryItems,
-                        onSelectSuggestion = onSelectSuggestion,
-                        onInsertQuery = onQueryChange,
-                        testTagPrefix = "group_trending"
-                    )
-                }
-            }
-
-            // Group 5: Other Search Queries
+            // Group 3: Other Search Queries
             if (otherItems.isNotEmpty()) {
                 item(key = "group_other_header") {
                     ExpressiveGroupHeader(
@@ -594,7 +531,7 @@ fun SearchScreen(
             }
 
             // Empty state when no suggestions and no recent history
-            if (recentItems.isEmpty() && domainItems.isEmpty() && personalizedItems.isEmpty() && trendingAndDiscoveryItems.isEmpty() && otherItems.isEmpty()) {
+            if (recentItems.isEmpty() && domainItems.isEmpty() && otherItems.isEmpty()) {
                 item {
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,

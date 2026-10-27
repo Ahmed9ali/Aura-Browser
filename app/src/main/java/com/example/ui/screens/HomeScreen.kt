@@ -26,23 +26,15 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Code
-import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.Newspaper
-import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Shield
-import androidx.compose.material.icons.filled.VideoLibrary
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -59,18 +51,20 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.model.BrowserSettings
 import com.example.model.BrowserTab
 import com.example.model.HistoryItem
-import com.example.model.NavScreen
 import com.example.model.SpeedDial
 import com.example.model.TabGroup
 import com.example.ui.components.SpeedDialEditDialog
 import com.example.ui.components.getSpeedDialIcon
+import com.example.ui.theme.ExpressiveCardShape
+import com.example.ui.theme.ExpressiveChipShape
+import com.example.ui.theme.ExpressivePillShape
+import com.example.ui.theme.ExpressiveSquircleShape
 
 data class DiscoverStory(
     val title: String,
@@ -81,6 +75,11 @@ data class DiscoverStory(
     val targetUrl: String
 )
 
+/**
+ * Material 3 Expressive Home Screen
+ * Features bold brand hierarchy, pill search trigger, squircle speed dials,
+ * and high-contrast tonal container sections.
+ */
 @Composable
 fun HomeScreen(
     settings: BrowserSettings = BrowserSettings(),
@@ -137,17 +136,17 @@ fun HomeScreen(
 
     val hasActiveSections = settings.showTabGroups || settings.showSpeedDials || settings.showDiscoverFeed
     val headerTopPadding by animateDpAsState(
-        targetValue = if (hasActiveSections) 24.dp else 120.dp,
+        targetValue = if (hasActiveSections) 20.dp else 110.dp,
         label = "header_top_padding"
     )
 
     LazyColumn(
-        contentPadding = PaddingValues(bottom = 90.dp),
+        contentPadding = PaddingValues(bottom = 96.dp),
         modifier = modifier
             .fillMaxSize()
             .testTag("home_screen")
     ) {
-        // Hero Header & Aura Brand
+        // Expressive Hero Header & Aura Brand
         item {
             Box(
                 modifier = Modifier
@@ -155,60 +154,68 @@ fun HomeScreen(
                     .background(
                         Brush.verticalGradient(
                             colors = listOf(
-                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
+                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f),
                                 Color.Transparent
                             )
                         )
                     )
-                    .padding(top = headerTopPadding, bottom = 16.dp, start = 20.dp, end = 20.dp)
+                    .padding(top = headerTopPadding, bottom = 18.dp, start = 20.dp, end = 20.dp)
             ) {
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    // Orbital Brand Badge
+                    // Expressive Squircle Brand Emblem
                     Surface(
-                        shape = CircleShape,
+                        shape = ExpressiveSquircleShape,
                         color = MaterialTheme.colorScheme.primary,
                         shadowElevation = 8.dp,
-                        modifier = Modifier.size(56.dp)
+                        modifier = Modifier.size(60.dp)
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Icon(
                                 imageVector = Icons.Default.Explore,
                                 contentDescription = "Aura Browser",
                                 tint = MaterialTheme.colorScheme.onPrimary,
-                                modifier = Modifier.size(32.dp)
+                                modifier = Modifier.size(34.dp)
                             )
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(14.dp))
 
                     Text(
                         text = "Aura Browser",
-                        fontSize = 24.sp,
-                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.headlineLarge,
                         color = MaterialTheme.colorScheme.onSurface
                     )
-                    Text(
-                        text = "Fast, organized tab workflows & smart discovery",
-                        fontSize = 13.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
 
-                    Spacer(modifier = Modifier.height(18.dp))
-
-                    // Prominent Quick Search Bar trigger with clear contrast in light/dark themes
                     Surface(
-                        shape = RoundedCornerShape(24.dp),
+                        shape = ExpressiveChipShape,
+                        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f),
+                        modifier = Modifier.padding(top = 4.dp)
+                    ) {
+                        Text(
+                            text = "Fast · Private · Automated",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    // Expressive Omnibox Search Bar Trigger
+                    Surface(
+                        shape = ExpressivePillShape,
                         color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                        border = BorderStroke(1.2.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.35f)),
-                        tonalElevation = 4.dp,
-                        shadowElevation = 3.dp,
+                        border = BorderStroke(1.2.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
+                        tonalElevation = 3.dp,
+                        shadowElevation = 2.dp,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(24.dp))
+                            .height(52.dp)
+                            .clip(ExpressivePillShape)
                             .clickable(onClick = onNavigateToSearch)
                             .testTag("home_search_bar_trigger")
                     ) {
@@ -216,14 +223,14 @@ fun HomeScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 14.dp, vertical = 12.dp)
+                                .padding(horizontal = 16.dp)
                         ) {
                             Box(
                                 contentAlignment = Alignment.Center,
                                 modifier = Modifier
                                     .size(34.dp)
                                     .clip(CircleShape)
-                                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
+                                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f))
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Search,
@@ -235,15 +242,14 @@ fun HomeScreen(
                             Spacer(modifier = Modifier.width(12.dp))
                             Text(
                                 text = "Search or type web address...",
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Normal,
+                                style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.weight(1f)
                             )
                             Icon(
                                 imageVector = Icons.Default.Mic,
                                 contentDescription = "Voice Search",
-                                tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
+                                tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.75f),
                                 modifier = Modifier.size(20.dp)
                             )
                         }
@@ -252,7 +258,7 @@ fun HomeScreen(
             }
         }
 
-        // Active Tab Groups Quick Strip (Requirement: Tab management with grouping capabilities)
+        // Active Tab Groups Quick Strip
         if (settings.showTabGroups) {
             item {
                 Column(
@@ -267,31 +273,44 @@ fun HomeScreen(
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Layers,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(18.dp)
-                            )
+                            Surface(
+                                shape = ExpressiveChipShape,
+                                color = MaterialTheme.colorScheme.primaryContainer,
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Default.Layers,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
                             Text(
                                 text = "Tab Groups",
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.SemiBold,
+                                style = MaterialTheme.typography.titleMedium,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
-                            Text(
-                                text = "(${tabGroups.size})",
-                                fontSize = 13.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                            Surface(
+                                shape = ExpressiveChipShape,
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                modifier = Modifier.padding(start = 2.dp)
+                            ) {
+                                Text(
+                                    text = "${tabGroups.size}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
                         }
 
                         Text(
                             text = "Manage All",
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Medium,
+                            style = MaterialTheme.typography.labelLarge,
                             color = MaterialTheme.colorScheme.primary,
                             modifier = Modifier
                                 .clickable(onClick = onNavigateToTabs)
@@ -308,39 +327,39 @@ fun HomeScreen(
                         items(tabGroups) { group ->
                             val groupColor = try {
                                 Color(android.graphics.Color.parseColor(group.colorHex))
-                            } catch (e: Exception) {
+                            } catch (_: Exception) {
                                 MaterialTheme.colorScheme.primary
                             }
                             val tabsInGroup = tabs.count { it.groupId == group.id }
 
                             Surface(
-                                shape = RoundedCornerShape(16.dp),
+                                shape = ExpressiveCardShape,
                                 color = groupColor.copy(alpha = 0.12f),
+                                border = BorderStroke(1.dp, groupColor.copy(alpha = 0.3f)),
                                 modifier = Modifier
-                                    .clip(RoundedCornerShape(16.dp))
+                                    .clip(ExpressiveCardShape)
                                     .clickable(onClick = onNavigateToTabs)
                             ) {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
                                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
                                 ) {
                                     Box(
                                         modifier = Modifier
-                                            .size(10.dp)
+                                            .size(12.dp)
                                             .clip(CircleShape)
                                             .background(groupColor)
                                     )
                                     Column {
                                         Text(
                                             text = group.name,
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.SemiBold,
+                                            style = MaterialTheme.typography.titleSmall,
                                             color = MaterialTheme.colorScheme.onSurface
                                         )
                                         Text(
-                                            text = "$tabsInGroup active ${if (tabsInGroup == 1) "tab" else "tabs"}",
-                                            fontSize = 11.sp,
+                                            text = "$tabsInGroup ${if (tabsInGroup == 1) "tab" else "tabs"}",
+                                            style = MaterialTheme.typography.bodySmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                     }
@@ -369,44 +388,58 @@ fun HomeScreen(
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.GridView,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(18.dp)
-                            )
+                            Surface(
+                                shape = ExpressiveChipShape,
+                                color = MaterialTheme.colorScheme.primaryContainer,
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Default.GridView,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
                             Text(
                                 text = "Speed Dials",
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.SemiBold,
+                                style = MaterialTheme.typography.titleMedium,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
-                            Text(
-                                text = "(${speedDials.size})",
-                                fontSize = 13.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                            Surface(
+                                shape = ExpressiveChipShape,
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                modifier = Modifier.padding(start = 2.dp)
+                            ) {
+                                Text(
+                                    text = "${speedDials.size}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
                         }
 
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             // Add button
                             Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                                shape = ExpressivePillShape,
+                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f),
                                 modifier = Modifier
-                                    .clip(RoundedCornerShape(8.dp))
+                                    .clip(ExpressivePillShape)
                                     .clickable { showAddSpeedDialDialog = true }
                                     .testTag("btn_home_add_speed_dial")
                             ) {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
                                 ) {
                                     Icon(
                                         imageVector = Icons.Default.Add,
@@ -416,8 +449,7 @@ fun HomeScreen(
                                     )
                                     Text(
                                         text = "Add",
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Medium,
+                                        style = MaterialTheme.typography.labelMedium,
                                         color = MaterialTheme.colorScheme.primary
                                     )
                                 }
@@ -425,17 +457,17 @@ fun HomeScreen(
 
                             // Manage/Done button
                             Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = if (isManageMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                                shape = ExpressivePillShape,
+                                color = if (isManageMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHigh,
                                 modifier = Modifier
-                                    .clip(RoundedCornerShape(8.dp))
+                                    .clip(ExpressivePillShape)
                                     .clickable { isManageMode = !isManageMode }
                                     .testTag("btn_toggle_manage_speed_dials")
                             ) {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
                                 ) {
                                     Icon(
                                         imageVector = if (isManageMode) Icons.Default.Check else Icons.Default.Edit,
@@ -445,8 +477,7 @@ fun HomeScreen(
                                     )
                                     Text(
                                         text = if (isManageMode) "Done" else "Manage",
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Medium,
+                                        style = MaterialTheme.typography.labelMedium,
                                         color = if (isManageMode) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
@@ -532,72 +563,79 @@ fun HomeScreen(
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                         modifier = Modifier.padding(bottom = 12.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Bolt,
-                            contentDescription = null,
-                            tint = Color(0xFFF59E0B),
-                            modifier = Modifier.size(18.dp)
-                        )
+                        Surface(
+                            shape = ExpressiveChipShape,
+                            color = Color(0xFFF59E0B).copy(alpha = 0.16f),
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.Bolt,
+                                    contentDescription = null,
+                                    tint = Color(0xFFF59E0B),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
                         Text(
                             text = "Discover Feed",
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.SemiBold,
+                            style = MaterialTheme.typography.titleMedium,
                             color = MaterialTheme.colorScheme.onSurface
                         )
                     }
 
                     discoverStories.forEach { story ->
                         Card(
-                            shape = RoundedCornerShape(14.dp),
+                            shape = ExpressiveCardShape,
                             colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                                containerColor = MaterialTheme.colorScheme.surfaceContainerLow
                             ),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(bottom = 10.dp)
-                                .clip(RoundedCornerShape(14.dp))
+                                .clip(ExpressiveCardShape)
                                 .clickable { onOpenUrl(story.targetUrl) }
                         ) {
-                            Column(modifier = Modifier.padding(14.dp)) {
+                            Column(modifier = Modifier.padding(16.dp)) {
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
                                     Surface(
-                                        shape = RoundedCornerShape(8.dp),
+                                        shape = ExpressiveChipShape,
                                         color = story.tagColor.copy(alpha = 0.15f)
                                     ) {
                                         Text(
                                             text = story.tag,
-                                            fontSize = 11.sp,
+                                            style = MaterialTheme.typography.labelSmall,
                                             fontWeight = FontWeight.Bold,
                                             color = story.tagColor,
-                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                                         )
                                     }
                                     Text(
                                         text = story.timeAgo,
-                                        fontSize = 11.sp,
+                                        style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
 
-                                Spacer(modifier = Modifier.height(8.dp))
+                                Spacer(modifier = Modifier.height(10.dp))
 
                                 Text(
                                     text = story.title,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.SemiBold,
+                                    style = MaterialTheme.typography.titleMedium,
                                     color = MaterialTheme.colorScheme.onSurface,
                                     maxLines = 2,
                                     overflow = TextOverflow.Ellipsis
                                 )
 
-                                Spacer(modifier = Modifier.height(6.dp))
+                                Spacer(modifier = Modifier.height(8.dp))
 
                                 Row(
                                     verticalAlignment = Alignment.CenterVertically,
@@ -606,15 +644,23 @@ fun HomeScreen(
                                 ) {
                                     Text(
                                         text = story.source,
-                                        fontSize = 12.sp,
+                                        style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
-                                    Icon(
-                                        imageVector = Icons.Default.ArrowForward,
-                                        contentDescription = "Read",
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(14.dp)
-                                    )
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
+                                        modifier = Modifier.size(24.dp)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(
+                                                imageVector = Icons.Default.ArrowForward,
+                                                contentDescription = "Read",
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(13.dp)
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -661,7 +707,7 @@ fun SpeedDialItem(
 ) {
     val dialColor = try {
         Color(android.graphics.Color.parseColor(dial.colorHex))
-    } catch (e: Exception) {
+    } catch (_: Exception) {
         MaterialTheme.colorScheme.primary
     }
 
@@ -671,16 +717,18 @@ fun SpeedDialItem(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = modifier
             .padding(horizontal = 4.dp)
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(16.dp))
             .clickable(onClick = onClick)
             .testTag("speed_dial_${dial.title.lowercase()}")
     ) {
         Box(contentAlignment = Alignment.Center) {
             Surface(
-                shape = CircleShape,
-                color = dialColor.copy(alpha = 0.15f),
-                border = if (isManageMode) BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null,
-                modifier = Modifier.size(52.dp)
+                shape = ExpressiveSquircleShape,
+                color = dialColor.copy(alpha = 0.16f),
+                border = if (isManageMode) BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary)
+                else BorderStroke(1.dp, dialColor.copy(alpha = 0.25f)),
+                shadowElevation = 2.dp,
+                modifier = Modifier.size(54.dp)
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Icon(
@@ -697,7 +745,7 @@ fun SpeedDialItem(
                     shape = CircleShape,
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier
-                        .size(20.dp)
+                        .size(22.dp)
                         .align(Alignment.TopEnd)
                 ) {
                     Box(contentAlignment = Alignment.Center) {
@@ -705,7 +753,7 @@ fun SpeedDialItem(
                             imageVector = Icons.Default.Edit,
                             contentDescription = "Edit",
                             tint = MaterialTheme.colorScheme.onPrimary,
-                            modifier = Modifier.size(11.dp)
+                            modifier = Modifier.size(12.dp)
                         )
                     }
                 }
@@ -714,8 +762,7 @@ fun SpeedDialItem(
         Spacer(modifier = Modifier.height(6.dp))
         Text(
             text = dial.title,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Medium,
+            style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurface,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
@@ -732,30 +779,29 @@ fun AddSpeedDialGridItem(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = modifier
             .padding(horizontal = 4.dp)
-            .clip(RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(16.dp))
             .clickable(onClick = onClick)
             .testTag("btn_speed_dial_grid_add")
     ) {
         Surface(
-            shape = CircleShape,
-            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)),
-            modifier = Modifier.size(52.dp)
+            shape = ExpressiveSquircleShape,
+            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f),
+            border = BorderStroke(1.2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)),
+            modifier = Modifier.size(54.dp)
         ) {
             Box(contentAlignment = Alignment.Center) {
                 Icon(
                     imageVector = Icons.Default.Add,
                     contentDescription = "Add shortcut",
                     tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(24.dp)
+                    modifier = Modifier.size(26.dp)
                 )
             }
         }
         Spacer(modifier = Modifier.height(6.dp))
         Text(
             text = "Add",
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Medium,
+            style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.primary,
             maxLines = 1
         )

@@ -48,7 +48,8 @@ data class BrowserUiState(
     val isProxyEnabled: Boolean = false,
     val proxyNode: String = "US Fast Gateway",
     val showProxyDialog: Boolean = false,
-    val snackbarMessage: String? = null
+    val snackbarMessage: String? = null,
+    val dismissedClipboardTexts: Set<String> = emptySet()
 )
 
 class BrowserViewModel(
@@ -71,6 +72,7 @@ class BrowserViewModel(
     private val _proxyNode = MutableStateFlow("US Fast Gateway")
     private val _showProxyDialog = MutableStateFlow(false)
     private val _snackbarMessage = MutableStateFlow<String?>(null)
+    private val _dismissedClipboardTexts = MutableStateFlow<Set<String>>(emptySet())
 
     private val _reloadTrigger = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     val reloadTrigger: SharedFlow<Unit> = _reloadTrigger.asSharedFlow()
@@ -124,7 +126,8 @@ class BrowserViewModel(
             _isProxyEnabled,
             _proxyNode,
             _showProxyDialog,
-            _snackbarMessage
+            _snackbarMessage,
+            _dismissedClipboardTexts
         )
     ) { params ->
         val screen = params[0] as NavScreen
@@ -154,6 +157,8 @@ class BrowserViewModel(
         val proxyNode = params[19] as String
         val showProxyDialog = params[20] as Boolean
         val snackbarMessage = params[21] as String?
+        @Suppress("UNCHECKED_CAST")
+        val dismissedClipboard = params[22] as Set<String>
 
         val activeTab = tabs.find { it.id == activeTabId } ?: tabs.firstOrNull()
 
@@ -187,7 +192,8 @@ class BrowserViewModel(
             isProxyEnabled = isProxyEnabled,
             proxyNode = proxyNode,
             showProxyDialog = showProxyDialog,
-            snackbarMessage = snackbarMessage
+            snackbarMessage = snackbarMessage,
+            dismissedClipboardTexts = dismissedClipboard
         )
     }.stateIn(
         scope = viewModelScope,
@@ -202,14 +208,14 @@ class BrowserViewModel(
 
     fun toggleAutomationHud() {
         val activeTab = uiState.value.activeTab
-        if (_currentScreen.value != NavScreen.WEB_PAGE) {
+        if (_currentScreen.value != NavScreen.WEB_PAGE && _currentScreen.value != NavScreen.HOME) {
             if (activeTab != null && !activeTab.url.startsWith("aura://")) {
                 _currentScreen.value = NavScreen.WEB_PAGE
             } else {
-                loadUrl("https://github.com/signup")
+                _currentScreen.value = NavScreen.HOME
             }
         }
-        val currentUrl = uiState.value.activeTab?.url ?: ""
+        val currentUrl = uiState.value.activeTab?.url ?: "aura://home"
         automationEngine.toggleHud(currentUrl)
     }
 
@@ -252,6 +258,22 @@ class BrowserViewModel(
 
     fun showMessage(message: String) {
         _snackbarMessage.value = message
+    }
+
+    fun dismissClipboardText(text: String) {
+        val trimmed = text.trim()
+        if (trimmed.isNotEmpty()) {
+            _dismissedClipboardTexts.value = _dismissedClipboardTexts.value + trimmed
+        }
+    }
+
+    fun copyToClipboard(context: android.content.Context, text: String, label: String = "Link") {
+        try {
+            val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+            val clip = android.content.ClipData.newPlainText(label, text)
+            clipboard.setPrimaryClip(clip)
+            _snackbarMessage.value = "Link copied to clipboard: $text"
+        } catch (_: Exception) {}
     }
 
     // Tab Management

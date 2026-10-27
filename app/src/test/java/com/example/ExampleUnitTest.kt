@@ -72,17 +72,22 @@ class ExampleUnitTest {
 
     @Test
     fun testPersonalizedSuggestionsEngine() {
+        // Record visit and add bookmark to test suggestions
+        repository.recordVisit("https://github.com", "GitHub: Build software")
+        repository.addBookmark(title = "Wikipedia - The Free Encyclopedia", url = "https://www.wikipedia.org", folder = "Favorites")
+
         val history = repository.history.value
         val bookmarks = repository.bookmarks.value
 
-        // Test empty query returns personalized history + trending suggestions
+        // Test empty query returns pure history/bookmarks without trending suggestions
         val emptySuggestions = suggestionsEngine.getSuggestions(
             query = "",
             history = history,
             bookmarks = bookmarks
         )
-        assertTrue("Empty query should offer personalized suggestions", emptySuggestions.isNotEmpty())
-        assertTrue("Should contain personalized suggestions", emptySuggestions.any { it.type == SuggestionType.PERSONALIZED })
+        assertTrue("Query should offer history/bookmark suggestions", emptySuggestions.isNotEmpty())
+        assertTrue("Should contain history suggestions", emptySuggestions.any { it.type == SuggestionType.HISTORY })
+        assertFalse("Should not contain trending suggestions", emptySuggestions.any { it.type == SuggestionType.TRENDING })
 
         // Test partial domain typing (e.g., 'git')
         val gitSuggestions = suggestionsEngine.getSuggestions(
@@ -91,15 +96,6 @@ class ExampleUnitTest {
             bookmarks = bookmarks
         )
         assertTrue("Should suggest github domain", gitSuggestions.any { it.query.contains("github", ignoreCase = true) })
-
-        // Test category discovery
-        val techSuggestions = suggestionsEngine.getSuggestions(
-            query = "",
-            history = history,
-            bookmarks = bookmarks,
-            selectedCategory = "Technology"
-        )
-        assertTrue(techSuggestions.all { it.type == SuggestionType.DISCOVERY })
 
         // Test URL resolution: direct domain vs search query
         val directUrl = suggestionsEngine.resolveUrl("kotlinlang.org", SearchEngine.GOOGLE)
@@ -111,6 +107,9 @@ class ExampleUnitTest {
 
     @Test
     fun testBookmarksManagement() {
+        // Fresh app starts with 0 bookmarks
+        assertTrue("Bookmarks start empty in fresh app", repository.bookmarks.value.isEmpty())
+
         val testUrl = "https://developer.mozilla.org/en-US/docs/Web"
         val testTitle = "MDN Web Docs Documentation"
         val testFolder = "Work"
@@ -125,8 +124,12 @@ class ExampleUnitTest {
 
     @Test
     fun testHistoryManagementOperations() {
+        // Fresh app starts with empty history
+        assertTrue("History starts empty in fresh app", repository.history.value.isEmpty())
+
+        repository.recordVisit("https://github.com", "GitHub")
         val initialHistory = repository.history.value
-        assertTrue("Initial history should exist", initialHistory.isNotEmpty())
+        assertTrue("History should exist after recordVisit", initialHistory.isNotEmpty())
 
         val testItem = initialHistory.first()
         repository.removeHistoryItem(testItem.id)
@@ -134,6 +137,25 @@ class ExampleUnitTest {
 
         repository.clearHistory()
         assertTrue("History should be empty after clear", repository.history.value.isEmpty())
+    }
+
+    @Test
+    fun testFreshAppCleanState() {
+        assertEquals(1, repository.tabs.value.size)
+        assertEquals("aura://home", repository.tabs.value.first().url)
+        assertTrue("Bookmarks should start empty", repository.bookmarks.value.isEmpty())
+        assertTrue("History should start empty", repository.history.value.isEmpty())
+        assertTrue("Tab groups should start empty", repository.tabGroups.value.isEmpty())
+    }
+
+    @Test
+    fun testSettingsOperations() {
+        val initialSettings = repository.settings.value
+        assertEquals(SearchEngine.GOOGLE, initialSettings.searchEngine)
+
+        repository.updateSettings { it.copy(searchEngine = SearchEngine.DUCKDUCKGO, adShieldEnabled = false) }
+        assertEquals(SearchEngine.DUCKDUCKGO, repository.settings.value.searchEngine)
+        assertFalse(repository.settings.value.adShieldEnabled)
     }
 
     @Test
@@ -197,5 +219,36 @@ class ExampleUnitTest {
                 orderOverride = com.example.model.DataIterationOrder.BOTTOM_TO_TOP
             ) { "fallback" }
         )
+    }
+
+    @Test
+    fun testAutomationEngineNoScriptGateAndGrabReadyUse() {
+        val testScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Unconfined)
+        val engine = com.example.automation.AutomationEngine(testScope)
+
+        // Fresh engine starts with 0 saved scripts, 0 data sheets, and 0 steps
+        assertTrue(engine.savedScripts.value.isEmpty())
+        assertTrue(engine.dataSheets.value.isEmpty())
+        assertTrue(engine.currentScript.value.steps.isEmpty())
+
+        // Attempt to start playback when no scripts exist -> cannot start, switches to CREATE_AUTOMATION
+        engine.startPlayback()
+        assertEquals(com.example.model.HudMode.CREATE_AUTOMATION, engine.executionState.value.hudMode)
+        assertEquals(com.example.model.AutomationStatus.RECORDING, engine.executionState.value.status)
+
+        // Grab elements via No-Type recording (user taps input, checkbox, and submit button without typing)
+        engine.jsInterface.onUserAction("INPUT", "#user_email", "Fill Email (#user_email)", "email")
+        engine.jsInterface.onUserAction("CHECKBOX", "#agree_terms", "Check Box (#agree_terms)", "")
+        engine.jsInterface.onUserAction("SUBMIT", "button[type=\"submit\"]", "Submit Form", "")
+
+        val steps = engine.currentScript.value.steps
+        assertEquals(3, steps.size)
+        assertEquals(com.example.model.AutomationActionType.INPUT, steps[0].actionType)
+        assertEquals("{{email}}", steps[0].value)
+        assertEquals("email", steps[0].variableKey)
+        assertEquals(com.example.model.AutomationActionType.CHECKBOX, steps[1].actionType)
+        assertEquals(com.example.model.AutomationActionType.SUBMIT, steps[2].actionType)
+        assertEquals(1, engine.savedScripts.value.size)
+        assertEquals(3, engine.savedScripts.value.first().steps.size)
     }
 }
