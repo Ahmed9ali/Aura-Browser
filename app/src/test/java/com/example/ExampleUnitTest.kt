@@ -250,5 +250,94 @@ class ExampleUnitTest {
         assertEquals(com.example.model.AutomationActionType.SUBMIT, steps[2].actionType)
         assertEquals(1, engine.savedScripts.value.size)
         assertEquals(3, engine.savedScripts.value.first().steps.size)
+
+        // Delete all steps 1 by 1 and verify it does NOT re-grab in a loop
+        steps.forEach { step -> engine.removeStep(step.id) }
+        assertTrue("Steps should be empty after deleting all", engine.currentScript.value.steps.isEmpty())
+        assertTrue("Saved scripts should not retain deleted empty script", engine.savedScripts.value.isEmpty())
+
+        // Simulate page load or passive scan result after deleting all -> must stay empty (no loop)
+        engine.onPageLoaded("https://github.com/signup")
+        val mockScanJson = """
+            [{"tagName":"input","type":"email","nameAttr":"email","idAttr":"email","placeholder":"Email","text":"","selector":"#email","pageUrl":"https://github.com/signup","isInput":true,"isButton":false,"semanticType":"EMAIL","detectedOptions":[]}]
+        """.trimIndent()
+        engine.jsInterface.onScanResults(mockScanJson)
+        assertTrue("Passive scan after deleting all steps must NOT auto-regrab steps in a loop", engine.currentScript.value.steps.isEmpty())
+
+        // Explicit user press of "Grab Elements" (triggerScan(autoReadySteps = true)) SHOULD grab elements
+        engine.triggerScan(autoReadySteps = true)
+        engine.jsInterface.onScanResults(mockScanJson)
+        assertEquals(1, engine.currentScript.value.steps.size)
+
+        // Clear All / Reset Script should wipe steps and stay empty
+        engine.startFreshRecordingScript("https://github.com/signup")
+        assertTrue("Clear All must leave steps empty without re-grabbing", engine.currentScript.value.steps.isEmpty())
+    }
+
+    @Test
+    fun testMultiPageElementGrabbingAndPage1Start() {
+        val testScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Unconfined)
+        val engine = com.example.automation.AutomationEngine(testScope)
+
+        val page1Url = "https://example.com/signup/step1"
+        val page2Url = "https://example.com/signup/step2"
+        val page3Url = "https://example.com/signup/step3"
+
+        // 1. User opens Page 1 and presses "Grab Elements"
+        engine.onPageLoaded(page1Url)
+        engine.triggerScan(autoReadySteps = true)
+        val page1ScanJson = """
+            [
+              {"tagName":"input","type":"email","nameAttr":"email","idAttr":"email","placeholder":"Email","text":"","selector":"#email","pageUrl":"https://example.com/signup/step1","isInput":true,"isButton":false,"semanticType":"EMAIL","detectedOptions":[]},
+              {"tagName":"button","type":"submit","nameAttr":"","idAttr":"next1","placeholder":"","text":"Next","selector":"#next1","pageUrl":"https://example.com/signup/step1","isInput":false,"isButton":true,"semanticType":"SUBMIT_BUTTON","detectedOptions":[]}
+            ]
+        """.trimIndent()
+        engine.jsInterface.onScanResults(page1ScanJson)
+
+        assertEquals("Page 1 should have 2 grabbed steps", 2, engine.currentScript.value.steps.size)
+        assertEquals("Starting targetUrl must be Page 1", page1Url, engine.currentScript.value.targetUrl)
+
+        // 2. User navigates to Page 2 and presses "Grab Elements"
+        engine.onPageLoaded(page2Url)
+        engine.triggerScan(autoReadySteps = true)
+        val page2ScanJson = """
+            [
+              {"tagName":"input","type":"text","nameAttr":"username","idAttr":"username","placeholder":"Username","text":"","selector":"#username","pageUrl":"https://example.com/signup/step2","isInput":true,"isButton":false,"semanticType":"USERNAME","detectedOptions":[]},
+              {"tagName":"input","type":"password","nameAttr":"password","idAttr":"password","placeholder":"Password","text":"","selector":"#password","pageUrl":"https://example.com/signup/step2","isInput":true,"isButton":false,"semanticType":"PASSWORD","detectedOptions":[]},
+              {"tagName":"button","type":"submit","nameAttr":"","idAttr":"next2","placeholder":"","text":"Continue","selector":"#next2","pageUrl":"https://example.com/signup/step2","isInput":false,"isButton":true,"semanticType":"SUBMIT_BUTTON","detectedOptions":[]}
+            ]
+        """.trimIndent()
+        engine.jsInterface.onScanResults(page2ScanJson)
+
+        // Verify Page 1 steps are STILL included in total step count (2 from Page 1 + 3 from Page 2 = 5 steps)
+        val stepsAfterPage2 = engine.currentScript.value.steps
+        assertEquals("Total steps must include Page 1 (2) + Page 2 (3) = 5 steps", 5, stepsAfterPage2.size)
+        assertEquals("First step must still belong to Page 1", page1Url, stepsAfterPage2[0].pageUrl)
+        assertEquals("Second step must still belong to Page 1", page1Url, stepsAfterPage2[1].pageUrl)
+        assertEquals("Third step must belong to Page 2", page2Url, stepsAfterPage2[2].pageUrl)
+        assertEquals("Starting URL must remain Page 1, NOT overwritten by Page 2", page1Url, engine.getStartingPageUrl())
+
+        // 3. User visits Page 3 and taps an element via Tap-Grab
+        engine.onPageLoaded(page3Url)
+        engine.jsInterface.onPageUrlDetected(page3Url)
+        engine.jsInterface.onUserAction("CHECKBOX", "#terms", "Check Box (#terms)", "")
+        engine.jsInterface.onUserAction("SUBMIT", "#finish", "Finish Signup", "")
+
+        val allSteps = engine.currentScript.value.steps
+        assertEquals("Total steps must include Page 1 (2) + Page 2 (3) + Page 3 (2) = 7 steps", 7, allSteps.size)
+        assertEquals("Execution state totalSteps must reflect all 7 steps across all 3 pages", 7, engine.executionState.value.totalSteps)
+        assertEquals("Starting URL must still be Page 1", page1Url, engine.getStartingPageUrl())
+
+        // 4. Verify that when automation is started while sitting on Page 3, it navigates back to Page 1 first
+        var navigatedToUrl: String? = null
+        engine.webViewNavigator = { url ->
+            navigatedToUrl = url
+            engine.onPageLoaded(url)
+        }
+        engine.startPlayback()
+        assertEquals("When starting playback from Page 3, engine must navigate to Page 1 first", page1Url, navigatedToUrl)
+        engine.stopPlayback()
     }
 }
+
+

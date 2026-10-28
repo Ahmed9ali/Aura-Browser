@@ -2,39 +2,43 @@ package com.example.ui.components
 
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Layers
-import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material.icons.outlined.Home
-import androidx.compose.material.icons.outlined.Layers
+import androidx.compose.material.icons.outlined.MoreHoriz
 import androidx.compose.material.icons.outlined.Search
-import androidx.compose.material3.Badge
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -46,17 +50,20 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.model.NavScreen
-import com.example.ui.theme.ExpressiveChipShape
-import com.example.ui.theme.ExpressiveDockShape
 
 /**
- * Material 3 Expressive Bottom Navigation Bar
- * Features expressive pill dock container, spring-animated active indicator pills,
- * and tactile touch targets respecting system insets.
+ * Refined Material 3 Browser Bottom Navigation Bar.
+ * Features a sleek edge-to-edge surface container, spring-animated active pill indicators,
+ * an authentic browser Tab Counter Box, and smart bookmark status indication.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -68,90 +75,105 @@ fun BrowserBottomBar(
     onBookmarkPress: () -> Unit,
     onBookmarkHold: () -> Unit,
     onMoreClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isMoreActive: Boolean = false
 ) {
+    val isHomeSelected = currentScreen == NavScreen.HOME || currentScreen == NavScreen.WEB_PAGE
+    val isBookmarkSelected = currentScreen == NavScreen.BOOKMARK
+    val isSearchSelected = currentScreen == NavScreen.SEARCH
+    val isTabSelected = currentScreen == NavScreen.TAB
+    val isMoreSelected = isMoreActive ||
+        currentScreen == NavScreen.HISTORY ||
+        currentScreen == NavScreen.AUTOMATION ||
+        currentScreen == NavScreen.SETTINGS
+
     Surface(
-        tonalElevation = 6.dp,
-        shadowElevation = 8.dp,
-        color = MaterialTheme.colorScheme.surface,
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        tonalElevation = 3.dp,
+        shadowElevation = 6.dp,
         modifier = modifier.fillMaxWidth()
     ) {
-        Box(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .navigationBarsPadding()
-                .padding(horizontal = 8.dp, vertical = 6.dp)
         ) {
-            Surface(
-                shape = ExpressiveDockShape,
-                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
-                tonalElevation = 3.dp,
-                shadowElevation = 2.dp,
+            HorizontalDivider(
+                thickness = 0.75.dp,
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
+            )
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceEvenly,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(64.dp)
+                    .height(68.dp)
+                    .padding(horizontal = 8.dp)
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceEvenly,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 6.dp)
-                ) {
-                    // 1. Home
-                    ExpressiveNavItem(
-                        label = "Home",
-                        icon = if (currentScreen == NavScreen.HOME) Icons.Filled.Home else Icons.Outlined.Home,
-                        isSelected = currentScreen == NavScreen.HOME,
-                        onClick = { onNavigate(NavScreen.HOME) },
-                        testTag = "nav_home",
-                        modifier = Modifier.weight(1f)
-                    )
+                // 1. Home
+                BrowserNavItem(
+                    label = "Home",
+                    icon = if (isHomeSelected) Icons.Filled.Home else Icons.Outlined.Home,
+                    isSelected = isHomeSelected,
+                    onClick = { onNavigate(NavScreen.HOME) },
+                    testTag = "nav_home",
+                    modifier = Modifier.weight(1f)
+                )
 
-                    // 2. Bookmark (Tap = Bookmark Web Page, Hold = Open Bookmarks)
-                    ExpressiveNavItem(
-                        label = "Bookmark",
-                        icon = if (isCurrentPageBookmarked || currentScreen == NavScreen.BOOKMARK) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
-                        isSelected = currentScreen == NavScreen.BOOKMARK,
-                        activeColor = if (isCurrentPageBookmarked) Color(0xFFF59E0B) else MaterialTheme.colorScheme.primary,
-                        onClick = onBookmarkPress,
-                        onLongClick = onBookmarkHold,
-                        testTag = "nav_bookmark",
-                        modifier = Modifier.weight(1f)
-                    )
+                // 2. Bookmarks
+                BrowserNavItem(
+                    label = "Bookmarks",
+                    icon = if (isCurrentPageBookmarked || isBookmarkSelected) {
+                        Icons.Filled.Bookmark
+                    } else {
+                        Icons.Outlined.BookmarkBorder
+                    },
+                    isSelected = isBookmarkSelected,
+                    isHighlightedAccent = isCurrentPageBookmarked && !isBookmarkSelected,
+                    accentColor = Color(0xFFF59E0B),
+                    onClick = onBookmarkPress,
+                    onLongClick = onBookmarkHold,
+                    testTag = "nav_bookmark",
+                    modifier = Modifier.weight(1f)
+                )
 
-                    // 3. Search
-                    ExpressiveNavItem(
-                        label = "Search",
-                        icon = if (currentScreen == NavScreen.SEARCH) Icons.Filled.Search else Icons.Outlined.Search,
-                        isSelected = currentScreen == NavScreen.SEARCH,
-                        onClick = { onNavigate(NavScreen.SEARCH) },
-                        testTag = "nav_search",
-                        modifier = Modifier.weight(1f)
-                    )
+                // 3. Search
+                BrowserNavItem(
+                    label = "Search",
+                    icon = if (isSearchSelected) Icons.Filled.Search else Icons.Outlined.Search,
+                    isSelected = isSearchSelected,
+                    onClick = { onNavigate(NavScreen.SEARCH) },
+                    testTag = "nav_search",
+                    modifier = Modifier.weight(1f)
+                )
 
-                    // 4. Tab (with badge)
-                    ExpressiveNavItem(
-                        label = "Tabs",
-                        icon = if (currentScreen == NavScreen.TAB) Icons.Filled.Layers else Icons.Outlined.Layers,
-                        isSelected = currentScreen == NavScreen.TAB,
-                        badgeCount = tabCount,
-                        onClick = { onNavigate(NavScreen.TAB) },
-                        testTag = "nav_tab",
-                        modifier = Modifier.weight(1f)
-                    )
+                // 4. Tabs (Authentic Browser Tab Counter Box)
+                BrowserNavItem(
+                    label = "Tabs",
+                    icon = null,
+                    isSelected = isTabSelected,
+                    onClick = { onNavigate(NavScreen.TAB) },
+                    testTag = "nav_tab",
+                    modifier = Modifier.weight(1f),
+                    customIconContent = { tint ->
+                        BrowserTabCounterIcon(
+                            count = tabCount,
+                            isSelected = isTabSelected,
+                            tint = tint
+                        )
+                    }
+                )
 
-                    // 5. 3-Dots Menu (More features)
-                    ExpressiveNavItem(
-                        label = "More",
-                        icon = Icons.Default.MoreVert,
-                        isSelected = false,
-                        onClick = onMoreClick,
-                        testTag = "nav_more_menu",
-                        modifier = Modifier.weight(1f)
-                    )
-                }
+                // 5. More Menu
+                BrowserNavItem(
+                    label = "More",
+                    icon = if (isMoreSelected) Icons.Filled.MoreHoriz else Icons.Outlined.MoreHoriz,
+                    isSelected = isMoreSelected,
+                    onClick = onMoreClick,
+                    testTag = "nav_more_menu",
+                    modifier = Modifier.weight(1f)
+                )
             }
         }
     }
@@ -159,95 +181,173 @@ fun BrowserBottomBar(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ExpressiveNavItem(
+private fun BrowserNavItem(
     label: String,
-    icon: ImageVector,
+    icon: ImageVector?,
     isSelected: Boolean,
     onClick: () -> Unit,
     onLongClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
-    badgeCount: Int? = null,
-    activeColor: Color = MaterialTheme.colorScheme.primary,
-    testTag: String = ""
+    isHighlightedAccent: Boolean = false,
+    accentColor: Color = MaterialTheme.colorScheme.primary,
+    testTag: String = "",
+    customIconContent: (@Composable (Color) -> Unit)? = null
 ) {
     val interactionSource = remember { MutableInteractionSource() }
 
-    val iconScale by animateFloatAsState(
-        targetValue = if (isSelected) 1.08f else 1.0f,
+    val pillScale by animateFloatAsState(
+        targetValue = if (isSelected) 1.0f else 0.88f,
         animationSpec = spring(
             dampingRatio = Spring.DampingRatioMediumBouncy,
             stiffness = Spring.StiffnessMediumLow
         ),
-        label = "nav_icon_scale"
+        label = "nav_pill_scale"
+    )
+
+    val pillWidth by animateDpAsState(
+        targetValue = if (isSelected) 54.dp else 44.dp,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = Spring.StiffnessMedium
+        ),
+        label = "nav_pill_width"
     )
 
     val containerColor by animateColorAsState(
-        targetValue = if (isSelected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent,
+        targetValue = when {
+            isSelected -> MaterialTheme.colorScheme.primaryContainer
+            isHighlightedAccent -> accentColor.copy(alpha = 0.14f)
+            else -> Color.Transparent
+        },
         animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
         label = "nav_container_color"
     )
 
-    val iconTint by animateColorAsState(
-        targetValue = if (isSelected) activeColor else MaterialTheme.colorScheme.onSurfaceVariant,
+    val contentColor by animateColorAsState(
+        targetValue = when {
+            isSelected -> MaterialTheme.colorScheme.onPrimaryContainer
+            isHighlightedAccent -> accentColor
+            else -> MaterialTheme.colorScheme.onSurfaceVariant
+        },
         animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
-        label = "nav_icon_tint"
+        label = "nav_content_color"
+    )
+
+    val labelColor by animateColorAsState(
+        targetValue = when {
+            isSelected -> MaterialTheme.colorScheme.primary
+            isHighlightedAccent -> accentColor
+            else -> MaterialTheme.colorScheme.onSurfaceVariant
+        },
+        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+        label = "nav_label_color"
     )
 
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
         modifier = modifier
-            .clip(RoundedCornerShape(18.dp))
+            .minimumInteractiveComponentSize()
+            .clip(RoundedCornerShape(16.dp))
             .combinedClickable(
                 interactionSource = interactionSource,
-                indication = ripple(bounded = true, radius = 26.dp),
+                indication = ripple(bounded = true, radius = 32.dp),
+                role = Role.Tab,
                 onClick = onClick,
                 onLongClick = onLongClick
             )
-            .padding(vertical = 4.dp)
+            .padding(vertical = 6.dp, horizontal = 2.dp)
+            .semantics { contentDescription = label }
             .testTag(testTag)
     ) {
-        Box(contentAlignment = Alignment.Center) {
-            Surface(
-                shape = ExpressiveChipShape,
-                color = containerColor,
-                modifier = Modifier
-                    .size(width = 48.dp, height = 30.dp)
-                    .scale(iconScale)
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        imageVector = icon,
-                        contentDescription = label,
-                        tint = iconTint,
-                        modifier = Modifier.size(22.dp)
-                    )
-                }
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+                .width(pillWidth)
+                .height(30.dp)
+                .scale(pillScale)
+                .clip(RoundedCornerShape(15.dp))
+                .background(containerColor)
+        ) {
+            if (customIconContent != null) {
+                customIconContent(contentColor)
+            } else if (icon != null) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = label,
+                    tint = contentColor,
+                    modifier = Modifier.size(22.dp)
+                )
             }
 
-            if (badgeCount != null && badgeCount > 0) {
-                Badge(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    contentColor = MaterialTheme.colorScheme.onPrimary,
+            if (isHighlightedAccent) {
+                Box(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
-                        .offset(x = 6.dp, y = (-4).dp)
-                ) {
-                    Text(
-                        text = if (badgeCount > 99) "99+" else badgeCount.toString(),
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
+                        .padding(top = 4.dp, end = 10.dp)
+                        .size(6.dp)
+                        .clip(CircleShape)
+                        .background(accentColor)
+                )
             }
         }
+
+        Spacer(modifier = Modifier.height(3.dp))
 
         Text(
             text = label,
             fontSize = 11.sp,
-            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-            color = if (isSelected) activeColor else MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = 2.dp)
+            lineHeight = 13.sp,
+            fontWeight = if (isSelected || isHighlightedAccent) FontWeight.Bold else FontWeight.Medium,
+            color = labelColor,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center
+        )
+    }
+}
+
+/**
+ * Authentic Browser Tab Counter Box Icon (like Chrome/Brave/Edge mobile tab switcher).
+ * Displays the live open tab count inside a crisp rounded square frame.
+ */
+@Composable
+private fun BrowserTabCounterIcon(
+    count: Int,
+    isSelected: Boolean,
+    tint: Color
+) {
+    val displayCount = when {
+        count <= 0 -> "1"
+        count > 99 -> ":D"
+        else -> count.toString()
+    }
+
+    val shape = RoundedCornerShape(6.dp)
+    val backgroundColor = if (isSelected) tint else Color.Transparent
+    val textColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer else tint
+
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .size(21.dp)
+            .clip(shape)
+            .background(backgroundColor)
+            .border(
+                BorderStroke(
+                    width = 1.8.dp,
+                    color = tint
+                ),
+                shape = shape
+            )
+    ) {
+        Text(
+            text = displayCount,
+            color = textColor,
+            fontSize = if (displayCount.length >= 2) 9.5.sp else 11.sp,
+            fontWeight = FontWeight.ExtraBold,
+            lineHeight = 11.sp,
+            textAlign = TextAlign.Center
         )
     }
 }

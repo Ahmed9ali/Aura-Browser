@@ -838,8 +838,17 @@ private fun RunAutomationHudContent(
                                         }
                                     }
                                 }
+                                val distinctPageCount = remember(currentScript.steps) {
+                                    currentScript.steps.mapNotNull {
+                                        it.pageUrl.trim().trimEnd('/').lowercase().takeIf { u -> u.isNotBlank() && !u.startsWith("aura://") }
+                                    }.distinct().size.coerceAtLeast(if (currentScript.steps.isNotEmpty()) 1 else 0)
+                                }
                                 Text(
-                                    text = "${currentScript.steps.size} grabbed steps • Target: ${currentScript.targetWebsite}",
+                                    text = if (distinctPageCount > 1) {
+                                        "${currentScript.steps.size} grabbed steps • $distinctPageCount pages (Starts Page 1)"
+                                    } else {
+                                        "${currentScript.steps.size} grabbed steps • Target: ${currentScript.targetWebsite}"
+                                    },
                                     fontSize = 11.sp,
                                     color = MaterialTheme.colorScheme.primary
                                 )
@@ -1198,7 +1207,7 @@ private fun RunAutomationHudContent(
 }
 
 /**
- * Tab Content: Create Automation (No-Type Element Grabbing & Instant Ready Use)
+ * Tab Content: Create Automation (Clean, Uncluttered No-Type Element Grabber)
  */
 @Composable
 private fun CreateAutomationHudContent(
@@ -1228,125 +1237,98 @@ private fun CreateAutomationHudContent(
     val isRecording = executionState.status == AutomationStatus.RECORDING
     val isOnHomeScreen = currentUrl.isBlank() || currentUrl.startsWith("aura://")
     var targetSiteInput by remember { mutableStateOf("") }
+    var showRawScannedStrip by remember { mutableStateOf(false) }
 
-    Column(modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
-        // If user clicked the Robot icon on the Main Screen (aura://home), let them enter a website URL right here to open & auto-create script
+    Column(
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+    ) {
+        // If on Home Screen, simple inline URL bar to open a site
         if (isOnHomeScreen) {
-            Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)),
-                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Column(
-                    modifier = Modifier.padding(10.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Text(
-                        text = "Step 1: Open a Website to Create Your Script",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        OutlinedTextField(
-                            value = targetSiteInput,
-                            onValueChange = { targetSiteInput = it },
-                            placeholder = { Text("Enter website URL (e.g. github.com/signup)", fontSize = 11.sp) },
-                            singleLine = true,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Button(
-                            onClick = {
-                                val raw = targetSiteInput.trim()
-                                if (raw.isNotBlank()) {
-                                    onNavigateWebViewToUrl(raw)
-                                }
-                            },
-                            enabled = targetSiteInput.isNotBlank(),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp)
-                        ) {
-                            Text("Open & Grab", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                OutlinedTextField(
+                    value = targetSiteInput,
+                    onValueChange = { targetSiteInput = it },
+                    placeholder = { Text("Enter URL (e.g. github.com/signup)", fontSize = 12.sp) },
+                    singleLine = true,
+                    modifier = Modifier.weight(1f)
+                )
+                Button(
+                    onClick = {
+                        val raw = targetSiteInput.trim()
+                        if (raw.isNotBlank()) {
+                            onNavigateWebViewToUrl(raw)
                         }
-                    }
+                    },
+                    enabled = targetSiteInput.isNotBlank(),
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp)
+                ) {
+                    Text("Open", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
 
-        // No-Type Recording Helper Banner
+        // Clean, Minimal Single-Line "No Typing Required" Pill
         Surface(
             shape = RoundedCornerShape(10.dp),
-            color = Color(0xFF10B981).copy(alpha = 0.12f),
-            border = BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.35f)),
-            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+            modifier = Modifier.fillMaxWidth()
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
-                modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp)
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
             ) {
-                Column(modifier = Modifier.weight(1f)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Surface(
+                        shape = CircleShape,
+                        color = if (isRecording) Color(0xFF10B981) else MaterialTheme.colorScheme.outline,
+                        modifier = Modifier.size(8.dp)
+                    ) {}
                     Text(
-                        text = "No Typing Required — Tap or Grab Elements",
+                        text = "No typing needed — tap fields or press Grab Elements",
                         fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF059669)
-                    )
-                    Text(
-                        text = "Tapped/grabbed fields, checkboxes & buttons are auto-mapped to fill from your Data Sheet or Default on start.",
-                        fontSize = 10.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
+
                 if (dataSheets.isEmpty()) {
-                    TextButton(
-                        onClick = onOpenCreateDataSheet,
-                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
-                    ) {
-                        Text("+ Data Sheet", fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                    }
+                    Text(
+                        text = "+ Data Sheet",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .clickable { onOpenCreateDataSheet() }
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
                 }
             }
         }
 
-        // Row 1: Primary active capture controls
+        // Primary Capture Controls (2 clean buttons)
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)
+            modifier = Modifier.fillMaxWidth()
         ) {
-            Button(
-                onClick = onToggleRecord,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = if (isRecording) Color(0xFFEF4444) else MaterialTheme.colorScheme.primaryContainer,
-                    contentColor = if (isRecording) Color.White else MaterialTheme.colorScheme.onPrimaryContainer
-                ),
-                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
-                modifier = Modifier.weight(1f).height(44.dp).testTag("btn_record_clicks")
-            ) {
-                Icon(
-                    imageVector = if (isRecording) Icons.Default.Stop else Icons.Default.FiberManualRecord,
-                    contentDescription = null,
-                    tint = if (isRecording) Color.White else Color(0xFFEF4444),
-                    modifier = Modifier.size(16.dp)
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(
-                    text = if (isRecording) "Tap Elements (Live)" else "Tap to Grab Mode",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-
             Button(
                 onClick = { onTriggerScan() },
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFF06B6D4).copy(alpha = 0.18f),
-                    contentColor = Color(0xFF0891B2)
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
                 ),
                 contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
                 modifier = Modifier.weight(1f).height(44.dp).testTag("btn_grab_elements")
@@ -1354,7 +1336,6 @@ private fun CreateAutomationHudContent(
                 Icon(
                     imageVector = Icons.Default.DocumentScanner,
                     contentDescription = null,
-                    tint = Color(0xFF0891B2),
                     modifier = Modifier.size(16.dp)
                 )
                 Spacer(modifier = Modifier.width(6.dp))
@@ -1364,191 +1345,231 @@ private fun CreateAutomationHudContent(
                     fontWeight = FontWeight.Bold
                 )
             }
-        }
-
-        // Row 2: Workflow Actions: New Script, + Next Page / URL, Save Script
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)
-        ) {
-            OutlinedButton(
-                onClick = onStartFreshScript,
-                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
-                modifier = Modifier.weight(1f).testTag("btn_new_script_hud")
-            ) {
-                Icon(Icons.Default.NoteAdd, contentDescription = null, modifier = Modifier.size(14.dp))
-                Spacer(modifier = Modifier.width(4.dp))
-                Text("Reset Script", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-            }
 
             OutlinedButton(
-                onClick = onOpenAddNavigate,
-                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
-                modifier = Modifier.weight(1.1f).testTag("btn_add_navigate_step")
+                onClick = onToggleRecord,
+                border = BorderStroke(
+                    1.dp,
+                    if (isRecording) Color(0xFFEF4444) else MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)
+                ),
+                colors = ButtonDefaults.outlinedButtonColors(
+                    containerColor = if (isRecording) Color(0xFFEF4444).copy(alpha = 0.1f) else Color.Transparent,
+                    contentColor = if (isRecording) Color(0xFFEF4444) else MaterialTheme.colorScheme.onSurface
+                ),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+                modifier = Modifier.weight(1f).height(44.dp).testTag("btn_record_clicks")
             ) {
-                Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, modifier = Modifier.size(14.dp))
-                Spacer(modifier = Modifier.width(4.dp))
-                Text("+ Next Page", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-            }
-
-            Button(
-                onClick = onOpenSaveScript,
-                enabled = currentScript.steps.isNotEmpty(),
-                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-                modifier = Modifier.weight(1.1f).testTag("btn_save_script_hud")
-            ) {
-                Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(14.dp))
-                Spacer(modifier = Modifier.width(4.dp))
-                Text("Save Script", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-            }
-        }
-
-        // Instant "Ready — Start Automation Now" button once elements are grabbed
-        if (currentScript.steps.isNotEmpty()) {
-            Button(
-                onClick = onReadyAndRun,
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981), contentColor = Color.White),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 6.dp)
-                    .height(42.dp)
-                    .testTag("btn_ready_start_from_create")
-            ) {
-                Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
+                Icon(
+                    imageVector = if (isRecording) Icons.Default.Stop else Icons.Default.FiberManualRecord,
+                    contentDescription = null,
+                    tint = if (isRecording) Color(0xFFEF4444) else MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(15.dp)
+                )
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = "Ready (${currentScript.steps.size} Elements) — Start Automation Now",
+                    text = if (isRecording) "Tap Grab: ON" else "Tap Grab: OFF",
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold
                 )
             }
         }
 
-        // Scanned DOM Elements Strip
-        if (scannedElements.isNotEmpty()) {
-            Column(modifier = Modifier.padding(top = 4.dp)) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 6.dp)
-                ) {
-                    Text(
-                        text = "Detected Page Elements (${scannedElements.size})",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF0891B2)
-                    )
-
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = Color(0xFF6366F1).copy(alpha = 0.15f),
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .clickable { onAutoMapAllScanned() }
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                            ) {
-                                Icon(Icons.Default.AutoFixHigh, contentDescription = null, tint = Color(0xFF6366F1), modifier = Modifier.size(13.dp))
-                                Text("Rebuild Ready Steps", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF6366F1))
-                            }
-                        }
-
-                        Text(
-                            text = "Hide",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(4.dp))
-                                .clickable { onClearScan() }
-                                .padding(horizontal = 6.dp, vertical = 4.dp)
-                        )
-                    }
-                }
-
-                LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)
-                ) {
-                    items(scannedElements) { element ->
-                        ScannedElementCard(
-                            element = element,
-                            onAdd = { onAddScannedElement(element) },
-                            onEdit = { onEditScannedElement(element) }
-                        )
-                    }
+        val distinctPages = remember(currentScript.steps) {
+            val pages = mutableListOf<String>()
+            currentScript.steps.forEach { s ->
+                val norm = s.pageUrl.trim().trimEnd('/').lowercase()
+                if (norm.isNotBlank() && !norm.startsWith("aura://") && !pages.contains(norm)) {
+                    pages.add(norm)
                 }
             }
+            pages
         }
 
-        // Captured Script Steps List in HUD
-        Column(modifier = Modifier.padding(top = 4.dp)) {
+        // Grabbed Elements Header & Quick Actions
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+            modifier = Modifier.fillMaxWidth()
+        ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 6.dp)
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Text(
-                    text = "Ready Script Elements (${currentScript.steps.size})",
+                    text = "Grabbed (${currentScript.steps.size})",
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface
                 )
+
+                if (distinctPages.size > 1) {
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = Color(0xFF10B981).copy(alpha = 0.15f)
+                    ) {
+                        Text(
+                            text = "${distinctPages.size} Pages (P1→P${distinctPages.size})",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF10B981),
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+
+                if (scannedElements.isNotEmpty()) {
+                    Text(
+                        text = if (showRawScannedStrip) "Hide Scanned" else "Scanned (${scannedElements.size})",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color(0xFF0891B2),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .clickable { showRawScannedStrip = !showRawScannedStrip }
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
+            }
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
                 Text(
-                    text = "Manage in Studio →",
+                    text = "+ URL",
                     fontSize = 11.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier
-                        .clip(RoundedCornerShape(4.dp))
+                        .clip(RoundedCornerShape(6.dp))
+                        .clickable { onOpenAddNavigate() }
+                        .padding(horizontal = 6.dp, vertical = 4.dp)
+                        .testTag("btn_add_navigate_step")
+                )
+
+                if (currentScript.steps.isNotEmpty() || scannedElements.isNotEmpty()) {
+                    Text(
+                        text = "Clear All",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .clickable {
+                                showRawScannedStrip = false
+                                onStartFreshScript()
+                            }
+                            .padding(horizontal = 6.dp, vertical = 4.dp)
+                            .testTag("btn_new_script_hud")
+                    )
+                } else {
+                    // Preserve testTag when list is empty
+                    Box(modifier = Modifier.size(1.dp).testTag("btn_new_script_hud"))
+                }
+
+                Text(
+                    text = "Studio",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
                         .clickable { onOpenScriptManager() }
-                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                        .padding(horizontal = 6.dp, vertical = 4.dp)
                 )
             }
+        }
 
-            if (currentScript.steps.isEmpty()) {
-                Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 4.dp)
-                ) {
-                    Text(
-                        text = "No elements grabbed yet. Tap 'Grab Elements' to auto-prepare all fields, checkboxes, and buttons on the page, or simply tap elements on the page directly (no typing required).",
-                        fontSize = 11.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(12.dp)
+        // Optional collapsible Scanned Elements strip (collapsed by default to keep HUD clean)
+        if (showRawScannedStrip && scannedElements.isNotEmpty()) {
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                items(scannedElements) { element ->
+                    ScannedElementCard(
+                        element = element,
+                        onAdd = { onAddScannedElement(element) },
+                        onEdit = { onEditScannedElement(element) }
                     )
                 }
-            } else {
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 165.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
+            }
+        }
+
+        // Grabbed Elements List
+        if (currentScript.steps.isEmpty()) {
+            Surface(
+                shape = RoundedCornerShape(10.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = "No elements grabbed yet. Press 'Grab Elements' or tap any input/button on the page.",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)
+                )
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 150.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                itemsIndexed(currentScript.steps) { index, step ->
+                    val normPage = step.pageUrl.trim().trimEnd('/').lowercase()
+                    val pageIdx = distinctPages.indexOf(normPage).let { if (it >= 0) it + 1 else 1 }
+                    EditableHudStepCard(
+                        index = index,
+                        totalCount = currentScript.steps.size,
+                        step = step,
+                        pageNumber = pageIdx,
+                        totalPages = distinctPages.size.coerceAtLeast(1),
+                        onEdit = { onEditStep(step) },
+                        onMoveUp = { onMoveStep(step.id, -1) },
+                        onMoveDown = { onMoveStep(step.id, 1) },
+                        onDelete = { onDeleteStep(step.id) }
+                    )
+                }
+            }
+
+            // Bottom Action Bar: Save + Start Automation Now
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                OutlinedButton(
+                    onClick = onOpenSaveScript,
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
+                    modifier = Modifier.height(42.dp).testTag("btn_save_script_hud")
                 ) {
-                    itemsIndexed(currentScript.steps) { index, step ->
-                        EditableHudStepCard(
-                            index = index,
-                            totalCount = currentScript.steps.size,
-                            step = step,
-                            onEdit = { onEditStep(step) },
-                            onMoveUp = { onMoveStep(step.id, -1) },
-                            onMoveDown = { onMoveStep(step.id, 1) },
-                            onDelete = { onDeleteStep(step.id) }
-                        )
-                    }
+                    Icon(Icons.Default.Save, contentDescription = null, modifier = Modifier.size(15.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Save", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+
+                Button(
+                    onClick = onReadyAndRun,
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981), contentColor = Color.White),
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(42.dp)
+                        .testTag("btn_ready_start_from_create")
+                ) {
+                    Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = if (distinctPages.size > 1) {
+                            "Start from Page 1 (${currentScript.steps.size} steps)"
+                        } else {
+                            "Start Automation (${currentScript.steps.size})"
+                        },
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
             }
         }
@@ -1734,13 +1755,15 @@ fun QuickCreateDataSheetDialog(
 }
 
 /**
- * Step Card with direct Edit, Reorder, and Delete buttons in HUD
+ * Clean, Compact Step Card with Edit and Delete actions in HUD
  */
 @Composable
 private fun EditableHudStepCard(
     index: Int,
     totalCount: Int,
     step: AutomationStep,
+    pageNumber: Int = 1,
+    totalPages: Int = 1,
     onEdit: () -> Unit,
     onMoveUp: () -> Unit,
     onMoveDown: () -> Unit,
@@ -1764,8 +1787,8 @@ private fun EditableHudStepCard(
 
     Surface(
         shape = RoundedCornerShape(10.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-        border = BorderStroke(1.dp, actionColor.copy(alpha = 0.35f)),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+        border = BorderStroke(1.dp, actionColor.copy(alpha = 0.3f)),
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onEdit() }
@@ -1782,14 +1805,27 @@ private fun EditableHudStepCard(
             ) {
                 Surface(
                     shape = RoundedCornerShape(6.dp),
-                    color = actionColor.copy(alpha = 0.18f)
+                    color = actionColor.copy(alpha = 0.16f)
                 ) {
                     Text(
-                        text = "${index + 1}. ${step.actionType.name}",
+                        text = "${index + 1}",
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
                         color = actionColor,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
+
+                Surface(
+                    shape = RoundedCornerShape(5.dp),
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
+                ) {
+                    Text(
+                        text = "P$pageNumber",
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
                     )
                 }
 
@@ -1802,17 +1838,15 @@ private fun EditableHudStepCard(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    val dataBindingLabel = if (!step.variableKey.isNullOrBlank()) {
-                        "Fills from Data Sheet/Default: {{${step.variableKey}}} • ${step.selector}"
-                    } else if (step.actionType == AutomationActionType.NAVIGATE) {
-                        "Target URL: ${step.value.ifBlank { step.selector }}"
+                    val subtitle = if (!step.variableKey.isNullOrBlank()) {
+                        "{{${step.variableKey}}} • ${step.selector}"
                     } else {
-                        "Selector: ${step.selector}"
+                        step.selector
                     }
                     Text(
-                        text = dataBindingLabel,
+                        text = subtitle,
                         fontSize = 10.sp,
-                        color = MaterialTheme.colorScheme.primary,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -1821,35 +1855,35 @@ private fun EditableHudStepCard(
 
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (index > 0) {
-                    IconButton(onClick = onMoveUp, modifier = Modifier.size(32.dp)) {
-                        Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Move Up", modifier = Modifier.size(18.dp))
+                    IconButton(onClick = onMoveUp, modifier = Modifier.size(28.dp)) {
+                        Icon(Icons.Default.KeyboardArrowUp, contentDescription = "Move Up", modifier = Modifier.size(16.dp))
                     }
                 }
                 if (index < totalCount - 1) {
-                    IconButton(onClick = onMoveDown, modifier = Modifier.size(32.dp)) {
-                        Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Move Down", modifier = Modifier.size(18.dp))
+                    IconButton(onClick = onMoveDown, modifier = Modifier.size(28.dp)) {
+                        Icon(Icons.Default.KeyboardArrowDown, contentDescription = "Move Down", modifier = Modifier.size(16.dp))
                     }
                 }
                 IconButton(
                     onClick = onEdit,
-                    modifier = Modifier.size(32.dp).testTag("btn_edit_step_$index")
+                    modifier = Modifier.size(28.dp).testTag("btn_edit_step_$index")
                 ) {
                     Icon(
                         imageVector = Icons.Default.Edit,
                         contentDescription = "Edit Step",
                         tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(16.dp)
+                        modifier = Modifier.size(15.dp)
                     )
                 }
                 IconButton(
                     onClick = onDelete,
-                    modifier = Modifier.size(32.dp).testTag("btn_delete_step_$index")
+                    modifier = Modifier.size(28.dp).testTag("btn_delete_step_$index")
                 ) {
                     Icon(
                         imageVector = Icons.Default.Delete,
                         contentDescription = "Delete Step",
                         tint = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.size(16.dp)
+                        modifier = Modifier.size(15.dp)
                     )
                 }
             }

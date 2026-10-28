@@ -95,44 +95,13 @@ fun BookmarksScreen(
             .fillMaxSize()
             .testTag("bookmarks_screen")
     ) {
-        // Bookmarks Header
-        Surface(
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 3.dp,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 18.dp, vertical = 14.dp)
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    Surface(
-                        shape = ExpressiveChipShape,
-                        color = Color(0xFFF59E0B).copy(alpha = 0.16f),
-                        modifier = Modifier.size(36.dp)
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = Icons.Default.Bookmark,
-                                contentDescription = null,
-                                tint = Color(0xFFF59E0B),
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                    }
-                    Text(
-                        text = "Bookmarks",
-                        style = MaterialTheme.typography.titleLarge,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                }
-
+        // Professional Bookmarks App Bar
+        com.example.ui.components.AuraSubScreenTopBar(
+            title = "Bookmarks",
+            subtitle = "${bookmarks.size} saved sites • Folder: $selectedFolder",
+            icon = Icons.Default.Bookmark,
+            accentColor = Color(0xFFF59E0B),
+            actions = {
                 Button(
                     onClick = { showAddDialog = true },
                     shape = ExpressivePillShape,
@@ -145,10 +114,10 @@ fun BookmarksScreen(
                         modifier = Modifier.size(16.dp)
                     )
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text(text = "Add", style = MaterialTheme.typography.labelMedium)
+                    Text(text = "Add", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
                 }
             }
-        }
+        )
 
         // Expressive Search within Bookmarks
         OutlinedTextField(

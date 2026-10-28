@@ -95,6 +95,7 @@ fun BrowserApp(
     } ?: false
 
     val automationExecutionState by viewModel.automationEngine.executionState.collectAsStateWithLifecycle()
+    val currentAutomationScript by viewModel.automationEngine.currentScript.collectAsStateWithLifecycle()
     val isAutomationActive = automationExecutionState.isHudVisible ||
             automationExecutionState.status == AutomationStatus.RECORDING ||
             automationExecutionState.status == AutomationStatus.PLAYING
@@ -108,13 +109,17 @@ fun BrowserApp(
         }
     }
 
-    // Back button behavior for sub-screens
-    BackHandler(enabled = uiState.currentScreen != NavScreen.HOME && uiState.currentScreen != NavScreen.WEB_PAGE) {
+    val returnFromSubScreen = {
         if (activeTab != null && !activeTab.url.startsWith("aura://") && activeTab.url != "about:blank") {
             viewModel.navigateTo(NavScreen.WEB_PAGE)
         } else {
             viewModel.navigateTo(NavScreen.HOME)
         }
+    }
+
+    // Back button behavior for sub-screens
+    BackHandler(enabled = uiState.currentScreen != NavScreen.HOME && uiState.currentScreen != NavScreen.WEB_PAGE) {
+        returnFromSubScreen()
     }
 
     Scaffold(
@@ -126,6 +131,8 @@ fun BrowserApp(
                     isLoading = uiState.isLoading,
                     loadProgress = uiState.loadProgress,
                     isAutomationActive = isAutomationActive,
+                    automationStatus = automationExecutionState.status,
+                    automationStepCount = currentAutomationScript.steps.size,
                     onSearchClick = { viewModel.navigateTo(NavScreen.SEARCH) },
                     onReload = {
                         viewModel.reloadActiveTab()
@@ -151,6 +158,7 @@ fun BrowserApp(
                 currentScreen = uiState.currentScreen,
                 tabCount = uiState.tabs.size,
                 isCurrentPageBookmarked = isBookmarked,
+                isMoreActive = uiState.showMoreSheet,
                 onNavigate = { screen ->
                     if (screen == NavScreen.HOME && activeTab != null && !activeTab.url.startsWith("aura://")) {
                         viewModel.loadUrl("aura://home")
@@ -159,7 +167,11 @@ fun BrowserApp(
                     }
                 },
                 onBookmarkPress = {
-                    viewModel.toggleBookmarkCurrentTab()
+                    if (uiState.currentScreen == NavScreen.WEB_PAGE && activeTab != null && !activeTab.url.startsWith("aura://")) {
+                        viewModel.toggleBookmarkCurrentTab()
+                    } else {
+                        viewModel.navigateTo(NavScreen.BOOKMARK)
+                    }
                 },
                 onBookmarkHold = {
                     viewModel.navigateTo(NavScreen.BOOKMARK)
@@ -232,7 +244,8 @@ fun BrowserApp(
                             onSelectSuggestion = { suggestion -> viewModel.selectSuggestion(suggestion) },
                             onClearQuery = { viewModel.clearSearchQuery() },
                             onClearHistory = { viewModel.clearHistory() },
-                            onDeleteHistoryItem = { id -> viewModel.removeHistoryItem(id) }
+                            onDeleteHistoryItem = { id -> viewModel.removeHistoryItem(id) },
+                            onNavigateBack = returnFromSubScreen
                         )
                     }
 
@@ -281,13 +294,7 @@ fun BrowserApp(
                             onClearAllHistory = { viewModel.clearHistory() },
                             onClearTodayHistory = { viewModel.clearTodayHistory() },
                             onCopyUrl = { url -> viewModel.copyToClipboard(context, url) },
-                            onNavigateBack = {
-                                if (activeTab != null && !activeTab.url.startsWith("aura://") && activeTab.url != "about:blank") {
-                                    viewModel.navigateTo(NavScreen.WEB_PAGE)
-                                } else {
-                                    viewModel.navigateTo(NavScreen.HOME)
-                                }
-                            }
+                            onNavigateBack = returnFromSubScreen
                         )
                     }
 
@@ -306,14 +313,13 @@ fun BrowserApp(
                             onDeleteScript = { viewModel.automationEngine.deleteScript(it) },
                             onRunScript = {
                                 viewModel.automationEngine.setHudVisible(true)
-                                if (activeTab != null && !activeTab.url.startsWith("aura://")) {
+                                val page1Url = viewModel.automationEngine.getStartingPageUrl(currentScript)
+                                if (page1Url.isNotBlank() && !page1Url.startsWith("aura://")) {
+                                    viewModel.loadUrl(page1Url)
+                                } else if (activeTab != null && !activeTab.url.startsWith("aura://")) {
                                     viewModel.navigateTo(NavScreen.WEB_PAGE)
                                 } else {
-                                    val target = currentScript.targetUrl.ifBlank {
-                                        if (currentScript.targetWebsite != "*") "https://${currentScript.targetWebsite}"
-                                        else "https://developer.android.com"
-                                    }
-                                    viewModel.loadUrl(target)
+                                    viewModel.loadUrl("https://developer.android.com")
                                 }
                                 viewModel.automationEngine.startPlayback()
                             },
@@ -324,13 +330,7 @@ fun BrowserApp(
                             onUpdateStep = { step -> viewModel.automationEngine.updateStep(step) },
                             onAddStep = { step -> viewModel.automationEngine.addStep(step) },
                             onClearAllSteps = { viewModel.automationEngine.clearAllSteps() },
-                            onNavigateBack = {
-                                if (activeTab != null && !activeTab.url.startsWith("aura://")) {
-                                    viewModel.navigateTo(NavScreen.WEB_PAGE)
-                                } else {
-                                    viewModel.navigateTo(NavScreen.HOME)
-                                }
-                            }
+                            onNavigateBack = returnFromSubScreen
                         )
                     }
 
@@ -424,13 +424,9 @@ fun BrowserApp(
                         onUpdateScannedElement = { viewModel.automationEngine.updateScannedElement(it) },
                         onToggleRecord = { viewModel.automationEngine.toggleRecording() },
                         onStartPlay = {
-                            val targetUrl = script.targetUrl.ifBlank {
-                                if (script.targetWebsite != "*" && script.targetWebsite.isNotBlank()) {
-                                    "https://${script.targetWebsite}"
-                                } else ""
-                            }
-                            if (targetUrl.isNotBlank() && !targetUrl.startsWith("aura://")) {
-                                viewModel.loadUrl(targetUrl)
+                            val page1Url = viewModel.automationEngine.getStartingPageUrl(script)
+                            if (page1Url.isNotBlank() && !page1Url.startsWith("aura://")) {
+                                viewModel.loadUrl(page1Url)
                             }
                             viewModel.automationEngine.startPlayback()
                         },

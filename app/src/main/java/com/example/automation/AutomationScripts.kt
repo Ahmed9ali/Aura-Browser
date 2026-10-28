@@ -4,18 +4,20 @@ object AutomationScripts {
 
     /**
      * JavaScript injected to record user interactions on the page in NO-TYPE Tap-to-Grab mode.
-     * - User does NOT type into input fields!
+     * - User does NOT type into input fields.
+     * - Prevents the Android soft keyboard from appearing when tapping inputs (`inputmode="none"` + instant blur).
      * - Tapping any input, textarea, select, checkbox, radio, or button immediately grabs the element,
      *   binds it to the appropriate Data Sheet field key (e.g. {{email}}, {{username}}, {{password}}),
-     *   blurs the input so the keyboard doesn't get in the way, and marks it "Ready to Fill / Click".
+     *   and marks it "Ready to Fill / Click".
      */
     val RECORDING_INJECTION = """
         (function() {
-            if (window._auraRecorderActive) return;
+            window._auraPlaybackActive = false;
             window._auraRecorderActive = true;
+            if (window._auraRecorderInstalled) return;
+            window._auraRecorderInstalled = true;
             window._auraLastCapturedSelector = '';
             window._auraLastCapturedTime = 0;
-            window._auraGrabCount = window._auraGrabCount || 0;
 
             function cssEscape(str) {
                 if (window.CSS && window.CSS.escape) return window.CSS.escape(str);
@@ -40,10 +42,14 @@ object AutomationScripts {
                     if (isUniqueSelector(idSel, el)) return idSel;
                 }
 
-                var testId = el.getAttribute('data-testid') || el.getAttribute('data-test') || el.getAttribute('data-qa') || el.getAttribute('data-cy');
-                if (testId) {
-                    var testSel = '[' + (el.hasAttribute('data-testid') ? 'data-testid' : (el.hasAttribute('data-test') ? 'data-test' : (el.hasAttribute('data-qa') ? 'data-qa' : 'data-cy'))) + '="' + testId.replace(/"/g, '\\"') + '"]';
-                    if (isUniqueSelector(testSel, el)) return testSel;
+                var testAttrs = ['data-testid', 'data-test', 'data-qa', 'data-cy', 'data-automation-id'];
+                for (var t = 0; t < testAttrs.length; t++) {
+                    var attr = testAttrs[t];
+                    var val = el.getAttribute(attr);
+                    if (val) {
+                        var testSel = '[' + attr + '="' + val.replace(/"/g, '\\"') + '"]';
+                        if (isUniqueSelector(testSel, el)) return testSel;
+                    }
                 }
 
                 if (el.name) {
@@ -71,7 +77,6 @@ object AutomationScripts {
                     if (isUniqueSelector(acSel, el)) return acSel;
                 }
 
-                // Build a guaranteed-unique DOM hierarchy path with :nth-of-type
                 var path = [];
                 var curr = el;
                 while (curr && curr.nodeType === 1 && curr !== document.body && curr !== document.documentElement) {
@@ -121,50 +126,68 @@ object AutomationScripts {
                     if (closestLbl) parts.push(closestLbl.innerText || closestLbl.textContent || '');
                     var ariaLabelledBy = el.getAttribute('aria-labelledby');
                     if (ariaLabelledBy) {
-                        var refEl = document.getElementById(ariaLabelledBy);
-                        if (refEl) parts.push(refEl.innerText || refEl.textContent || '');
+                        var ids = ariaLabelledBy.split(/\s+/);
+                        for (var j = 0; j < ids.length; j++) {
+                            var refEl = document.getElementById(ids[j]);
+                            if (refEl) parts.push(refEl.innerText || refEl.textContent || '');
+                        }
+                    }
+                    var ariaDescribedBy = el.getAttribute('aria-describedby');
+                    if (ariaDescribedBy) {
+                        var dIds = ariaDescribedBy.split(/\s+/);
+                        for (var k = 0; k < dIds.length; k++) {
+                            var dEl = document.getElementById(dIds[k]);
+                            if (dEl) parts.push(dEl.innerText || dEl.textContent || '');
+                        }
                     }
                     var prev = el.previousElementSibling;
                     if (prev && (prev.tagName === 'LABEL' || prev.tagName === 'SPAN' || prev.tagName === 'DIV')) {
                         var prevTxt = (prev.innerText || prev.textContent || '').trim();
-                        if (prevTxt.length < 50) parts.push(prevTxt);
+                        if (prevTxt.length < 60) parts.push(prevTxt);
+                    }
+                    var fieldContainer = el.closest ? el.closest('.form-group, .field, .input-group, .form-field, fieldset') : null;
+                    if (fieldContainer) {
+                        var containerLbl = fieldContainer.querySelector('label, legend, .label, .form-label');
+                        if (containerLbl) parts.push(containerLbl.innerText || containerLbl.textContent || '');
                     }
                 } catch (e) {}
-                return parts.join(' ').trim();
+                return parts.join(' ').replace(/\s+/g, ' ').trim();
             }
 
             function detectFieldKey(el) {
                 if (!el) return '';
                 var type = (el.type || '').toLowerCase();
+                var ac = (el.autocomplete || '').toLowerCase();
                 var labelTxt = getAssociatedLabelText(el);
                 var combined = (
                     (el.name || '') + ' ' +
                     (el.id || '') + ' ' +
                     (el.placeholder || '') + ' ' +
                     (el.getAttribute('aria-label') || '') + ' ' +
-                    (el.autocomplete || '') + ' ' +
+                    (el.getAttribute('data-label') || '') + ' ' +
+                    ac + ' ' +
                     labelTxt
                 ).toLowerCase();
 
                 if (type === 'file' || /upload|resume|document|avatar|attachment|file|cv/i.test(combined)) return 'fileName';
-                if (type === 'password' || /pass|pwd/i.test(combined)) {
-                    if (/confirm|repeat|retype|verify|match|again/i.test(combined)) return 'confirmPassword';
+                if (type === 'password' || ac === 'new-password' || ac === 'current-password' || /pass|pwd|secret|pin.*code/i.test(combined)) {
+                    if (/confirm|repeat|retype|verify|match|again|pass.*2/i.test(combined)) return 'confirmPassword';
                     return 'password';
                 }
-                if (type === 'email' || /email|e-mail|mail/i.test(combined)) return 'email';
-                if (/user|username|login|handle|nick|account/i.test(combined)) return 'username';
+                if (type === 'email' || ac === 'email' || /email|e-mail|mail/i.test(combined)) return 'email';
+                if (ac === 'username' || /user|username|login|handle|nick|account/i.test(combined)) return 'username';
                 if (/country.*code|dial.*code|phone.*prefix/i.test(combined)) return 'countryCode';
-                if (type === 'tel' || /phone|mobile|cell|telephone|whatsapp|contact.*num/i.test(combined)) return 'phoneNumber';
-                if (/gender|sex/i.test(combined)) return 'gender';
-                if (type === 'date' || /birth|dob|bday/i.test(combined)) return 'dob';
-                if (/first.*name|fname|given.*name|forename/i.test(combined)) return 'firstName';
-                if (/last.*name|lname|surname|family.*name/i.test(combined)) return 'lastName';
-                if (/full.*name|^name$|your.*name|display.*name/i.test(combined)) return 'fullName';
-                if (/zip|postal|pincode|pin.*code|postcode/i.test(combined)) return 'zipCode';
-                if (/city|town|locality/i.test(combined)) return 'city';
-                if (/state|province|region/i.test(combined)) return 'state';
-                if (/address.*2|line.*2|apt|suite|unit/i.test(combined)) return 'addressLine2';
-                if (/address|street|addr/i.test(combined)) return 'address';
+                if (type === 'tel' || ac.indexOf('tel') === 0 || /phone|mobile|cell|telephone|whatsapp|contact.*num/i.test(combined)) return 'phoneNumber';
+                if (ac === 'sex' || /gender|sex/i.test(combined)) return 'gender';
+                if (type === 'date' || ac.indexOf('bday') === 0 || /birth|dob|bday/i.test(combined)) return 'dob';
+                if (ac === 'given-name' || /first.*name|fname|given.*name|forename/i.test(combined)) return 'firstName';
+                if (ac === 'family-name' || /last.*name|lname|surname|family.*name/i.test(combined)) return 'lastName';
+                if (ac === 'name' || /full.*name|^name$|your.*name|display.*name/i.test(combined)) return 'fullName';
+                if (ac === 'postal-code' || /zip|postal|pincode|postcode/i.test(combined)) return 'zipCode';
+                if (ac === 'address-level2' || /city|town|locality/i.test(combined)) return 'city';
+                if (ac === 'address-level1' || /state|province|region/i.test(combined)) return 'state';
+                if (ac === 'address-line2' || /address.*2|line.*2|apt|suite|unit/i.test(combined)) return 'addressLine2';
+                if (ac === 'street-address' || ac === 'address-line1' || /address|street|addr/i.test(combined)) return 'address';
                 if (type === 'search' || /search|query|^q$/i.test(combined)) return 'username';
                 return '';
             }
@@ -176,22 +199,22 @@ object AutomationScripts {
                 var role = (el.getAttribute('role') || '').toLowerCase();
                 var labelText = (el.placeholder || getAssociatedLabelText(el) || el.getAttribute('aria-label') || el.name || el.id || el.innerText || el.value || '').trim();
                 labelText = labelText.replace(/\s+/g, ' ');
-                if (labelText.length > 28) labelText = labelText.substring(0, 28) + '...';
+                if (labelText.length > 26) labelText = labelText.substring(0, 26) + '...';
 
                 if (type === 'checkbox' || role === 'checkbox' || role === 'switch') {
                     return 'Check: ' + (labelText || el.name || 'Checkbox');
                 }
                 if (type === 'radio' || role === 'radio') {
-                    return 'Select Radio: ' + (labelText || el.value || el.name || 'Option');
+                    return 'Radio: ' + (labelText || el.value || el.name || 'Option');
                 }
                 if (fieldKey) {
                     return 'Fill ' + fieldKey + (labelText ? ' (' + labelText + ')' : '');
                 }
-                if (tag === 'button' || type === 'submit' || role === 'button') return 'Click Button: ' + (labelText || 'Submit');
-                if (tag === 'select' || role === 'combobox') return 'Select Dropdown: ' + (labelText || 'Option');
-                if (tag === 'input' || tag === 'textarea') return 'Fill Input: ' + (labelText || type || 'field');
-                if (tag === 'a') return 'Click Link: ' + (labelText || 'Navigate');
-                return 'Click ' + tag + (labelText ? ' "' + labelText + '"' : '');
+                if (tag === 'button' || type === 'submit' || role === 'button') return 'Click: ' + (labelText || 'Submit');
+                if (tag === 'select' || role === 'combobox') return 'Select: ' + (labelText || 'Option');
+                if (tag === 'input' || tag === 'textarea') return 'Fill: ' + (labelText || type || 'Field');
+                if (tag === 'a') return 'Link: ' + (labelText || 'Open');
+                return 'Click ' + (labelText || tag);
             }
 
             function showGrabToastOnPage(el, text, color) {
@@ -199,7 +222,7 @@ object AutomationScripts {
                     var badge = document.createElement('div');
                     var rect = el.getBoundingClientRect();
                     badge.textContent = text;
-                    badge.style.cssText = 'position:fixed;z-index:2147483647;background:' + (color || '#10B981') + ';color:#ffffff;font-family:-apple-system,BlinkMacSystemFont,sans-serif;font-size:11px;font-weight:700;padding:4px 8px;border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,0.3);pointer-events:none;transition:opacity 0.3s ease;';
+                    badge.style.cssText = 'position:fixed;z-index:2147483647;background:' + (color || '#10B981') + ';color:#ffffff;font-family:-apple-system,BlinkMacSystemFont,sans-serif;font-size:11px;font-weight:700;padding:4px 8px;border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,0.3);pointer-events:none;transition:opacity 0.25s ease;';
                     var topPos = Math.max(8, rect.top - 28);
                     var leftPos = Math.max(8, Math.min(window.innerWidth - 180, rect.left));
                     badge.style.top = topPos + 'px';
@@ -207,25 +230,57 @@ object AutomationScripts {
                     document.body.appendChild(badge);
                     setTimeout(function() {
                         badge.style.opacity = '0';
-                        setTimeout(function() { if (badge.parentNode) badge.parentNode.removeChild(badge); }, 300);
-                    }, 1300);
+                        setTimeout(function() { if (badge.parentNode) badge.parentNode.removeChild(badge); }, 250);
+                    }, 1100);
                 } catch (e) {}
             }
 
-            function reportElementCapture(e) {
-                var el = e.target;
-                if (!el || !el.tagName) return;
-                if (el.closest && el.closest('.aura-hud')) return;
+            function resolveInteractiveTarget(rawTarget) {
+                if (!rawTarget || !rawTarget.tagName) return null;
+                if (rawTarget.closest && rawTarget.closest('.aura-hud')) return null;
 
-                // Resolve label or custom wrapper to the target input if clicked
-                var labelEl = el.closest ? el.closest('label') : null;
+                var labelEl = rawTarget.closest ? rawTarget.closest('label') : null;
                 var linkedInput = null;
                 if (labelEl) {
                     linkedInput = labelEl.querySelector('input, select, textarea') ||
                                  (labelEl.htmlFor ? document.getElementById(labelEl.htmlFor) : null);
                 }
 
-                var interactive = linkedInput || (el.closest ? el.closest('input, textarea, select, button, a, [role="button"], [role="checkbox"], [role="switch"], [role="radio"], [role="combobox"], label') : null) || el;
+                return linkedInput ||
+                    (rawTarget.closest ? rawTarget.closest('input, textarea, select, button, a, [role="button"], [role="checkbox"], [role="switch"], [role="radio"], [role="combobox"], [contenteditable="true"], label') : null) ||
+                    rawTarget;
+            }
+
+            // Suppress soft keyboard on pointerdown / touchstart / focusin while in No-Type Recording mode
+            function suppressKeyboardInRecordMode(e) {
+                if (!window._auraRecorderActive || window._auraPlaybackActive) return;
+                var target = resolveInteractiveTarget(e.target);
+                if (!target || !target.tagName) return;
+                var tag = target.tagName.toLowerCase();
+                var type = (target.type || '').toLowerCase();
+                var isTextEntry = (tag === 'textarea') ||
+                    (tag === 'input' && type !== 'submit' && type !== 'button' && type !== 'checkbox' && type !== 'radio' && type !== 'file') ||
+                    target.isContentEditable;
+                if (isTextEntry) {
+                    if (!target.hasAttribute('data-aura-orig-inputmode')) {
+                        target.setAttribute('data-aura-orig-inputmode', target.getAttribute('inputmode') || '');
+                    }
+                    target.setAttribute('inputmode', 'none');
+                    if (e.type === 'focusin' || e.type === 'focus') {
+                        try { target.blur(); } catch (err) {}
+                    }
+                }
+            }
+
+            document.addEventListener('pointerdown', suppressKeyboardInRecordMode, true);
+            document.addEventListener('touchstart', suppressKeyboardInRecordMode, true);
+            document.addEventListener('focusin', suppressKeyboardInRecordMode, true);
+
+            function reportElementCapture(e) {
+                if (!window._auraRecorderActive || window._auraPlaybackActive) return;
+                var interactive = resolveInteractiveTarget(e.target);
+                if (!interactive || !interactive.tagName) return;
+
                 var tag = interactive.tagName.toLowerCase();
                 var type = (interactive.type || '').toLowerCase();
                 var role = (interactive.getAttribute('role') || '').toLowerCase();
@@ -233,7 +288,7 @@ object AutomationScripts {
                 if (!selector) return;
 
                 var now = Date.now();
-                if (selector === window._auraLastCapturedSelector && (now - window._auraLastCapturedTime) < 1000) {
+                if (selector === window._auraLastCapturedSelector && (now - window._auraLastCapturedTime) < 850) {
                     return;
                 }
                 window._auraLastCapturedSelector = selector;
@@ -245,65 +300,71 @@ object AutomationScripts {
                 if (type === 'checkbox' || role === 'checkbox' || role === 'switch') {
                     action = 'CHECKBOX';
                     fieldKey = '';
-                    showGrabToastOnPage(interactive, '✓ Grabbed Checkbox (Ready)', '#06B6D4');
+                    showGrabToastOnPage(interactive, '✓ Grabbed Checkbox', '#06B6D4');
                 } else if (type === 'radio' || role === 'radio') {
                     action = 'RADIO';
                     fieldKey = '';
-                    showGrabToastOnPage(interactive, '✓ Grabbed Radio (Ready)', '#8B5CF6');
+                    showGrabToastOnPage(interactive, '✓ Grabbed Radio', '#8B5CF6');
                 } else if (tag === 'select' || role === 'combobox') {
                     if (!fieldKey) fieldKey = 'gender';
                     action = (fieldKey === 'countryCode') ? 'SELECT_COUNTRY_CODE' : 'SELECT_DROPDOWN';
-                    showGrabToastOnPage(interactive, '✓ Grabbed Dropdown -> {{' + fieldKey + '}}', '#D946EF');
-                } else if (tag === 'input' || tag === 'textarea') {
+                    showGrabToastOnPage(interactive, '✓ Grabbed -> {{' + fieldKey + '}}', '#D946EF');
+                } else if (tag === 'input' || tag === 'textarea' || interactive.isContentEditable) {
                     if (type === 'submit' || type === 'button' || type === 'image') {
                         action = 'SUBMIT';
                         fieldKey = '';
-                        // Prevent premature form submission while grabbing elements
                         try { e.preventDefault(); e.stopPropagation(); } catch (err) {}
-                        showGrabToastOnPage(interactive, '✓ Grabbed Submit Button (Ready)', '#10B981');
+                        showGrabToastOnPage(interactive, '✓ Grabbed Submit', '#10B981');
                     } else if (type === 'file') {
                         action = 'UPLOAD_FILE';
                         if (!fieldKey) fieldKey = 'fileName';
                         try { e.preventDefault(); } catch (err) {}
-                        showGrabToastOnPage(interactive, '✓ Grabbed File Upload -> {{' + fieldKey + '}}', '#F59E0B');
+                        showGrabToastOnPage(interactive, '✓ Grabbed File Upload', '#F59E0B');
                     } else if (type === 'date' || type === 'datetime-local') {
                         action = 'SELECT_DATE';
                         if (!fieldKey) fieldKey = 'dob';
+                        try { interactive.blur(); } catch (err) {}
                         showGrabToastOnPage(interactive, '✓ Grabbed Date -> {{' + fieldKey + '}}', '#0284C7');
                     } else {
                         action = 'INPUT';
                         if (!fieldKey) fieldKey = 'email';
-                        // NO-TYPE MODE: User does not type! Immediately blur so soft keyboard closes
-                        // and show visual indicator that this field is grabbed and ready for Data Sheet fill
-                        var origPlaceholder = interactive.getAttribute('placeholder') || '';
-                        interactive.setAttribute('placeholder', '[Ready: {{' + fieldKey + '}}] ' + origPlaceholder);
-                        setTimeout(function() {
-                            try { interactive.blur(); } catch (err) {}
-                        }, 60);
-                        showGrabToastOnPage(interactive, '✓ Grabbed Field -> {{' + fieldKey + '}} (No typing needed)', '#3B82F6');
+                        interactive.setAttribute('inputmode', 'none');
+                        try {
+                            e.preventDefault();
+                            interactive.blur();
+                            if (document.activeElement && document.activeElement.blur) {
+                                document.activeElement.blur();
+                            }
+                        } catch (err) {}
+                        showGrabToastOnPage(interactive, '✓ Grabbed -> {{' + fieldKey + '}}', '#3B82F6');
                     }
-                } else if (tag === 'button' || role === 'button') {
-                    var btnTxt = (interactive.innerText || interactive.value || '').toLowerCase();
-                    if (type === 'submit' || /submit|sign.*up|register|create|login|log.*in|sign.*in|continue|next|finish|send/i.test(btnTxt)) {
+                } else if (tag === 'button' || role === 'button' || tag === 'a') {
+                    var btnTxt = (interactive.innerText || interactive.value || interactive.getAttribute('aria-label') || '').toLowerCase();
+                    var isNextOrLink = (tag === 'a') || /next|continue|proceed|step/i.test(btnTxt);
+                    if (!isNextOrLink && (type === 'submit' || /submit|sign.*up|register|create|login|log.*in|sign.*in|finish|send|confirm|verify/i.test(btnTxt))) {
                         action = 'SUBMIT';
-                        // Prevent empty form submit while user is just grabbing the button
                         try { e.preventDefault(); e.stopPropagation(); } catch (err) {}
-                        showGrabToastOnPage(interactive, '✓ Grabbed Submit Button (Ready)', '#10B981');
+                        showGrabToastOnPage(interactive, '✓ Grabbed Submit Button', '#10B981');
                     } else {
-                        action = 'CLICK';
-                        showGrabToastOnPage(interactive, '✓ Grabbed Button Click (Ready)', '#10B981');
+                        action = isNextOrLink ? 'CLICK' : 'SUBMIT';
+                        showGrabToastOnPage(interactive, '✓ Grabbed Button', '#10B981');
                     }
                 } else {
-                    showGrabToastOnPage(interactive, '✓ Grabbed Element (Ready)', '#10B981');
+                    showGrabToastOnPage(interactive, '✓ Grabbed Element', '#10B981');
                 }
 
-                // Persistent green outline to show element is captured and ready
+                interactive.setAttribute('data-aura-highlighted', '1');
                 interactive.style.outline = '2px solid #10B981';
                 interactive.style.outlineOffset = '2px';
 
                 var desc = getElementDescription(interactive, fieldKey);
-                if (window.AuraAutomation && window.AuraAutomation.onUserAction) {
-                    window.AuraAutomation.onUserAction(action, selector, desc, fieldKey || '');
+                if (window.AuraAutomation) {
+                    if (window.AuraAutomation.onPageUrlDetected) {
+                        window.AuraAutomation.onPageUrlDetected(window.location.href || '');
+                    }
+                    if (window.AuraAutomation.onUserAction) {
+                        window.AuraAutomation.onUserAction(action, selector, desc, fieldKey || '');
+                    }
                 }
             }
 
@@ -314,12 +375,26 @@ object AutomationScripts {
     """.trimIndent()
 
     /**
-     * Stronger DOM Scanner:
-     * - Scans main DOM + open Shadow DOMs
-     * - Produces guaranteed-unique CSS selectors
-     * - Inspects labels, aria attributes, and surrounding context
-     * - Orders elements logically (Inputs & Selects -> Checkboxes & Radios -> Submit / Next Buttons)
-     *   so grabbed elements are immediately ready to run!
+     * Disables the in-page recorder so normal clicks and automated playback submits are not intercepted,
+     * and keeps inputmode suppressed when transitioning into playback.
+     */
+    val STOP_RECORDING_INJECTION = """
+        (function() {
+            window._auraRecorderActive = false;
+            try {
+                if (document.activeElement && document.activeElement.blur) {
+                    document.activeElement.blur();
+                }
+            } catch (e) {}
+        })();
+    """.trimIndent()
+
+    /**
+     * Stronger DOM Scanner & Element Grabber:
+     * - Traverses main document, open Shadow DOMs, and same-origin iframes
+     * - Filters out noise (navbar/footer links, password-visibility eye toggles, input clear buttons, hidden honeypots)
+     * - Inspects `autocomplete`, `inputmode`, `aria-labelledby`, `aria-describedby`, labels, and parent form groups
+     * - Assigns distinct semantic types and logical execution order (Inputs/Selects -> Checkboxes/Radios -> Submit/Next Buttons)
      */
     val DOM_SCANNER = """
         (function() {
@@ -349,11 +424,14 @@ object AutomationScripts {
                     if (isUniqueSelector(idSel, el)) return idSel;
                 }
 
-                var testId = el.getAttribute('data-testid') || el.getAttribute('data-test') || el.getAttribute('data-qa') || el.getAttribute('data-cy');
-                if (testId) {
-                    var attrName = el.hasAttribute('data-testid') ? 'data-testid' : (el.hasAttribute('data-test') ? 'data-test' : (el.hasAttribute('data-qa') ? 'data-qa' : 'data-cy'));
-                    var testSel = '[' + attrName + '="' + testId.replace(/"/g, '\\"') + '"]';
-                    if (isUniqueSelector(testSel, el)) return testSel;
+                var testAttrs = ['data-testid', 'data-test', 'data-qa', 'data-cy', 'data-automation-id'];
+                for (var t = 0; t < testAttrs.length; t++) {
+                    var attr = testAttrs[t];
+                    var val = el.getAttribute(attr);
+                    if (val) {
+                        var testSel = '[' + attr + '="' + val.replace(/"/g, '\\"') + '"]';
+                        if (isUniqueSelector(testSel, el)) return testSel;
+                    }
                 }
 
                 if (el.name) {
@@ -374,6 +452,11 @@ object AutomationScripts {
                 if (el.placeholder) {
                     var phSel = tag + '[placeholder="' + el.placeholder.replace(/"/g, '\\"') + '"]';
                     if (isUniqueSelector(phSel, el)) return phSel;
+                }
+
+                if (el.type && el.autocomplete) {
+                    var acSel = tag + '[type="' + el.type + '"][autocomplete="' + el.autocomplete.replace(/"/g, '\\"') + '"]';
+                    if (isUniqueSelector(acSel, el)) return acSel;
                 }
 
                 var path = [];
@@ -419,31 +502,64 @@ object AutomationScripts {
                     }
                     var closestLbl = el.closest ? el.closest('label') : null;
                     if (closestLbl) parts.push(closestLbl.innerText || closestLbl.textContent || '');
+                    var ariaLabelledBy = el.getAttribute('aria-labelledby');
+                    if (ariaLabelledBy) {
+                        var ids = ariaLabelledBy.split(/\s+/);
+                        for (var j = 0; j < ids.length; j++) {
+                            var refEl = document.getElementById(ids[j]);
+                            if (refEl) parts.push(refEl.innerText || refEl.textContent || '');
+                        }
+                    }
                     var prev = el.previousElementSibling;
                     if (prev && (prev.tagName === 'LABEL' || prev.tagName === 'SPAN' || prev.tagName === 'DIV')) {
                         var prevTxt = (prev.innerText || prev.textContent || '').trim();
-                        if (prevTxt.length < 50) parts.push(prevTxt);
+                        if (prevTxt.length < 60) parts.push(prevTxt);
+                    }
+                    var fieldContainer = el.closest ? el.closest('.form-group, .field, .input-group, .form-field, fieldset') : null;
+                    if (fieldContainer) {
+                        var containerLbl = fieldContainer.querySelector('label, legend, .label, .form-label');
+                        if (containerLbl) parts.push(containerLbl.innerText || containerLbl.textContent || '');
                     }
                 } catch (e) {}
-                return parts.join(' ').trim();
+                return parts.join(' ').replace(/\s+/g, ' ').trim();
             }
 
-            function classifySemanticType(el, tag, type, name, id, placeholder, text, ariaLabel, labelText) {
-                var combined = (name + ' ' + id + ' ' + placeholder + ' ' + text + ' ' + ariaLabel + ' ' + labelText + ' ' + (el.autocomplete || '')).toLowerCase();
+            function isUtilityOrNoiseButton(el, tag, type, combinedText) {
+                var isBtnLike = (tag === 'button' || type === 'button' || el.getAttribute('role') === 'button' || tag === 'a');
+                if (!isBtnLike) return false;
+                if (type === 'submit') return false;
+
+                // Ignore password show/hide eye toggles, clear input buttons, close/dismiss modals, and header/footer chrome
+                if (/show.*pass|hide.*pass|toggle.*pass|reveal.*pass|clear.*input|dismiss|close|cancel|cookie|skip.*to.*content|menu|navbar|navigation|theme|dark.*mode|language/i.test(combinedText)) {
+                    return true;
+                }
+                if (el.closest && el.closest('nav, header, footer, [role="navigation"], [role="banner"], [role="contentinfo"]')) {
+                    // Only allow primary auth/action buttons if inside header, otherwise skip nav chrome
+                    if (!/sign.*up|register|create.*account/i.test(combinedText)) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+
+            function classifySemanticType(el, tag, type, name, id, placeholder, text, ariaLabel, labelText, inputIndex) {
+                var ac = (el.autocomplete || '').toLowerCase();
+                var inputMode = (el.getAttribute('inputmode') || '').toLowerCase();
+                var combined = (name + ' ' + id + ' ' + placeholder + ' ' + text + ' ' + ariaLabel + ' ' + labelText + ' ' + ac).toLowerCase();
 
                 if (type === 'file' || (tag === 'input' && /upload|resume|document|avatar|attachment|file|cv/i.test(combined))) {
                     return 'FILE_UPLOAD';
                 }
-                if (type === 'password' || ((tag === 'input') && /pass|pwd/i.test(combined))) {
+                if (type === 'password' || ac === 'new-password' || ac === 'current-password' || ((tag === 'input') && /pass|pwd/i.test(combined))) {
                     if (/confirm|repeat|retype|re-enter|verify|match|again|pass.*2/i.test(combined)) {
                         return 'CONFIRM_PASSWORD';
                     }
                     return 'PASSWORD';
                 }
-                if (type === 'email' || ((tag === 'input') && /email|e-mail|mail/i.test(combined))) {
+                if (type === 'email' || ac === 'email' || inputMode === 'email' || ((tag === 'input') && /email|e-mail|mail/i.test(combined))) {
                     return 'EMAIL';
                 }
-                if ((tag === 'input' || tag === 'textarea') && /user|username|login|handle|nick|account/i.test(combined)) {
+                if (ac === 'username' || ((tag === 'input' || tag === 'textarea') && /user|username|login|handle|nick|account|identifier/i.test(combined))) {
                     return 'USERNAME';
                 }
                 if (/country.*code|dial.*code|phone.*prefix|dialing|iti__selected-flag/i.test(combined) ||
@@ -451,35 +567,35 @@ object AutomationScripts {
                     el.hasAttribute('data-dial-code')) {
                     return 'COUNTRY_CODE';
                 }
-                if (type === 'tel' || ((tag === 'input') && /phone|mobile|cell|telephone|contact.*num|whatsapp/i.test(combined))) {
+                if (type === 'tel' || ac.indexOf('tel') === 0 || inputMode === 'tel' || ((tag === 'input') && /phone|mobile|cell|telephone|contact.*num|whatsapp/i.test(combined))) {
                     return 'PHONE';
                 }
-                if (/gender|sex/i.test(combined) ||
-                    (tag === 'select' && /male|female/i.test(el.innerText || '')) ||
+                if (ac === 'sex' || /gender|sex/i.test(combined) ||
+                    (tag === 'select' && /male|female|non-binary/i.test(el.innerText || '')) ||
                     (type === 'radio' && /male|female/i.test(combined))) {
                     return 'GENDER';
                 }
-                if (type === 'date' || type === 'datetime-local' || /birth|dob|bday|date.*of.*birth/i.test(combined) || el.hasAttribute('data-datepicker')) {
-                    if (/day/i.test(combined)) return 'DOB_DAY';
-                    if (/month/i.test(combined)) return 'DOB_MONTH';
-                    if (/year/i.test(combined)) return 'DOB_YEAR';
+                if (type === 'date' || type === 'datetime-local' || ac.indexOf('bday') === 0 || /birth|dob|bday|date.*of.*birth/i.test(combined) || el.hasAttribute('data-datepicker')) {
+                    if (ac === 'bday-day' || /day/i.test(combined)) return 'DOB_DAY';
+                    if (ac === 'bday-month' || /month/i.test(combined)) return 'DOB_MONTH';
+                    if (ac === 'bday-year' || /year/i.test(combined)) return 'DOB_YEAR';
                     return 'DOB';
                 }
                 if (/^(day|birth_day|dob_day)$/i.test(name) || /^(day)$/i.test(id)) return 'DOB_DAY';
                 if (/^(month|birth_month|dob_month)$/i.test(name) || /^(month)$/i.test(id)) return 'DOB_MONTH';
                 if (/^(year|birth_year|dob_year)$/i.test(name) || /^(year)$/i.test(id)) return 'DOB_YEAR';
 
-                if ((tag === 'input') && /first.*name|fname|given.*name|forename/i.test(combined)) return 'FIRST_NAME';
-                if ((tag === 'input') && /last.*name|lname|surname|family.*name/i.test(combined)) return 'LAST_NAME';
-                if ((tag === 'input') && /full.*name|^name$|your.*name|display.*name/i.test(combined)) return 'FULL_NAME';
-                if ((tag === 'input') && /zip|postal|pincode|pin.*code|postcode/i.test(combined)) return 'ZIP_PIN';
-                if ((tag === 'input' || tag === 'select') && /city|town|locality/i.test(combined)) return 'CITY';
-                if ((tag === 'input' || tag === 'select') && /state|province|region/i.test(combined)) return 'STATE';
-                if ((tag === 'input') && /address.*2|line.*2|apt|suite|unit/i.test(combined)) return 'ADDRESS_LINE_2';
-                if ((tag === 'input' || tag === 'textarea') && /address|street|addr/i.test(combined)) return 'ADDRESS';
+                if (ac === 'given-name' || ((tag === 'input') && /first.*name|fname|given.*name|forename/i.test(combined))) return 'FIRST_NAME';
+                if (ac === 'family-name' || ((tag === 'input') && /last.*name|lname|surname|family.*name/i.test(combined))) return 'LAST_NAME';
+                if (ac === 'name' || ((tag === 'input') && /full.*name|^name$|your.*name|display.*name/i.test(combined))) return 'FULL_NAME';
+                if (ac === 'postal-code' || ((tag === 'input') && /zip|postal|pincode|pin.*code|postcode/i.test(combined))) return 'ZIP_PIN';
+                if (ac === 'address-level2' || ((tag === 'input' || tag === 'select') && /city|town|locality/i.test(combined))) return 'CITY';
+                if (ac === 'address-level1' || ((tag === 'input' || tag === 'select') && /state|province|region/i.test(combined))) return 'STATE';
+                if (ac === 'address-line2' || ((tag === 'input') && /address.*2|line.*2|apt|suite|unit/i.test(combined))) return 'ADDRESS_LINE_2';
+                if (ac === 'street-address' || ac === 'address-line1' || ((tag === 'input' || tag === 'textarea') && /address|street|addr/i.test(combined))) return 'ADDRESS';
 
                 if (type === 'checkbox' || el.getAttribute('role') === 'checkbox' || el.getAttribute('role') === 'switch') {
-                    if (/term|agree|policy|accept|consent|privacy/i.test(combined)) {
+                    if (/term|agree|policy|accept|consent|privacy|age/i.test(combined)) {
                         return 'CHECKBOX_TERMS';
                     }
                     return 'CHECKBOX';
@@ -488,33 +604,67 @@ object AutomationScripts {
                     return 'RADIO_OPTION';
                 }
                 if (tag === 'button' || type === 'submit' || type === 'button' || el.getAttribute('role') === 'button') {
-                    if (type === 'submit' || /submit|sign.*up|create.*account|register|finish|done|log.*in|sign.*in|send|save|apply|search/i.test(combined)) return 'SUBMIT_BUTTON';
+                    if (type === 'submit' || /submit|sign.*up|create.*account|register|finish|done|log.*in|sign.*in|send|save|apply|confirm|verify|join/i.test(combined)) return 'SUBMIT_BUTTON';
                     if (/next|continue|proceed|forward|step/i.test(combined)) return 'NEXT_BUTTON';
                     return 'GENERIC_BUTTON';
                 }
                 if (tag === 'select' || el.getAttribute('role') === 'combobox' || el.getAttribute('role') === 'listbox') {
                     return 'DROPDOWN';
                 }
-                return (tag === 'input' || tag === 'textarea') ? 'GENERIC_INPUT' : 'GENERIC_BUTTON';
+                if (tag === 'input' || tag === 'textarea' || el.isContentEditable) {
+                    // Positional fallback for unlabeled inputs so multiple inputs don't collide
+                    if (inputIndex === 0) return 'EMAIL';
+                    if (inputIndex === 1) return 'USERNAME';
+                    if (inputIndex === 2) return 'PASSWORD';
+                    return 'GENERIC_INPUT';
+                }
+                return 'GENERIC_BUTTON';
             }
 
-            var elements = document.querySelectorAll(
-                'input, textarea, select, button, [role="button"], [role="combobox"], [role="checkbox"], [role="switch"], [role="radio"], .iti__selected-flag, [data-dial-code], [data-datepicker], .dropzone'
-            );
+            // Deep collector across main document, open Shadow DOMs, and accessible same-origin iframes
+            var candidateQuery = 'input, textarea, select, button, [role="button"], [role="combobox"], [role="checkbox"], [role="switch"], [role="radio"], [contenteditable="true"], .iti__selected-flag, [data-dial-code], [data-datepicker], .dropzone';
+
+            function collectDeepElements(root, outList) {
+                if (!root) return;
+                try {
+                    var found = root.querySelectorAll(candidateQuery);
+                    for (var i = 0; i < found.length; i++) {
+                        outList.push(found[i]);
+                    }
+                    var allNodes = root.querySelectorAll('*');
+                    for (var j = 0; j < allNodes.length; j++) {
+                        var node = allNodes[j];
+                        if (node.shadowRoot) {
+                            collectDeepElements(node.shadowRoot, outList);
+                        }
+                        if (node.tagName === 'IFRAME') {
+                            try {
+                                if (node.contentDocument) {
+                                    collectDeepElements(node.contentDocument, outList);
+                                }
+                            } catch (iframeErr) {}
+                        }
+                    }
+                } catch (e) {}
+            }
+
+            var elements = [];
+            collectDeepElements(document, elements);
 
             var seenSelectors = {};
+            var seenRadioGroups = {};
+            var textInputCounter = 0;
 
             function processCandidate(el, allowHiddenStepFields) {
                 if (!el || el.disabled) return;
                 var tag = el.tagName.toLowerCase();
                 var type = (el.type || '').toLowerCase();
-                if (type === 'hidden') return;
+                if (type === 'hidden' || type === 'reset') return;
                 if (el.closest && el.closest('.aura-hud')) return;
 
                 var name = el.name || '';
                 var id = el.id || '';
-                // Skip internal CSRF / honeypot / analytics fields
-                if (/csrf|token|authenticity|honeypot|timestamp|_utf8|octolytics/i.test(name + ' ' + id)) return;
+                if (/csrf|token|authenticity|honeypot|timestamp|_utf8|octolytics|g-recaptcha|h-captcha|cf-turnstile/i.test(name + ' ' + id)) return;
 
                 var style = window.getComputedStyle(el);
                 var rect = el.getBoundingClientRect();
@@ -525,7 +675,6 @@ object AutomationScripts {
                         if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return;
                         if (rect.width < 4 || rect.height < 4) return;
                     } else {
-                        // For custom-styled checkboxes/radios/files, allow opacity:0 as long as it or its parent/label is in layout
                         var parentRect = el.parentElement ? el.parentElement.getBoundingClientRect() : rect;
                         if (rect.width < 1 && parentRect.width < 4) return;
                     }
@@ -537,10 +686,22 @@ object AutomationScripts {
                 var text = (el.innerText || el.textContent || el.value || labelText || '').trim().replace(/\s+/g, ' ');
                 if (text.length > 35) text = text.substring(0, 35) + '...';
 
-                var semantic = classifySemanticType(el, tag, type, name, id, placeholder, text, ariaLabel, labelText);
+                var combinedForNoise = (name + ' ' + id + ' ' + placeholder + ' ' + text + ' ' + ariaLabel + ' ' + labelText + ' ' + (el.className || '')).toLowerCase();
+                if (isUtilityOrNoiseButton(el, tag, type, combinedForNoise)) return;
+
+                // For radio groups with the same name, only grab the first radio option in the group during bulk scan
+                if (type === 'radio' && name) {
+                    if (seenRadioGroups[name]) return;
+                    seenRadioGroups[name] = true;
+                }
+
+                var isTextInput = (tag === 'input' && type !== 'submit' && type !== 'button' && type !== 'checkbox' && type !== 'radio' && type !== 'file') ||
+                                  tag === 'textarea' || el.isContentEditable;
+                var currentInputIdx = isTextInput ? textInputCounter : -1;
+
+                var semantic = classifySemanticType(el, tag, type, name, id, placeholder, text, ariaLabel, labelText, currentInputIdx);
 
                 if (allowHiddenStepFields) {
-                    // In fallback pass for animated/multi-step forms (like GitHub signup), only include clear semantic form fields & submit/next buttons
                     var isHighValueField = (
                         semantic === 'EMAIL' ||
                         semantic === 'PASSWORD' ||
@@ -564,10 +725,15 @@ object AutomationScripts {
                 var selector = getCssSelector(el);
                 if (!selector || seenSelectors[selector]) return;
                 seenSelectors[selector] = true;
+                if (isTextInput) textInputCounter++;
 
-                var isInput = (tag === 'input' && type !== 'submit' && type !== 'button' && type !== 'checkbox' && type !== 'radio') ||
-                              tag === 'textarea' || tag === 'select' || el.getAttribute('role') === 'combobox';
+                var isInput = isTextInput || tag === 'select' || el.getAttribute('role') === 'combobox' || type === 'file';
                 var isBtn = (tag === 'button' || type === 'submit' || type === 'button' || el.getAttribute('role') === 'button');
+
+                // Prevent keyboard popup on scanned inputs as well
+                if (isTextInput) {
+                    el.setAttribute('inputmode', 'none');
+                }
 
                 // Priority for smart workflow ordering:
                 // 1 = Inputs & Dropdowns, 2 = Checkboxes & Radios, 3 = Next/Submit Buttons, 4 = Generic Buttons
@@ -576,7 +742,7 @@ object AutomationScripts {
                 else if (semantic === 'CHECKBOX' || semantic === 'CHECKBOX_TERMS' || semantic === 'RADIO_OPTION') orderPriority = 2;
                 else if (semantic === 'SUBMIT_BUTTON' || semantic === 'NEXT_BUTTON') orderPriority = 3;
 
-                // Highlight grabbed element
+                el.setAttribute('data-aura-highlighted', '1');
                 el.style.outline = orderPriority <= 2 ? '2px solid #06B6D4' : '2px dashed #10B981';
                 el.style.outlineOffset = '2px';
 
@@ -611,8 +777,7 @@ object AutomationScripts {
                 processCandidate(el, false);
             });
 
-            // Pass 2: If page uses multi-step wizard / delayed reveal (e.g. GitHub signup where #email/#password/#login are in step containers),
-            // also include semantic form fields from the DOM so the full signup flow is captured immediately!
+            // Pass 2: Multi-step wizard / delayed reveal fallback if fewer than 2 inputs were visible
             var foundInputCount = rawItems.filter(function(item) { return item.isInput; }).length;
             if (foundInputCount < 2) {
                 elements.forEach(function(el) {
@@ -626,6 +791,12 @@ object AutomationScripts {
                 return a._top - b._top;
             });
 
+            try {
+                if (document.activeElement && document.activeElement.blur) {
+                    document.activeElement.blur();
+                }
+            } catch (e) {}
+
             if (window.AuraAutomation && window.AuraAutomation.onScanResults) {
                 window.AuraAutomation.onScanResults(JSON.stringify(rawItems));
             }
@@ -633,26 +804,29 @@ object AutomationScripts {
     """.trimIndent()
 
     /**
-     * Clear DOM scan visual outlines.
+     * Clear DOM scan visual outlines and restore any modified attributes.
      */
     val CLEAR_SCAN_HIGHLIGHTS = """
         (function() {
             var elements = document.querySelectorAll(
-                'input, button, [role="button"], [role="combobox"], [role="listbox"], [role="checkbox"], [role="switch"], [role="radio"], textarea, select, form, a, .iti__selected-flag, [data-dial-code], [data-datepicker], .dropzone'
+                '[data-aura-highlighted="1"], input, button, [role="button"], [role="combobox"], [role="listbox"], [role="checkbox"], [role="switch"], [role="radio"], textarea, select, form, a, .iti__selected-flag, [data-dial-code], [data-datepicker], .dropzone'
             );
             elements.forEach(function(el) {
                 el.style.outline = '';
                 el.style.outlineOffset = '';
+                el.removeAttribute('data-aura-highlighted');
             });
         })();
     """.trimIndent()
 
     /**
-     * Shared JS helper snippet for deep element lookup (CSS selector -> Shadow DOM -> fallback by fieldKey/description)
+     * Shared JS helper snippet for deep element lookup (CSS selector -> Shadow DOM -> iframe -> fallback by fieldKey/description)
      */
     private fun jsFindElementHelper(escapedSelector: String, fallbackHint: String = ""): String {
         val escapedHint = fallbackHint.replace("'", "\\'").lowercase()
         return """
+            window._auraPlaybackActive = true;
+            window._auraRecorderActive = false;
             function queryDeep(root, sel) {
                 try {
                     var found = root.querySelector(sel);
@@ -662,6 +836,14 @@ object AutomationScripts {
                         if (all[i].shadowRoot) {
                             var sub = queryDeep(all[i].shadowRoot, sel);
                             if (sub) return sub;
+                        }
+                        if (all[i].tagName === 'IFRAME') {
+                            try {
+                                if (all[i].contentDocument) {
+                                    var iframeSub = queryDeep(all[i].contentDocument, sel);
+                                    if (iframeSub) return iframeSub;
+                                }
+                            } catch (ie) {}
                         }
                     }
                 } catch (e) {}
@@ -706,7 +888,7 @@ object AutomationScripts {
     }
 
     /**
-     * Simulate a full human pointer/mouse click on an element by CSS selector or fallback text.
+     * Simulate a full human pointer/mouse click on an element by CSS selector or fallback text without opening the soft keyboard.
      */
     fun createClickScript(selector: String, fallbackHint: String = ""): String {
         val escaped = selector.replace("'", "\\'")
@@ -716,7 +898,9 @@ object AutomationScripts {
                 if (!el) return 'NOT_FOUND';
 
                 el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                try { el.focus(); } catch (e) {}
+                if (el.tagName.toLowerCase() === 'input' || el.tagName.toLowerCase() === 'textarea') {
+                    el.setAttribute('inputmode', 'none');
+                }
 
                 ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach(function(evt) {
                     var event = new MouseEvent(evt, { bubbles: true, cancelable: true, view: window });
@@ -725,6 +909,11 @@ object AutomationScripts {
                 if (typeof el.click === 'function') {
                     try { el.click(); } catch (e) {}
                 }
+                try {
+                    if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA')) {
+                        document.activeElement.blur();
+                    }
+                } catch (e) {}
                 return 'SUCCESS';
             })();
         """.trimIndent()
@@ -732,7 +921,7 @@ object AutomationScripts {
 
     /**
      * Dedicated script to reliably check / uncheck checkboxes and select radio buttons
-     * across vanilla HTML, React, Angular, Vue, and custom ARIA components without double-toggling.
+     * across vanilla HTML, React, Angular, Vue, and custom ARIA components without double-toggling or showing keyboard.
      */
     fun createCheckScript(selector: String, isRadio: Boolean, desiredState: Boolean = true, fallbackHint: String = ""): String {
         val escaped = selector.replace("'", "\\'")
@@ -755,7 +944,6 @@ object AutomationScripts {
 
                 var target = input || el;
                 target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                try { target.focus(); } catch (e) {}
 
                 var shouldCheck = $desiredState;
                 var isRadio = $isRadio;
@@ -763,10 +951,8 @@ object AutomationScripts {
 
                 if (input && (input.type === 'checkbox' || input.type === 'radio')) {
                     if (input.checked !== targetState) {
-                        // First try native click which triggers React/Vue/Angular synthetic events naturally
                         try { input.click(); } catch (e) {}
                     }
-                    // If still not in targetState, force via prototype descriptor
                     if (input.checked !== targetState) {
                         var nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'checked');
                         if (nativeSetter && nativeSetter.set) {
@@ -792,13 +978,17 @@ object AutomationScripts {
                     el.setAttribute('aria-checked', targetState ? 'true' : 'false');
                     el.dispatchEvent(new Event('change', { bubbles: true }));
                 }
+                try {
+                    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+                } catch (e) {}
                 return 'SUCCESS';
             })();
         """.trimIndent()
     }
 
     /**
-     * Input text into modern fields with full event dispatching for React 16-19, Vue, Angular, and contenteditable.
+     * Input text into modern fields with full event dispatching for React 16-19, Vue, Angular, and contenteditable,
+     * while strictly suppressing the Android soft keyboard (`inputmode="none"`, synthetic FocusEvent, and immediate blur).
      */
     fun createInputScript(selector: String, value: String, clearFirst: Boolean, fallbackHint: String = ""): String {
         val escapedSelector = selector.replace("'", "\\'")
@@ -808,20 +998,29 @@ object AutomationScripts {
                 ${jsFindElementHelper(escapedSelector, fallbackHint)}
                 if (!el) return 'NOT_FOUND';
 
-                // If selector matched a wrapper/label, drill down to actual input/textarea
                 if (el.tagName.toLowerCase() !== 'input' && el.tagName.toLowerCase() !== 'textarea' && !el.isContentEditable) {
                     var innerInput = el.querySelector('input, textarea, [contenteditable="true"]');
                     if (innerInput) el = innerInput;
                 }
 
+                // Suppress Android soft keyboard before any focus/input events
+                var prevInputMode = el.getAttribute('inputmode');
+                el.setAttribute('inputmode', 'none');
+
                 el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                try { el.focus(); } catch (e) {}
+
+                // Dispatch synthetic focus events for framework listeners without invoking native IME focus
+                try {
+                    el.dispatchEvent(new FocusEvent('focus', { bubbles: false }));
+                    el.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+                } catch (e) {}
 
                 if (el.isContentEditable) {
                     if ($clearFirst) el.innerText = '';
                     el.innerText = '$escapedValue';
                     el.dispatchEvent(new Event('input', { bubbles: true }));
                     el.dispatchEvent(new Event('change', { bubbles: true }));
+                    try { el.blur(); } catch (e) {}
                     return 'SUCCESS';
                 }
 
@@ -860,14 +1059,32 @@ object AutomationScripts {
                 }
                 el.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: 'a' }));
                 el.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
-                el.dispatchEvent(new Event('blur', { bubbles: true }));
+                try {
+                    el.dispatchEvent(new FocusEvent('blur', { bubbles: false }));
+                    el.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+                    el.blur();
+                    if (document.activeElement && document.activeElement !== document.body && document.activeElement.blur) {
+                        document.activeElement.blur();
+                    }
+                } catch (e) {}
+
+                setTimeout(function() {
+                    try {
+                        if (prevInputMode) {
+                            el.setAttribute('inputmode', prevInputMode);
+                        } else {
+                            el.removeAttribute('inputmode');
+                        }
+                    } catch (e) {}
+                }, 120);
+
                 return 'SUCCESS';
             })();
         """.trimIndent()
     }
 
     /**
-     * Modern Dropdown Handler (supports native <select> and custom ARIA/React select menus).
+     * Modern Dropdown Handler (supports native <select> and custom ARIA/React select menus) without showing keyboard.
      */
     fun createSelectDropdownScript(selector: String, optionValueOrText: String, fallbackHint: String = ""): String {
         val escapedSelector = selector.replace("'", "\\'")
@@ -878,8 +1095,6 @@ object AutomationScripts {
                 if (!el) return 'NOT_FOUND';
 
                 el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                try { el.focus(); } catch (e) {}
-
                 var target = '$escapedTarget'.toLowerCase().trim();
 
                 if (el.tagName.toLowerCase() === 'select') {
@@ -903,6 +1118,7 @@ object AutomationScripts {
                     return 'SUCCESS';
                 }
 
+                el.setAttribute('inputmode', 'none');
                 el.click();
                 setTimeout(function() {
                     var options = document.querySelectorAll('[role="option"], li, .dropdown-item, .select-option, [data-value]');
@@ -918,6 +1134,9 @@ object AutomationScripts {
                     if (!matched && options.length > 0) {
                         options[0].click();
                     }
+                    try {
+                        if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+                    } catch (e) {}
                 }, 300);
 
                 return 'SUCCESS';
@@ -962,6 +1181,9 @@ object AutomationScripts {
                             break;
                         }
                     }
+                    try {
+                        if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+                    } catch (e) {}
                 }, 350);
 
                 return 'SUCCESS';
@@ -970,7 +1192,7 @@ object AutomationScripts {
     }
 
     /**
-     * Modern Date of Birth (DOB) Handler.
+     * Modern Date of Birth (DOB) Handler without showing keyboard.
      */
     fun createSelectDateScript(selector: String, isoDate: String, day: String, month: String, year: String): String {
         val escapedSelector = selector.replace("'", "\\'")
@@ -980,8 +1202,8 @@ object AutomationScripts {
                          document.querySelector('input[type="date"], [data-datepicker], input[name*="dob"], input[name*="birth"]');
 
                 if (el) {
+                    el.setAttribute('inputmode', 'none');
                     el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    try { el.focus(); } catch (e) {}
 
                     var nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
                     if (nativeSetter && nativeSetter.set) {
@@ -991,18 +1213,7 @@ object AutomationScripts {
                     }
                     el.dispatchEvent(new Event('input', { bubbles: true }));
                     el.dispatchEvent(new Event('change', { bubbles: true }));
-
-                    el.click();
-                    setTimeout(function() {
-                        var dayCells = document.querySelectorAll('[role="gridcell"], .day, .calendar-day, td[data-day]');
-                        for (var i = 0; i < dayCells.length; i++) {
-                            if ((dayCells[i].innerText || '').trim() === '$day') {
-                                dayCells[i].click();
-                                break;
-                            }
-                        }
-                    }, 300);
-
+                    try { el.blur(); } catch (e) {}
                     return 'SUCCESS';
                 }
 
@@ -1080,7 +1291,11 @@ object AutomationScripts {
                 }
                 if (el) {
                     el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    try { el.focus(); } catch (e) {}
+                    try {
+                        if (document.activeElement && document.activeElement.blur) {
+                            document.activeElement.blur();
+                        }
+                    } catch (e) {}
                     ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach(function(evt) {
                         var event = new MouseEvent(evt, { bubbles: true, cancelable: true, view: window });
                         el.dispatchEvent(event);

@@ -83,6 +83,7 @@ fun WebViewScreen(
     var hasError by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf("") }
     var lastLoadedUrl by remember(tab.id) { mutableStateOf<String?>(null) }
+    var lastObservedTabPropUrl by remember(tab.id) { mutableStateOf(tab.url) }
     var lastDesktopMode by remember { mutableStateOf(isDesktopMode) }
 
     val desktopUserAgent = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
@@ -96,9 +97,19 @@ fun WebViewScreen(
         }
     }
 
-    // Connect WebView provider with AutomationEngine
+    // Connect WebView provider and multi-page navigator with AutomationEngine
     LaunchedEffect(webViewInstance, automationEngine) {
         automationEngine?.webViewProvider = { webViewInstance }
+        automationEngine?.webViewNavigator = { targetUrl ->
+            lastLoadedUrl = targetUrl
+            lastObservedTabPropUrl = targetUrl
+            onWebStateChanged(null, targetUrl, 15, true, webViewInstance?.canGoBack(), webViewInstance?.canGoForward())
+            webViewInstance?.loadUrl(targetUrl)
+        }
+        val activeUrl = lastLoadedUrl ?: tab.url
+        if (activeUrl.isNotBlank() && !activeUrl.startsWith("aura://")) {
+            automationEngine?.syncCurrentPageUrl(activeUrl)
+        }
     }
 
     // Listen for explicit reload requests (e.g. from top bar reload button)
@@ -207,6 +218,7 @@ fun WebViewScreen(
                             hasError = false
                             if (!url.isNullOrBlank()) {
                                 lastLoadedUrl = url
+                                automationEngine?.syncCurrentPageUrl(url)
                             }
                             onWebStateChanged(
                                 null,
@@ -290,16 +302,20 @@ fun WebViewScreen(
 
                     if (!tab.url.startsWith("aura://") && tab.url.isNotBlank()) {
                         lastLoadedUrl = tab.url
+                        lastObservedTabPropUrl = tab.url
                         loadUrl(tab.url)
                     }
                     webViewInstance = this
                 }
             },
             update = { webView ->
-                // Only load if tab.url is not internal and differs from last loaded URL
-                if (tab.url.isNotBlank() && !tab.url.startsWith("aura://") && !areUrlsEquivalent(tab.url, lastLoadedUrl)) {
-                    lastLoadedUrl = tab.url
-                    webView.loadUrl(tab.url)
+                // Only load when tab.url prop itself explicitly changed from the ViewModel, avoiding race conditions during multi-page WebView navigation
+                if (tab.url != lastObservedTabPropUrl) {
+                    lastObservedTabPropUrl = tab.url
+                    if (tab.url.isNotBlank() && !tab.url.startsWith("aura://") && !areUrlsEquivalent(tab.url, lastLoadedUrl)) {
+                        lastLoadedUrl = tab.url
+                        webView.loadUrl(tab.url)
+                    }
                 }
             },
             modifier = Modifier.fillMaxSize()

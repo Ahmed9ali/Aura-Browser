@@ -111,65 +111,15 @@ fun HistoryScreen(
             .fillMaxSize()
             .testTag("history_screen")
     ) {
-        // History Top Header
-        Surface(
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 3.dp,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 12.dp)
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    IconButton(
-                        onClick = onNavigateBack,
-                        modifier = Modifier.testTag("btn_history_back")
-                    ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back",
-                            tint = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-
-                    Surface(
-                        shape = ExpressiveChipShape,
-                        color = Color(0xFF8B5CF6).copy(alpha = 0.16f),
-                        modifier = Modifier.size(36.dp)
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = Icons.Default.History,
-                                contentDescription = null,
-                                tint = Color(0xFF8B5CF6),
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.width(4.dp))
-
-                    Column {
-                        Text(
-                            text = "Browsing History",
-                            style = MaterialTheme.typography.titleLarge,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Text(
-                            text = "${history.size} past sessions",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-
+        // Professional History Top App Bar
+        com.example.ui.components.AuraSubScreenTopBar(
+            title = "Browsing History",
+            subtitle = "${history.size} recorded sessions • Filter: $selectedFilter",
+            icon = Icons.Default.History,
+            accentColor = Color(0xFF8B5CF6),
+            onNavigateBack = onNavigateBack,
+            backButtonTestTag = "btn_history_back",
+            actions = {
                 if (history.isNotEmpty()) {
                     OutlinedButton(
                         onClick = { showClearDialog = true },
@@ -187,12 +137,13 @@ fun HistoryScreen(
                         Text(
                             text = "Clear",
                             style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.error
                         )
                     }
                 }
             }
-        }
+        )
 
         // Search in History input
         OutlinedTextField(

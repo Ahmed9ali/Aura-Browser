@@ -103,47 +103,13 @@ fun SettingsScreen(
             .fillMaxSize()
             .testTag("settings_screen")
     ) {
-        // Settings Header
-        Surface(
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 3.dp,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 18.dp, vertical = 14.dp)
-            ) {
-                Surface(
-                    shape = ExpressiveChipShape,
-                    color = MaterialTheme.colorScheme.primaryContainer,
-                    modifier = Modifier.size(36.dp)
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = Icons.Default.Settings,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-                }
-                Column {
-                    Text(
-                        text = "Browser Customization",
-                        style = MaterialTheme.typography.titleLarge,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Text(
-                        text = "Settings, preferences & layout controls",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-        }
+        // Professional Settings App Bar
+        com.example.ui.components.AuraSubScreenTopBar(
+            title = "Browser Customization",
+            subtitle = "Engine: ${settings.searchEngine.displayName} • Theme: ${settings.themeMode.name}",
+            icon = Icons.Default.Settings,
+            accentColor = MaterialTheme.colorScheme.primary
+        )
 
         LazyColumn(
             contentPadding = PaddingValues(16.dp),

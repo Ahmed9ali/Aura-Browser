@@ -166,85 +166,46 @@ fun AutomationManagerScreen(
             .background(MaterialTheme.colorScheme.background)
             .testTag("automation_manager_screen")
     ) {
-        // Top App Bar
-        Surface(
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 2.dp,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 10.dp, vertical = 10.dp)
+        val distinctStudioPageCount = remember(currentScript.steps) {
+            currentScript.steps.mapNotNull {
+                it.pageUrl.trim().trimEnd('/').lowercase().takeIf { u -> u.isNotBlank() && !u.startsWith("aura://") }
+            }.distinct().size.coerceAtLeast(if (currentScript.steps.isNotEmpty()) 1 else 0)
+        }
+
+        // Professional Automation Studio App Bar
+        com.example.ui.components.AuraSubScreenTopBar(
+            title = "Automation Studio",
+            subtitle = if (distinctStudioPageCount > 1) {
+                "${currentScript.steps.size} steps across $distinctStudioPageCount pages (Starts Page 1)"
+            } else {
+                "${currentScript.steps.size} steps • ${if (currentScript.targetWebsite == "*") "Any website" else currentScript.targetWebsite}"
+            },
+            icon = Icons.Default.SmartToy,
+            accentColor = indigo,
+            onNavigateBack = onNavigateBack,
+            backButtonTestTag = "btn_manager_back",
+            actions = {
+                Button(
+                    onClick = onRunScript,
+                    colors = ButtonDefaults.buttonColors(containerColor = emerald),
+                    shape = com.example.ui.theme.ExpressivePillShape,
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                    modifier = Modifier.testTag("btn_manager_run_script")
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        IconButton(
-                            onClick = onNavigateBack,
-                            modifier = Modifier
-                                .size(40.dp)
-                                .testTag("btn_manager_back")
-                        ) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                        }
-
-                        Surface(
-                            shape = CircleShape,
-                            color = indigo.copy(alpha = 0.15f),
-                            modifier = Modifier.size(36.dp)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = Icons.Default.SmartToy,
-                                    contentDescription = null,
-                                    tint = indigo,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                        }
-
-                        Column {
-                            Text(
-                                text = "Automation Studio",
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Text(
-                                text = "${currentScript.steps.size} steps • ${if (currentScript.targetWebsite == "*") "Any website" else currentScript.targetWebsite}",
-                                fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-
-                    // Primary One-Tap Run Button
-                    Button(
-                        onClick = onRunScript,
-                        colors = ButtonDefaults.buttonColors(containerColor = emerald),
-                        shape = com.example.ui.theme.ExpressivePillShape,
-                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                        modifier = Modifier.testTag("btn_manager_run_script")
-                    ) {
-                        Icon(
-                            Icons.Default.PlayArrow,
-                            contentDescription = "Run",
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = "Run Flow",
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
+                    Icon(
+                        Icons.Default.PlayArrow,
+                        contentDescription = "Run",
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = "Run Flow",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
-
+            },
+            bottomContent = {
                 // Modern 4-Tab Navigation Bar
                 PrimaryTabRow(
                     selectedTabIndex = selectedTab,
@@ -304,7 +265,7 @@ fun AutomationManagerScreen(
                     )
                 }
             }
-        }
+        )
 
         // Tab Content
         Box(modifier = Modifier.weight(1f)) {

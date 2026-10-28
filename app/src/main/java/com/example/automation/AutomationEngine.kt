@@ -1,5 +1,7 @@
 package com.example.automation
 
+import android.content.Context
+import android.view.inputmethod.InputMethodManager
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import com.example.model.AutomationActionType
@@ -59,11 +61,15 @@ class AutomationEngine(
 
     private var playbackJob: Job? = null
     private var exhaustionDecisionDeferred: CompletableDeferred<ExhaustionDecision>? = null
+    private var pageLoadWaiter: CompletableDeferred<String>? = null
+    @Volatile
     private var lastKnownPageUrl: String = ""
-    private var autoReadyOnNextScan: Boolean = true
+    // Only true when the user explicitly clicks "Grab Elements"
+    private var autoReadyOnNextScan: Boolean = false
 
     var onRotateProxy: (() -> Unit)? = null
     var webViewProvider: (() -> WebView?)? = null
+    var webViewNavigator: ((String) -> Unit)? = null
 
     private sealed class ExhaustionDecision {
         object Stop : ExhaustionDecision()
@@ -71,13 +77,66 @@ class AutomationEngine(
         data class AddedNewData(val newValues: List<String>) : ExhaustionDecision()
     }
 
+    fun syncCurrentPageUrl(url: String) {
+        if (url.isNotBlank() && !url.startsWith("aura://") && url != "about:blank") {
+            lastKnownPageUrl = url
+        }
+    }
+
+    fun normalizePageUrl(url: String?): String {
+        if (url.isNullOrBlank()) return ""
+        return url.trim().trimEnd('/')
+    }
+
+    fun arePageUrlsSame(url1: String?, url2: String?): Boolean {
+        val n1 = normalizePageUrl(url1)
+        val n2 = normalizePageUrl(url2)
+        if (n1.isEmpty() || n2.isEmpty()) return n1 == n2
+        return n1.equals(n2, ignoreCase = true)
+    }
+
+    /**
+     * Resolves Page 1's starting URL for a script so multi-page flows always start from Page 1.
+     */
+    fun getStartingPageUrl(script: AutomationScript = _currentScript.value): String {
+        val firstStepPageUrl = script.steps
+            .firstOrNull { it.pageUrl.isNotBlank() && !it.pageUrl.startsWith("aura://") }
+            ?.pageUrl
+        val firstNavigateUrl = script.steps
+            .firstOrNull { it.actionType == AutomationActionType.NAVIGATE && (it.value.isNotBlank() || it.selector.isNotBlank()) }
+            ?.let { it.value.ifBlank { it.selector } }
+        return when {
+            !firstStepPageUrl.isNullOrBlank() -> firstStepPageUrl
+            !firstNavigateUrl.isNullOrBlank() -> firstNavigateUrl
+            script.targetUrl.isNotBlank() && !script.targetUrl.startsWith("aura://") -> script.targetUrl
+            else -> lastKnownPageUrl
+        }
+    }
+
+    fun countDistinctPages(steps: List<AutomationStep> = _currentScript.value.steps): Int {
+        val pages = steps
+            .mapNotNull { normalizePageUrl(it.pageUrl).takeIf { u -> u.isNotBlank() && !u.startsWith("aura://") } }
+            .distinct()
+        return pages.size.coerceAtLeast(if (steps.isNotEmpty()) 1 else 0)
+    }
+
     // JavaScript Bridge exposed to WebView
     inner class AutomationJsInterface {
         @JavascriptInterface
+        fun onPageUrlDetected(url: String) {
+            if (url.isNotBlank() && !url.startsWith("aura://") && url != "about:blank") {
+                lastKnownPageUrl = url
+            }
+        }
+
+        @JavascriptInterface
         fun onUserAction(actionType: String, selector: String, description: String, fieldKeyFromJs: String) {
+            if (_executionState.value.status == AutomationStatus.PLAYING) return
             if (_executionState.value.status != AutomationStatus.RECORDING &&
                 _executionState.value.hudMode != HudMode.CREATE_AUTOMATION
             ) return
+
+            hideWebViewSoftKeyboard()
 
             val type = when (actionType.uppercase()) {
                 "INPUT" -> AutomationActionType.INPUT
@@ -97,22 +156,23 @@ class AutomationEngine(
                     ?: if (type == AutomationActionType.INPUT) "username" else ""
             }.ifBlank { null }
 
+            val stepPageUrl = lastKnownPageUrl
             val newStep = AutomationStep(
                 actionType = type,
                 selector = selector,
                 elementDescription = description,
                 value = if (resolvedKey != null) "{{$resolvedKey}}" else "",
                 variableKey = resolvedKey,
-                pageUrl = lastKnownPageUrl,
+                pageUrl = stepPageUrl,
                 delayMs = 750L
             )
 
             scope.launch {
                 val currentSteps = _currentScript.value.steps
-                // Prevent duplicate capture of the exact same input/checkbox/radio selector
+                // Prevent duplicate capture of the exact same input/checkbox/radio selector on the SAME page
                 val existingIdx = currentSteps.indexOfFirst {
                     it.selector == newStep.selector &&
-                            it.pageUrl == newStep.pageUrl &&
+                            arePageUrlsSame(it.pageUrl, newStep.pageUrl) &&
                             (it.actionType == newStep.actionType ||
                                     it.actionType == AutomationActionType.INPUT ||
                                     it.actionType == AutomationActionType.CHECKBOX ||
@@ -123,13 +183,18 @@ class AutomationEngine(
                     currentSteps.toMutableList().apply { set(existingIdx, newStep.copy(id = currentSteps[existingIdx].id)) }
                 } else {
                     val lastStep = currentSteps.lastOrNull()
-                    if (lastStep != null && lastStep.selector == newStep.selector && lastStep.actionType == newStep.actionType) {
+                    if (lastStep != null &&
+                        lastStep.selector == newStep.selector &&
+                        arePageUrlsSame(lastStep.pageUrl, newStep.pageUrl) &&
+                        lastStep.actionType == newStep.actionType
+                    ) {
                         return@launch
                     }
                     currentSteps + newStep
                 }
 
-                val domain = extractDomain(lastKnownPageUrl)
+                val page1Url = getStartingPageUrl(_currentScript.value.copy(steps = updatedSteps))
+                val domain = extractDomain(page1Url.ifBlank { stepPageUrl })
                 val updatedScriptName = if (_currentScript.value.name == "New Automation Flow" && domain.isNotBlank() && !domain.contains("home")) {
                     "$domain Automation"
                 } else {
@@ -144,11 +209,12 @@ class AutomationEngine(
                 _currentScript.value = _currentScript.value.copy(
                     name = updatedScriptName,
                     targetWebsite = updatedTargetWebsite,
-                    targetUrl = lastKnownPageUrl.ifBlank { _currentScript.value.targetUrl },
+                    targetUrl = page1Url,
                     steps = updatedSteps
                 )
                 syncCurrentScriptToSavedScripts()
-                addLog("Grabbed ready element: $description -> ${resolvedKey?.let { "Data '{{$it}}'" } ?: type.name}")
+                val totalPages = countDistinctPages(updatedSteps)
+                addLog("Grabbed ready element (Page $totalPages): $description -> ${resolvedKey?.let { "Data '{{$it}}'" } ?: type.name}")
             }
         }
 
@@ -156,58 +222,99 @@ class AutomationEngine(
         fun onScanResults(jsonString: String) {
             scope.launch {
                 try {
-                    val jsonArray = JSONArray(jsonString)
-                    val elements = mutableListOf<ScannedElement>()
-                    for (i in 0 until jsonArray.length()) {
-                        val obj = jsonArray.getJSONObject(i)
-                        val semanticStr = obj.optString("semanticType", "GENERIC_INPUT")
-                        val semanticEnum = try {
-                            ElementSemanticType.valueOf(semanticStr)
-                        } catch (e: Exception) {
-                            ElementSemanticType.GENERIC_INPUT
-                        }
-
-                        val optionsList = mutableListOf<String>()
-                        val optsArray = obj.optJSONArray("detectedOptions")
-                        if (optsArray != null) {
-                            for (j in 0 until optsArray.length()) {
-                                optionsList.add(optsArray.optString(j))
-                            }
-                        }
-
-                        elements.add(
-                            ScannedElement(
-                                tagName = obj.optString("tagName", ""),
-                                type = obj.optString("type", ""),
-                                nameAttr = obj.optString("nameAttr", ""),
-                                idAttr = obj.optString("idAttr", ""),
-                                placeholder = obj.optString("placeholder", ""),
-                                text = obj.optString("text", ""),
-                                selector = obj.optString("selector", ""),
-                                pageUrl = obj.optString("pageUrl", lastKnownPageUrl),
-                                isInput = obj.optBoolean("isInput", false),
-                                isButton = obj.optBoolean("isButton", false),
-                                semanticType = semanticEnum,
-                                detectedOptions = optionsList
-                            )
-                        )
-                    }
+                    hideWebViewSoftKeyboard()
+                    val elements = parseScannedElements(jsonString)
                     _scannedElements.value = elements
 
-                    // Automatically convert grabbed elements into ready-to-use script steps if requested or if script is empty
-                    if (elements.isNotEmpty() && (autoReadyOnNextScan || _currentScript.value.steps.isEmpty())) {
-                        autoReadyOnNextScan = false
+                    // ONLY build steps when explicitly requested by user pressing "Grab Elements" (autoReadyOnNextScan == true).
+                    // Never auto-rebuild merely because steps are empty (prevents re-grab loop after deleting steps).
+                    val shouldBuildReady = autoReadyOnNextScan
+                    autoReadyOnNextScan = false
+
+                    if (elements.isNotEmpty() && shouldBuildReady) {
                         buildReadyStepsFromGrabbedElements(elements)
                     } else {
-                        addLog("Grabbed ${elements.size} elements on page (ready to use with Data Sheet or Default)")
+                        addLog("Scanned ${elements.size} elements on page.")
                     }
 
                     if (_executionState.value.status == AutomationStatus.SCANNING) {
                         _executionState.value = _executionState.value.copy(status = AutomationStatus.RECORDING)
                     }
                 } catch (e: Exception) {
+                    autoReadyOnNextScan = false
                     addLog("Scanner parse error: ${e.message}")
                 }
+            }
+        }
+
+        private fun parseScannedElements(jsonString: String): List<ScannedElement> {
+            return try {
+                val jsonArray = JSONArray(jsonString)
+                val elements = mutableListOf<ScannedElement>()
+                for (i in 0 until jsonArray.length()) {
+                    val obj = jsonArray.getJSONObject(i)
+                    val semanticStr = obj.optString("semanticType", "GENERIC_INPUT")
+                    val semanticEnum = try {
+                        ElementSemanticType.valueOf(semanticStr)
+                    } catch (e: Exception) {
+                        ElementSemanticType.GENERIC_INPUT
+                    }
+
+                    val optionsList = mutableListOf<String>()
+                    val optsArray = obj.optJSONArray("detectedOptions")
+                    if (optsArray != null) {
+                        for (j in 0 until optsArray.length()) {
+                            optionsList.add(optsArray.optString(j))
+                        }
+                    }
+
+                    elements.add(
+                        ScannedElement(
+                            tagName = obj.optString("tagName", ""),
+                            type = obj.optString("type", ""),
+                            nameAttr = obj.optString("nameAttr", ""),
+                            idAttr = obj.optString("idAttr", ""),
+                            placeholder = obj.optString("placeholder", ""),
+                            text = obj.optString("text", ""),
+                            selector = obj.optString("selector", ""),
+                            pageUrl = obj.optString("pageUrl", lastKnownPageUrl),
+                            isInput = obj.optBoolean("isInput", false),
+                            isButton = obj.optBoolean("isButton", false),
+                            semanticType = semanticEnum,
+                            detectedOptions = optionsList
+                        )
+                    )
+                }
+                elements
+            } catch (_: Throwable) {
+                // Fallback parser for local JVM unit tests where android.jar JSONArray is stubbed
+                val objRegex = Regex("\\{[^{}]*\\}")
+                objRegex.findAll(jsonString).mapNotNull { match ->
+                    val raw = match.value
+                    fun strVal(key: String): String =
+                        Regex("\"$key\"\\s*:\\s*\"([^\"]*)\"").find(raw)?.groupValues?.get(1) ?: ""
+                    fun boolVal(key: String): Boolean =
+                        Regex("\"$key\"\\s*:\\s*(true|false)").find(raw)?.groupValues?.get(1)?.toBoolean() ?: false
+                    val selector = strVal("selector")
+                    if (selector.isBlank()) null
+                    else {
+                        val semStr = strVal("semanticType").ifBlank { "GENERIC_INPUT" }
+                        val sem = runCatching { ElementSemanticType.valueOf(semStr) }.getOrDefault(ElementSemanticType.GENERIC_INPUT)
+                        ScannedElement(
+                            tagName = strVal("tagName"),
+                            type = strVal("type"),
+                            nameAttr = strVal("nameAttr"),
+                            idAttr = strVal("idAttr"),
+                            placeholder = strVal("placeholder"),
+                            text = strVal("text"),
+                            selector = selector,
+                            pageUrl = strVal("pageUrl").ifBlank { lastKnownPageUrl },
+                            isInput = boolVal("isInput"),
+                            isButton = boolVal("isButton"),
+                            semanticType = sem
+                        )
+                    }
+                }.toList()
             }
         }
     }
@@ -254,6 +361,11 @@ class AutomationEngine(
 
         val targetList = orderedActionable.ifEmpty { elements }
 
+        val scanPageUrl = elements.firstOrNull { it.pageUrl.isNotBlank() }?.pageUrl?.ifBlank { lastKnownPageUrl } ?: lastKnownPageUrl
+        if (scanPageUrl.isNotBlank() && !scanPageUrl.startsWith("aura://")) {
+            lastKnownPageUrl = scanPageUrl
+        }
+
         val readySteps = targetList.map { element ->
             val (actionType, varKey, defaultVal, desc) = mapScannedElementDetails(element)
             AutomationStep(
@@ -262,22 +374,26 @@ class AutomationEngine(
                 elementDescription = desc,
                 value = defaultVal,
                 variableKey = varKey,
-                pageUrl = element.pageUrl.ifBlank { lastKnownPageUrl },
-                delayMs = if (actionType == AutomationActionType.SUBMIT) 1300L else 750L
+                pageUrl = element.pageUrl.ifBlank { scanPageUrl },
+                delayMs = if (actionType == AutomationActionType.SUBMIT) 1200L else 650L
             )
         }
 
+        // Preserve all steps grabbed on Page 1 and any previous pages; only deduplicate selectors on the SAME pageUrl
         val existingSteps = _currentScript.value.steps
-        val hasMultiPageNavigate = existingSteps.any { it.actionType == AutomationActionType.NAVIGATE }
-        val finalSteps = if (hasMultiPageNavigate) {
-            // Keep steps from earlier pages and append new page's steps
-            val existingSelectorsOnPage = existingSteps.filter { it.pageUrl == lastKnownPageUrl }.map { it.selector }.toSet()
-            existingSteps + readySteps.filter { it.selector !in existingSelectorsOnPage }
-        } else {
+        val finalSteps = if (existingSteps.isEmpty()) {
             readySteps
+        } else {
+            val existingSelectorsOnCurrentPage = existingSteps
+                .filter { arePageUrlsSame(it.pageUrl, scanPageUrl) }
+                .map { it.selector }
+                .toSet()
+            val newStepsForCurrentPage = readySteps.filter { it.selector !in existingSelectorsOnCurrentPage }
+            existingSteps + newStepsForCurrentPage
         }
 
-        val domain = extractDomain(lastKnownPageUrl)
+        val page1Url = getStartingPageUrl(_currentScript.value.copy(steps = finalSteps))
+        val domain = extractDomain(page1Url.ifBlank { scanPageUrl })
         val updatedName = if (_currentScript.value.name == "New Automation Flow" && domain.isNotBlank() && !domain.contains("home")) {
             "$domain Automation"
         } else {
@@ -292,19 +408,27 @@ class AutomationEngine(
         _currentScript.value = _currentScript.value.copy(
             name = updatedName,
             targetWebsite = updatedSite,
-            targetUrl = lastKnownPageUrl.ifBlank { _currentScript.value.targetUrl },
+            targetUrl = page1Url,
             steps = finalSteps,
             dataSheetId = _currentScript.value.dataSheetId ?: _dataSheets.value.firstOrNull()?.id
         )
         syncCurrentScriptToSavedScripts()
 
-        addLog("Created script '${_currentScript.value.name}' with ${readySteps.size} ready elements (fields + checkboxes + buttons)!")
+        val pageCount = countDistinctPages(finalSteps)
+        addLog("Grabbed ${readySteps.size} elements on page (Total: ${finalSteps.size} steps across $pageCount page(s), starting from Page 1)!")
     }
 
     private fun syncCurrentScriptToSavedScripts() {
         val current = _currentScript.value
-        if (current.steps.isEmpty()) return
+        _executionState.value = _executionState.value.copy(totalSteps = current.steps.size)
         val existingIdx = _savedScripts.value.indexOfFirst { it.id == current.id }
+        if (current.steps.isEmpty()) {
+            // If all steps were deleted from the current script, remove it from savedScripts so it does not linger or resurrect
+            if (existingIdx >= 0) {
+                _savedScripts.value = _savedScripts.value.filterNot { it.id == current.id }
+            }
+            return
+        }
         if (existingIdx >= 0) {
             _savedScripts.value = _savedScripts.value.toMutableList().apply { set(existingIdx, current) }
         } else {
@@ -336,42 +460,18 @@ class AutomationEngine(
     }
 
     /**
-     * Called when WebView finishes loading a page (supports Page 1 -> Page 2 and Website 1 -> Website 2).
+     * Called when WebView finishes loading a page.
+     * Note: Does NOT auto-trigger bulk scan so user deletions are never overwritten in a loop.
      */
     fun onPageLoaded(url: String) {
         if (url.isBlank() || url.startsWith("aura://")) return
-        val previousUrl = lastKnownPageUrl
         lastKnownPageUrl = url
+        pageLoadWaiter?.complete(url)
 
-        // If user is in Create Automation, Recording mode, or HUD is visible with no script created yet:
-        if (_executionState.value.hudMode == HudMode.CREATE_AUTOMATION ||
-            _executionState.value.status == AutomationStatus.RECORDING ||
-            (_executionState.value.isHudVisible && _savedScripts.value.isEmpty())
+        if (_executionState.value.status == AutomationStatus.RECORDING ||
+            _executionState.value.hudMode == HudMode.CREATE_AUTOMATION
         ) {
-            if (previousUrl.isNotBlank() && !previousUrl.equals(url, ignoreCase = true)) {
-                addLog("Page loaded: $url (Grabbing page elements...)")
-                autoReadyOnNextScan = true
-            }
             injectJs(AutomationScripts.RECORDING_INJECTION)
-            triggerScan(autoReadySteps = _currentScript.value.steps.isEmpty() || autoReadyOnNextScan)
-
-            // Schedule follow-up scans for dynamic SPA pages that render form fields after onPageFinished
-            scope.launch {
-                delay(900L)
-                if (_currentScript.value.steps.isEmpty() &&
-                    (_executionState.value.hudMode == HudMode.CREATE_AUTOMATION || _executionState.value.isHudVisible)
-                ) {
-                    injectJs(AutomationScripts.RECORDING_INJECTION)
-                    triggerScan(autoReadySteps = true)
-                }
-                delay(1200L)
-                if (_currentScript.value.steps.isEmpty() &&
-                    (_executionState.value.hudMode == HudMode.CREATE_AUTOMATION || _executionState.value.isHudVisible)
-                ) {
-                    injectJs(AutomationScripts.RECORDING_INJECTION)
-                    triggerScan(autoReadySteps = true)
-                }
-            }
         } else if (_executionState.value.isHudVisible && _executionState.value.status == AutomationStatus.IDLE) {
             autoSelectScriptForWebsite(url)
         }
@@ -394,11 +494,14 @@ class AutomationEngine(
 
     // HUD Mode & Visibility
     fun setHudMode(mode: HudMode, currentUrl: String = lastKnownPageUrl) {
+        if (currentUrl.isNotBlank() && !currentUrl.startsWith("aura://")) {
+            lastKnownPageUrl = currentUrl
+        }
         _executionState.value = _executionState.value.copy(hudMode = mode)
         if (mode == HudMode.CREATE_AUTOMATION) {
             val domain = extractDomain(currentUrl)
             if (domain.isNotBlank() && !domain.contains("home")) {
-                if (_currentScript.value.targetWebsite == "*") {
+                if (_currentScript.value.targetWebsite == "*" && _currentScript.value.steps.isEmpty()) {
                     _currentScript.value = _currentScript.value.copy(
                         name = if (_currentScript.value.name == "New Automation Flow") "$domain Automation" else _currentScript.value.name,
                         targetWebsite = domain,
@@ -407,18 +510,24 @@ class AutomationEngine(
                 }
             }
             startRecording()
-            triggerScan(autoReadySteps = _currentScript.value.steps.isEmpty())
         } else {
             stopRecording()
         }
     }
 
+    /**
+     * Clears/resets the current script and all grabbed elements WITHOUT auto-grabbing again.
+     */
     fun startFreshRecordingScript(currentUrl: String) {
+        autoReadyOnNextScan = false
+        val oldId = _currentScript.value.id
+        _savedScripts.value = _savedScripts.value.filterNot { it.id == oldId && _currentScript.value.steps.isEmpty() }
+
         val domain = extractDomain(currentUrl).ifBlank { "*" }
         val fresh = AutomationScript(
             id = UUID.randomUUID().toString(),
-            name = if (domain != "*") "$domain Automation" else "Custom Web Automation",
-            targetWebsite = domain,
+            name = if (domain != "*" && !domain.contains("home")) "$domain Automation" else "Custom Web Automation",
+            targetWebsite = if (domain.contains("home")) "*" else domain,
             targetUrl = currentUrl,
             steps = emptyList(),
             dataSheetId = _dataSheets.value.firstOrNull()?.id,
@@ -427,10 +536,11 @@ class AutomationEngine(
             exhaustionPolicy = DataExhaustionPolicy.ADD_NEW
         )
         _currentScript.value = fresh
-        autoReadyOnNextScan = true
+        _scannedElements.value = emptyList()
+        _executionState.value = _executionState.value.copy(totalSteps = 0, currentStepIndex = 0)
+        injectJs(AutomationScripts.CLEAR_SCAN_HIGHLIGHTS)
         startRecording()
-        triggerScan(autoReadySteps = true)
-        addLog("Created new script for $domain. Grabbing page elements (no typing needed)...")
+        addLog("Cleared script. Tap 'Grab Elements' or tap elements on page to add new steps.")
     }
 
     fun toggleHud(currentUrl: String = lastKnownPageUrl) {
@@ -448,9 +558,9 @@ class AutomationEngine(
         )
 
         if (next && !hasAnyScript) {
-            addLog("No scripts found. Create a script by grabbing or tapping page elements (no typing required).")
             startRecording()
-            triggerScan(autoReadySteps = true)
+        } else if (!next) {
+            stopRecording()
         }
     }
 
@@ -463,7 +573,8 @@ class AutomationEngine(
         )
         if (visible && !hasAnyScript) {
             startRecording()
-            triggerScan(autoReadySteps = true)
+        } else if (!visible) {
+            stopRecording()
         }
     }
 
@@ -495,6 +606,7 @@ class AutomationEngine(
 
     fun selectScript(script: AutomationScript) {
         _currentScript.value = script
+        _executionState.value = _executionState.value.copy(totalSteps = script.steps.size)
         addLog("Selected script: ${script.name} (${script.steps.size} steps)")
     }
 
@@ -511,12 +623,13 @@ class AutomationEngine(
             it.id == current.id || (it.name.equals(name, ignoreCase = true) && it.targetWebsite.equals(targetWebsite, ignoreCase = true))
         }
         val scriptId = if (existingByNameAndSite != null && current.name == name) current.id else UUID.randomUUID().toString()
+        val page1Url = getStartingPageUrl(current)
 
         val newScript = current.copy(
             id = scriptId,
             name = name.ifBlank { "Website Automation" },
             targetWebsite = targetWebsite.ifBlank { "*" },
-            targetUrl = lastKnownPageUrl.ifBlank { current.targetUrl },
+            targetUrl = page1Url,
             dataSheetId = dataSheetId,
             iterationOrder = iterationOrder,
             exhaustionPolicy = exhaustionPolicy,
@@ -530,19 +643,22 @@ class AutomationEngine(
         }
         _savedScripts.value = updatedList
         _currentScript.value = newScript
-        addLog("Saved script '${newScript.name}' (${newScript.steps.size} steps) for '${newScript.targetWebsite}'")
+        _executionState.value = _executionState.value.copy(totalSteps = newScript.steps.size)
+        addLog("Saved script '${newScript.name}' (${newScript.steps.size} steps across ${countDistinctPages(newScript.steps)} page(s))")
     }
 
     fun deleteScript(scriptId: String) {
         _savedScripts.value = _savedScripts.value.filter { it.id != scriptId }
         if (_currentScript.value.id == scriptId) {
-            _currentScript.value = _savedScripts.value.firstOrNull() ?: AutomationScript(
+            val nextScript = _savedScripts.value.firstOrNull() ?: AutomationScript(
                 id = UUID.randomUUID().toString(),
                 name = "New Automation Flow",
                 targetWebsite = "*",
                 steps = emptyList(),
                 repeatCount = 1
             )
+            _currentScript.value = nextScript
+            _executionState.value = _executionState.value.copy(totalSteps = nextScript.steps.size)
         }
         addLog("Deleted script.")
     }
@@ -556,7 +672,6 @@ class AutomationEngine(
             _dataSheets.value + sheet
         }
         _dataSheets.value = updated
-        // Automatically link newly created Data Sheet to current script if none was linked
         if (_currentScript.value.dataSheetId == null) {
             _currentScript.value = _currentScript.value.copy(dataSheetId = sheet.id)
         }
@@ -590,14 +705,14 @@ class AutomationEngine(
             status = AutomationStatus.RECORDING,
             isHudVisible = true
         )
-        addLog("No-Type Recording active: tap any field, checkbox, or button to grab it (no typing needed; values fill from Data Sheet/Default on start).")
+        hideWebViewSoftKeyboard()
         injectJs(AutomationScripts.RECORDING_INJECTION)
     }
 
     fun stopRecording() {
         if (_executionState.value.status == AutomationStatus.RECORDING) {
             _executionState.value = _executionState.value.copy(status = AutomationStatus.IDLE)
-            addLog("Recording paused. Ready elements in script: ${_currentScript.value.steps.size}")
+            injectJs(AutomationScripts.STOP_RECORDING_INJECTION)
         }
     }
 
@@ -607,11 +722,13 @@ class AutomationEngine(
         if (_executionState.value.status != AutomationStatus.RECORDING) {
             _executionState.value = _executionState.value.copy(status = AutomationStatus.SCANNING)
         }
-        addLog("Grabbing page elements and preparing script...")
+        hideWebViewSoftKeyboard()
+        addLog("Scanning & grabbing page elements...")
         injectJs(AutomationScripts.DOM_SCANNER)
     }
 
     fun clearScanHighlights() {
+        autoReadyOnNextScan = false
         injectJs(AutomationScripts.CLEAR_SCAN_HIGHLIGHTS)
         _scannedElements.value = emptyList()
         if (_executionState.value.status == AutomationStatus.SCANNING) {
@@ -628,16 +745,22 @@ class AutomationEngine(
 
     fun addScannedElementToScript(element: ScannedElement) {
         val (actionType, varKey, defaultVal, desc) = mapScannedElementDetails(element)
+        val stepPageUrl = element.pageUrl.ifBlank { lastKnownPageUrl }
         val newStep = AutomationStep(
             actionType = actionType,
             selector = element.selector,
             elementDescription = desc,
             value = defaultVal,
             variableKey = varKey,
-            pageUrl = element.pageUrl.ifBlank { lastKnownPageUrl },
-            delayMs = 800L
+            pageUrl = stepPageUrl,
+            delayMs = 750L
         )
-        _currentScript.value = _currentScript.value.copy(steps = _currentScript.value.steps + newStep)
+        val updatedSteps = _currentScript.value.steps + newStep
+        val page1Url = getStartingPageUrl(_currentScript.value.copy(steps = updatedSteps))
+        _currentScript.value = _currentScript.value.copy(
+            targetUrl = page1Url,
+            steps = updatedSteps
+        )
         syncCurrentScriptToSavedScripts()
         addLog("Added element '$desc' -> bound to ${varKey?.let { "Data '{{$it}}'" } ?: actionType.name}")
     }
@@ -726,18 +849,73 @@ class AutomationEngine(
         exhaustionDecisionDeferred?.complete(ExhaustionDecision.AddedNewData(clean))
     }
 
+    private fun getCurrentWebViewUrl(): String {
+        val liveUrl = try {
+            webViewProvider?.invoke()?.url
+        } catch (_: Exception) {
+            null
+        }
+        return if (!liveUrl.isNullOrBlank() && !liveUrl.startsWith("aura://") && liveUrl != "about:blank") {
+            liveUrl
+        } else {
+            lastKnownPageUrl
+        }
+    }
+
+    private suspend fun navigateWebViewAndWait(targetUrl: String, timeoutMs: Long = 4500L) {
+        if (targetUrl.isBlank() || targetUrl.startsWith("aura://")) return
+        val waiter = CompletableDeferred<String>()
+        pageLoadWaiter = waiter
+        lastKnownPageUrl = targetUrl
+
+        val nav = webViewNavigator
+        val wv = webViewProvider?.invoke()
+        if (nav != null) {
+            nav.invoke(targetUrl)
+        } else if (wv != null) {
+            wv.loadUrl(targetUrl)
+        } else {
+            pageLoadWaiter = null
+            return
+        }
+
+        withTimeoutOrNull(timeoutMs) {
+            waiter.await()
+        }
+        pageLoadWaiter = null
+        delay(350L)
+        hideWebViewSoftKeyboard()
+    }
+
+    private suspend fun waitForNaturalPageTransition(expectedPageUrl: String, maxWaitMs: Long = 1800L) {
+        if (expectedPageUrl.isBlank() || expectedPageUrl.startsWith("aura://")) return
+        var elapsed = 0L
+        val stepMs = 150L
+        while (elapsed < maxWaitMs) {
+            if (arePageUrlsSame(getCurrentWebViewUrl(), expectedPageUrl)) {
+                delay(250L)
+                return
+            }
+            delay(stepMs)
+            elapsed += stepMs
+        }
+    }
+
     /**
      * Playback Execution:
-     * - STRICT GATE: Cannot start if no script or steps exist; redirects HUD to Create Automation mode.
-     * - Auto-registers newly grabbed script in savedScripts when started.
+     * - STRICT GATE: Cannot start if no script or steps exist; switches HUD to Create Automation mode.
+     * - ALWAYS starts from Page 1 (the URL where the first elements of the workflow were grabbed) and transitions across pages in order.
+     * - Suppresses the Android soft keyboard throughout filling.
      * - Consumes stored values from the linked Data Sheet 1 by 1, or uses Default Generator if no Data Sheet is linked.
-     * - Executes with wait-for-element auto-retry and fallback hint matching so dynamic DOMs succeed reliably.
      */
     fun startPlayback() {
-        // If currentScript has no steps, check if a saved script exists for this website
+        // If currentScript has no steps, check if a valid saved script exists for this website
         if (_currentScript.value.steps.isEmpty() && _savedScripts.value.isNotEmpty()) {
-            val matched = getScriptsForCurrentUrl(lastKnownPageUrl).firstOrNull() ?: _savedScripts.value.first()
-            _currentScript.value = matched
+            val matched = getScriptsForCurrentUrl(lastKnownPageUrl).firstOrNull { it.steps.isNotEmpty() }
+                ?: _savedScripts.value.firstOrNull { it.steps.isNotEmpty() }
+            if (matched != null) {
+                _currentScript.value = matched
+            }
         }
 
         val script = _currentScript.value
@@ -748,26 +926,43 @@ class AutomationEngine(
                 hudMode = HudMode.CREATE_AUTOMATION,
                 isHudVisible = true
             )
-            addLog("Cannot start automation: No script created yet. Grab or tap elements on the page in HUD to create one first.")
+            addLog("Cannot start automation: No script created yet. Tap 'Grab Elements' or tap elements on the page to create one.")
             injectJs(AutomationScripts.RECORDING_INJECTION)
-            triggerScan(autoReadySteps = true)
             return
         }
 
-        // Auto-save the current script into savedScripts if it isn't saved yet
+        val page1StartingUrl = getStartingPageUrl(script)
+
+        // Auto-save the current script into savedScripts if it isn't saved yet, locking targetUrl to Page 1
         if (_savedScripts.value.none { it.id == script.id }) {
-            val domain = extractDomain(lastKnownPageUrl).ifBlank { script.targetWebsite.ifBlank { "*" } }
+            val domain = extractDomain(page1StartingUrl.ifBlank { lastKnownPageUrl }).ifBlank { script.targetWebsite.ifBlank { "*" } }
             val savedCopy = script.copy(
                 name = if (script.name == "New Automation Flow" && domain != "*") "$domain Automation" else script.name,
                 targetWebsite = if (script.targetWebsite == "*" && domain != "*") domain else script.targetWebsite,
-                targetUrl = lastKnownPageUrl.ifBlank { script.targetUrl }
+                targetUrl = page1StartingUrl
             )
             _currentScript.value = savedCopy
             _savedScripts.value = listOf(savedCopy) + _savedScripts.value
+        } else if (page1StartingUrl.isNotBlank() && _currentScript.value.targetUrl != page1StartingUrl) {
+            val updatedCopy = script.copy(targetUrl = page1StartingUrl)
+            _currentScript.value = updatedCopy
+            syncCurrentScriptToSavedScripts()
         }
 
         val activeScript = _currentScript.value
         stopPlayback()
+        injectJs(AutomationScripts.STOP_RECORDING_INJECTION)
+        hideWebViewSoftKeyboard()
+
+        // Ensure Page 1 URL is immediately set if we are starting playback from Page 2+
+        val initialCurrentUrl = getCurrentWebViewUrl()
+        val needsInitialPage1Nav = page1StartingUrl.isNotBlank() &&
+                !page1StartingUrl.startsWith("aura://") &&
+                !arePageUrlsSame(initialCurrentUrl, page1StartingUrl)
+        if (needsInitialPage1Nav) {
+            lastKnownPageUrl = page1StartingUrl
+        }
+
         _executionState.value = _executionState.value.copy(
             status = AutomationStatus.PLAYING,
             hudMode = HudMode.RUN_AUTOMATION,
@@ -780,17 +975,15 @@ class AutomationEngine(
             exhaustedFieldKey = null
         )
 
-        // Per-field consumption counter so recurring steps and iterations consume 1 by 1
         val fieldUsageCounters = mutableMapOf<String, Int>()
-        // Non-repeating shuffled index list per field when RANDOM order is selected
         val fieldShuffledOrders = mutableMapOf<String, List<Int>>()
-        // Track fields where user selected "Continue Using Default" after exhaustion
         val fieldsForcedToDefault = mutableSetOf<String>()
 
-        playbackJob = scope.launch(Dispatchers.Main) {
+        playbackJob = scope.launch {
             val initialSheet = getDataSheet(activeScript.dataSheetId)
+            val totalPagesCount = countDistinctPages(activeScript.steps)
             addLog(
-                "Starting '${activeScript.name}' (${activeScript.repeatCount}x, Order: ${activeScript.iterationOrder.shortLabel}). " +
+                "Starting '${activeScript.name}' (${activeScript.steps.size} steps across $totalPagesCount page(s), ${activeScript.repeatCount}x, Order: ${activeScript.iterationOrder.shortLabel}). " +
                         if (initialSheet != null) "Filling from Data Sheet: '${initialSheet.name}'" else "Filling from Default Data Generator"
             )
 
@@ -804,14 +997,30 @@ class AutomationEngine(
                     totalIterations = activeScript.repeatCount
                 )
 
-                // Rotate proxy at each iteration if enabled
                 if (activeScript.rotateProxyOnRepeat) {
                     onRotateProxy?.invoke()
                     addLog("[Run $iteration] Rotated proxy node for clean session")
                     delay(450)
                 }
 
-                // Fresh random synthetic profile from Default generator for this run
+                // Always start each iteration from Page 1 if the browser is currently on a later page (Page 2+) or on repeat runs
+                if (page1StartingUrl.isNotBlank() && !page1StartingUrl.startsWith("aura://")) {
+                    val firstStepIsSameNavigate = activeScript.steps.firstOrNull()?.let {
+                        it.actionType == AutomationActionType.NAVIGATE &&
+                                arePageUrlsSame(it.value.ifBlank { it.selector }, page1StartingUrl)
+                    } ?: false
+                    val shouldLoadPage1 = !firstStepIsSameNavigate &&
+                            (iteration > 1 || needsInitialPage1Nav || !arePageUrlsSame(getCurrentWebViewUrl(), page1StartingUrl))
+                    if (shouldLoadPage1) {
+                        _executionState.value = _executionState.value.copy(
+                            currentStepIndex = 1,
+                            currentStepDescription = "Opening Page 1 (${extractDomain(page1StartingUrl).ifBlank { page1StartingUrl }})"
+                        )
+                        addLog("[Run $iteration] Navigating to Page 1: $page1StartingUrl")
+                        navigateWebViewAndWait(page1StartingUrl)
+                    }
+                }
+
                 var currentDefaultRecord = AutomationDataGenerator.generateSingleRandomRecord()
                 var lastResolvedPassword: String? = null
 
@@ -819,6 +1028,25 @@ class AutomationEngine(
                     if (_executionState.value.status != AutomationStatus.PLAYING &&
                         _executionState.value.status != AutomationStatus.PAUSED
                     ) break@outerLoop
+
+                    hideWebViewSoftKeyboard()
+
+                    // Handle multi-page transitions (e.g. Page 1 -> Page 2 -> Page 3)
+                    val prevPageUrl = if (index > 0) activeScript.steps[index - 1].pageUrl else page1StartingUrl
+                    val stepPageUrl = step.pageUrl
+                    if (step.actionType != AutomationActionType.NAVIGATE &&
+                        stepPageUrl.isNotBlank() &&
+                        !stepPageUrl.startsWith("aura://") &&
+                        !arePageUrlsSame(stepPageUrl, getCurrentWebViewUrl())
+                    ) {
+                        if (index > 0 && !arePageUrlsSame(stepPageUrl, prevPageUrl)) {
+                            waitForNaturalPageTransition(stepPageUrl, maxWaitMs = 1800L)
+                        }
+                        if (!arePageUrlsSame(stepPageUrl, getCurrentWebViewUrl())) {
+                            addLog("[Run $iteration] Transitioning to page: $stepPageUrl")
+                            navigateWebViewAndWait(stepPageUrl)
+                        }
+                    }
 
                     _executionState.value = _executionState.value.copy(
                         currentStepIndex = index + 1,
@@ -831,7 +1059,6 @@ class AutomationEngine(
 
                     delay(actualDelay)
 
-                    // Determine which field key this step consumes
                     val stepFieldKey = inferStepFieldKey(step)
                     val fallbackHint = stepFieldKey ?: step.elementDescription
 
@@ -875,8 +1102,7 @@ class AutomationEngine(
                         AutomationActionType.NAVIGATE -> {
                             val targetUrl = resolvedValue.ifBlank { step.selector }
                             addLog("[Run $iteration] Navigating to page/website: $targetUrl")
-                            webViewProvider?.invoke()?.loadUrl(targetUrl)
-                            delay(2000L)
+                            navigateWebViewAndWait(targetUrl)
                         }
                         AutomationActionType.CLICK -> {
                             val js = AutomationScripts.createClickScript(step.selector, fallbackHint)
@@ -943,6 +1169,8 @@ class AutomationEngine(
                             addLog("[Run $iteration] Scrolled page")
                         }
                     }
+
+                    hideWebViewSoftKeyboard()
                 }
 
                 if (activeScript.clearDataOnComplete && iteration < activeScript.repeatCount) {
@@ -966,7 +1194,8 @@ class AutomationEngine(
     }
 
     /**
-     * Stronger JS Execution with automatic Wait-For-Element retry for dynamic SPAs and delayed renders.
+     * Stronger JS Execution with automatic Wait-For-Element retry for dynamic SPAs and delayed renders,
+     * while keeping the Android soft keyboard suppressed.
      */
     private suspend fun evaluateJsWithRetry(
         js: String,
@@ -975,6 +1204,7 @@ class AutomationEngine(
     ): Boolean {
         val webView = webViewProvider?.invoke() ?: return false
         for (attempt in 1..maxAttempts) {
+            hideWebViewSoftKeyboard()
             val deferred = CompletableDeferred<String?>()
             try {
                 webView.evaluateJavascript(js) { result ->
@@ -984,7 +1214,8 @@ class AutomationEngine(
                 deferred.complete(null)
             }
             val res = withTimeoutOrNull(1800L) { deferred.await() }
-            if (res != null && (res.contains("true", ignoreCase = true) || !res.contains("false", ignoreCase = true))) {
+            hideWebViewSoftKeyboard()
+            if (res != null && (res.contains("SUCCESS", ignoreCase = true) || res.contains("CLICKED", ignoreCase = true))) {
                 return true
             }
             if (attempt < maxAttempts) {
@@ -1009,12 +1240,6 @@ class AutomationEngine(
         }
     }
 
-    /**
-     * Consumes 1 value from the active DataSheet for [fieldKey] according to the configured order
-     * (Top to Bottom, Bottom to Top, or Random 1-by-1).
-     * If stored values are present, Default is NEVER used until all stored values are finished.
-     * When finished, applies exhaustion policy (Stop, Continue with Default, Loop, or Ask/Add New).
-     */
     private suspend fun consumeFieldNextValue(
         fieldKey: String,
         script: AutomationScript,
@@ -1059,7 +1284,6 @@ class AutomationEngine(
             return chosen
         }
 
-        // All stored values in this field have been used 1 by 1!
         return when (policy) {
             DataExhaustionPolicy.STOP -> {
                 addLog("All ${storedList.size} stored '$fieldKey' values in '${activeSheet.name}' finished. Stopping automation.")
@@ -1083,7 +1307,7 @@ class AutomationEngine(
                 chosen
             }
             DataExhaustionPolicy.ADD_NEW -> {
-                addLog("All ${storedList.size} '$fieldKey' values in '${activeSheet.name}' have been used 1 by 1. Waiting for user selection (Stop / Continue Default / Add New)...")
+                addLog("All ${storedList.size} '$fieldKey' values in '${activeSheet.name}' have been used 1 by 1. Waiting for user selection...")
                 val deferred = CompletableDeferred<ExhaustionDecision>()
                 exhaustionDecisionDeferred = deferred
                 _executionState.value = _executionState.value.copy(
@@ -1176,23 +1400,42 @@ class AutomationEngine(
     }
 
     fun removeStep(stepId: String) {
-        _currentScript.value = _currentScript.value.copy(
-            steps = _currentScript.value.steps.filter { it.id != stepId }
-        )
+        autoReadyOnNextScan = false
+        val remaining = _currentScript.value.steps.filter { it.id != stepId }
+        _currentScript.value = _currentScript.value.copy(steps = remaining)
         syncCurrentScriptToSavedScripts()
-        addLog("Removed step.")
+        if (remaining.isEmpty()) {
+            _scannedElements.value = emptyList()
+            injectJs(AutomationScripts.CLEAR_SCAN_HIGHLIGHTS)
+            addLog("All grabbed elements removed.")
+        } else {
+            addLog("Removed element (${remaining.size} remaining).")
+        }
     }
 
     fun clearAllSteps() {
+        autoReadyOnNextScan = false
         _currentScript.value = _currentScript.value.copy(steps = emptyList())
-        addLog("Cleared all steps.")
+        _scannedElements.value = emptyList()
+        syncCurrentScriptToSavedScripts()
+        injectJs(AutomationScripts.CLEAR_SCAN_HIGHLIGHTS)
+        addLog("Cleared all grabbed elements.")
     }
 
     fun updateCurrentScript(script: AutomationScript) {
         _currentScript.value = script
-        val idx = _savedScripts.value.indexOfFirst { it.id == script.id }
-        if (idx >= 0) {
-            _savedScripts.value = _savedScripts.value.toMutableList().apply { set(idx, script) }
+        syncCurrentScriptToSavedScripts()
+    }
+
+    private fun hideWebViewSoftKeyboard() {
+        val webView = webViewProvider?.invoke() ?: return
+        webView.post {
+            try {
+                webView.clearFocus()
+                val imm = webView.context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+                imm?.hideSoftInputFromWindow(webView.windowToken, 0)
+            } catch (_: Exception) {
+            }
         }
     }
 

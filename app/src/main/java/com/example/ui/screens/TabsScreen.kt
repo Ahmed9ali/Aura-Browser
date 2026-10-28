@@ -104,111 +104,67 @@ fun TabsScreen(
             .fillMaxSize()
             .testTag("tabs_screen")
     ) {
-        // Tabs Header & Expressive Actions Bar
-        Surface(
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 3.dp,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 12.dp)
-            ) {
-                Column {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Surface(
-                            shape = ExpressiveChipShape,
-                            color = MaterialTheme.colorScheme.primaryContainer,
-                            modifier = Modifier.size(32.dp)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = Icons.Default.Layers,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                            }
-                        }
-                        Text(
-                            text = "Tab Manager",
-                            style = MaterialTheme.typography.titleLarge,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                    Text(
-                        text = "${tabs.size} tabs • ${tabGroups.size} groups",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(start = 40.dp)
+        // Professional Tabs App Bar
+        com.example.ui.components.AuraSubScreenTopBar(
+            title = "Tab Manager",
+            subtitle = "${tabs.size} open tabs • ${tabGroups.size} tab groups",
+            icon = Icons.Default.Layers,
+            accentColor = MaterialTheme.colorScheme.primary,
+            actions = {
+                // New Group Button
+                OutlinedButton(
+                    onClick = onOpenCreateGroupDialog,
+                    shape = ExpressivePillShape,
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                    modifier = Modifier.testTag("btn_new_group")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.FolderSpecial,
+                        contentDescription = "New Group",
+                        modifier = Modifier.size(16.dp)
                     )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(text = "Group", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
                 }
 
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                // New Tab Button
+                Button(
+                    onClick = { onOpenNewTab(null) },
+                    shape = ExpressivePillShape,
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                    modifier = Modifier.testTag("btn_new_tab")
                 ) {
-                    // New Group Button
-                    OutlinedButton(
-                        onClick = onOpenCreateGroupDialog,
-                        shape = ExpressivePillShape,
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                        modifier = Modifier.testTag("btn_new_group")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.FolderSpecial,
-                            contentDescription = "New Group",
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(text = "Group", style = MaterialTheme.typography.labelMedium)
-                    }
+                    Icon(
+                        imageVector = Icons.Default.Add,
+                        contentDescription = "New Tab",
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(text = "New Tab", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                }
 
-                    // New Tab Button
-                    Button(
-                        onClick = { onOpenNewTab(null) },
-                        shape = ExpressivePillShape,
-                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
-                        modifier = Modifier.testTag("btn_new_tab")
-                    ) {
+                Box {
+                    IconButton(onClick = { showMoreMenu = true }) {
                         Icon(
-                            imageVector = Icons.Default.Add,
-                            contentDescription = "New Tab",
-                            modifier = Modifier.size(16.dp)
+                            imageVector = Icons.Default.MoreVert,
+                            contentDescription = "More Options"
                         )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(text = "New Tab", style = MaterialTheme.typography.labelMedium)
                     }
-
-                    Box {
-                        IconButton(onClick = { showMoreMenu = true }) {
-                            Icon(
-                                imageVector = Icons.Default.MoreVert,
-                                contentDescription = "More Options"
-                            )
-                        }
-                        DropdownMenu(
-                            expanded = showMoreMenu,
-                            onDismissRequest = { showMoreMenu = false }
-                        ) {
-                            DropdownMenuItem(
-                                text = { Text("Close All Tabs", color = MaterialTheme.colorScheme.error) },
-                                onClick = {
-                                    showMoreMenu = false
-                                    onCloseAllTabs()
-                                }
-                            )
-                        }
+                    DropdownMenu(
+                        expanded = showMoreMenu,
+                        onDismissRequest = { showMoreMenu = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Close All Tabs", color = MaterialTheme.colorScheme.error) },
+                            onClick = {
+                                showMoreMenu = false
+                                onCloseAllTabs()
+                            }
+                        )
                     }
                 }
             }
-        }
+        )
 
         // Tab Groups & Tabs Content
         LazyColumn(
