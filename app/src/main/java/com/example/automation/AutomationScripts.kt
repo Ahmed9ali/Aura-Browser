@@ -1286,6 +1286,7 @@ object AutomationScripts {
                 if (!node || node.nodeType !== 1) return false;
                 if (node.closest && node.closest('.aura-hud')) return false;
                 try {
+                    if (node.getClientRects && node.getClientRects().length === 0) return false;
                     var st = window.getComputedStyle(node);
                     if (!st || st.display === 'none' || st.visibility === 'hidden' || parseFloat(st.opacity) === 0) return false;
                     var r = node.getBoundingClientRect();
@@ -1326,6 +1327,13 @@ object AutomationScripts {
                 if (!triggerEl) return;
                 try {
                     triggerEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                } catch (e) {}
+                if (triggerEl.tagName && (triggerEl.tagName.toLowerCase() === 'input' || triggerEl.tagName.toLowerCase() === 'textarea')) {
+                    triggerEl.setAttribute('inputmode', 'none');
+                }
+                try {
+                    triggerEl.dispatchEvent(new FocusEvent('focus', { bubbles: false }));
+                    triggerEl.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
                 } catch (e) {}
                 dispatchHumanTap(triggerEl);
 
@@ -1381,6 +1389,9 @@ object AutomationScripts {
                 function addOverlay(node) {
                     if (!node || seen.indexOf(node) >= 0) return;
                     if (!isNodeVisible(node)) return;
+                    for (var s = 0; s < seen.length; s++) {
+                        if (seen[s].contains && seen[s].contains(node)) return;
+                    }
                     seen.push(node);
                     results.push(node);
                 }
@@ -1397,7 +1408,7 @@ object AutomationScripts {
                     }
                 }
 
-                // 2. Standard Bottom Sheets, Modals, Drawers, Popovers, and Framework Dropdown Portals
+                // 2. Standard Bottom Sheets, Modals, Drawers, Popovers, Datepickers, and Framework Dropdown Portals
                 var overlaySelector = [
                     '[role="listbox"]',
                     '[role="menu"]',
@@ -1423,11 +1434,14 @@ object AutomationScripts {
                     '.MuiMenu-list',
                     '.MuiAutocomplete-popper',
                     '.MuiPickersPopper-root',
+                    '.MuiDateCalendar-root',
                     '.MuiDialog-root',
                     '.ant-select-dropdown',
                     '.ant-drawer-content-wrapper',
                     '.ant-modal-content',
                     '.ant-picker-dropdown',
+                    '.ant-picker-panel-container',
+                    '.ant-calendar-picker-container',
                     '.adm-popup',
                     '.adm-picker',
                     '[data-radix-popper-content-wrapper]',
@@ -1439,6 +1453,8 @@ object AutomationScripts {
                     '.v-bottom-sheet',
                     '.v-menu__content',
                     '.el-select-dropdown',
+                    '.el-picker-panel',
+                    '.el-date-picker',
                     '.el-drawer',
                     '.q-menu',
                     '.q-dialog',
@@ -1449,7 +1465,22 @@ object AutomationScripts {
                     '.flag-dropdown.open',
                     '.react-select__menu',
                     '.flatpickr-calendar.open',
+                    '.flatpickr-calendar',
                     '.react-datepicker-popper',
+                    '.react-datepicker',
+                    '.datepicker-dropdown',
+                    '.datepicker-picker',
+                    '.datepicker',
+                    '.vdp-datepicker__calendar',
+                    '.mx-datepicker-main',
+                    '.mx-datepicker-popup',
+                    '.dp__menu',
+                    '.daterangepicker',
+                    '.pika-single',
+                    '.air-datepicker',
+                    '.litepicker',
+                    '.vanilla-calendar',
+                    '.duet-date__dialog',
                     '.picker-modal',
                     '.wheel-picker',
                     'ion-modal',
@@ -1460,18 +1491,21 @@ object AutomationScripts {
 
                 var matches = document.querySelectorAll(overlaySelector);
                 for (var m = 0; m < matches.length; m++) {
+                    if (triggerEl && matches[m] === triggerEl) continue;
                     addOverlay(matches[m]);
                 }
 
-                // 3. Local dropdown menu inside trigger's parent/container
+                // 3. Local dropdown menu or calendar popup inside trigger's parent/container
                 if (triggerEl) {
                     var localContainer = triggerEl.closest
-                        ? triggerEl.closest('#month, #countryList, .dropdown, .select, .custom-select, .iti, .react-tel-input, .PhoneInput, .phone-input, .form-group, .field, .input-group, .MuiFormControl-root, .ant-select, [role="combobox"], [role="listbox"]')
+                        ? triggerEl.closest('#month, #countryList, .dropdown, .select, .custom-select, .iti, .react-tel-input, .PhoneInput, .phone-input, .vdp-datepicker, .mx-datepicker, .date, .datepicker, .form-group, .field, .input-group, .MuiFormControl-root, .ant-select, [role="combobox"], [role="listbox"]')
                         : triggerEl.parentElement;
                     if (localContainer) {
-                        var localMenus = localContainer.querySelectorAll('ul, [role="listbox"], [role="menu"], .dropdown-menu, .dropdown-content, .options, .select-options, .select-items, .menu, .country-list, .iti__country-list');
+                        var localMenus = localContainer.querySelectorAll('ul, table, [role="listbox"], [role="menu"], [role="grid"], .dropdown-menu, .dropdown-content, .options, .select-options, .select-items, .menu, .country-list, .iti__country-list, .vdp-datepicker__calendar, .datepicker, .datepicker-dropdown, .datepicker-picker, [class*="datepicker"]:not(input), [class*="date-picker"]:not(input), [class*="calendar"]:not(input)');
                         for (var lm = 0; lm < localMenus.length; lm++) {
-                            addOverlay(localMenus[lm]);
+                            if (localMenus[lm] !== triggerEl && !localMenus[lm].contains(triggerEl)) {
+                                addOverlay(localMenus[lm]);
+                            }
                         }
                         if (localContainer.querySelectorAll('[role="option"], [data-value], [data-dial-code], .iti__country, .country').length > 0) {
                             addOverlay(localContainer);
@@ -1479,18 +1513,17 @@ object AutomationScripts {
                     }
                 }
 
-                // 4. Heuristic detector for custom fixed/absolute Bottom Sheets & Portals attached to body
-                var bodyChildren = document.body ? document.body.children : [];
-                for (var b = bodyChildren.length - 1; b >= 0; b--) {
-                    var node = bodyChildren[b];
+                // 4. Heuristic detector for custom fixed/absolute Bottom Sheets, Floating Popovers & Calendar Portals
+                var allCandidates = document.body ? document.body.querySelectorAll('div, section, aside, dialog, ul, table') : [];
+                for (var b = allCandidates.length - 1; b >= 0; b--) {
+                    var node = allCandidates[b];
                     if (!node || node.classList.contains('aura-hud') || node.tagName === 'SCRIPT' || node.tagName === 'STYLE') continue;
-                    if (triggerEl && node.contains(triggerEl) && node.getAttribute('role') !== 'dialog') continue;
+                    if (triggerEl && (node === triggerEl || (node.contains(triggerEl) && node.getAttribute('role') !== 'dialog'))) continue;
                     try {
                         var st = window.getComputedStyle(node);
                         if ((st.position === 'fixed' || st.position === 'absolute') && isNodeVisible(node)) {
-                            var z = parseInt(st.zIndex, 10) || 0;
                             var rect = node.getBoundingClientRect();
-                            if ((z >= 10 || rect.bottom >= window.innerHeight - 40) && rect.height >= 40) {
+                            if (rect.width >= 100 && rect.height >= 40 && rect.height <= window.innerHeight * 0.96) {
                                 addOverlay(node);
                             }
                         }
@@ -2582,61 +2615,261 @@ object AutomationScripts {
                     formattedDate = yearStr + '/' + monthPad + '/' + dayPad;
                 }
 
-                var isCustomPickerTrigger = (
-                    tag !== 'input' ||
-                    el.readOnly ||
-                    el.hasAttribute('data-datepicker') ||
-                    el.getAttribute('aria-haspopup') === 'dialog' ||
-                    el.getAttribute('role') === 'combobox' ||
-                    /datepicker|flatpickr|ant-picker|MuiPickers|react-datepicker/i.test((el.className || '') + ' ' + (el.parentElement ? el.parentElement.className : ''))
-                );
+                var elScope = el.closest ? (el.closest('form, fieldset, .form-group, .field, div') || document) : document;
+                var elHint = ((el.name || '') + ' ' + (el.id || '') + ' ' + (el.placeholder || '') + ' ' + (el.getAttribute('aria-label') || '')).toLowerCase();
 
-                // 3. Standard editable text/masked DOB input (not a readonly bottom-sheet/calendar trigger)
-                if (tag === 'input' && !isCustomPickerTrigger) {
-                    var elScope = el.closest ? (el.closest('form, fieldset, .form-group, .field, div') || document) : document;
-                    var elHint = ((el.name || '') + ' ' + (el.id || '') + ' ' + (el.placeholder || '') + ' ' + (el.getAttribute('aria-label') || '')).toLowerCase();
+                // 3. Dedicated single part of a 3-part split DOB input (e.g. separate Day, Month, or Year text/number box)
+                if (tag === 'input' && !el.readOnly && (el.maxLength === 2 || el.maxLength === 4 || /^(day|dd|month|mm|year|yyyy)$/i.test((el.placeholder || '').trim()))) {
                     if (/\bday\b|bday-day|dob_day|^dd$/i.test(elHint)) {
                         setNativeInputValueNoKeyboard(el, dayNumStr);
                         fillSplitDobSelects(elScope);
+                        return 'SUCCESS:SPLIT_DOB_INPUT';
                     } else if (/\byear\b|bday-year|dob_year|^yyyy$/i.test(elHint)) {
                         setNativeInputValueNoKeyboard(el, yearStr);
                         fillSplitDobSelects(elScope);
+                        return 'SUCCESS:SPLIT_DOB_INPUT';
                     } else if (/\bmonth\b|bday-month|dob_month|^mm$/i.test(elHint)) {
                         setNativeInputValueNoKeyboard(el, monthPad);
                         fillSplitDobSelects(elScope);
-                    } else {
-                        typeMaskedDigitsIfNeeded(el, formattedDate);
-                        fillSplitDobSelects(document);
+                        return 'SUCCESS:SPLIT_DOB_INPUT';
                     }
-                    return 'SUCCESS:FORMATTED_DATE_INPUT';
                 }
 
-                // 4. Custom Calendar Popup or Mobile Bottom-Sheet Wheel/Grid Date Picker
-                var stepKey = 'dob_' + '$escapedSelector';
-                var overlays = findActiveOverlays(el);
+                // 4. Multi-Stage Calendar Popup (Decade/Year -> Month -> Day, e.g. account.fydeos.io, Bootstrap/VanillaJS/Vue/AntD/Element/MUI/Flatpickr)
+                //    + Mobile Bottom-Sheet Wheel Picker + Formatted Date Input Fallback
+                var targetYearNum = parseInt(yearStr, 10) || 1998;
+                var targetMonthNum = parseInt(monthNumStr, 10) || 5;
+                var targetDayNum = parseInt(dayNumStr, 10) || 14;
 
-                if (overlays.length === 0 && window._auraActiveDateKey !== stepKey) {
-                    window._auraActiveDateKey = stepKey;
-                    window._auraActiveDateAttempts = 1;
-                    openDropdownOrSheetTrigger(el);
-                    return 'PENDING:OPENED_DATE_PICKER';
+                function findDatePickerOverlays(triggerNode) {
+                    var list = findActiveOverlays(triggerNode);
+                    // Also check if any visible element in document has a Decade range header like "2020-2029"
+                    var allNodes = document.body ? document.body.querySelectorAll('div, table, section, aside, dialog') : [];
+                    for (var i = 0; i < allNodes.length; i++) {
+                        var n = allNodes[i];
+                        if (!isNodeVisible(n) || n.classList.contains('aura-hud')) continue;
+                        if (triggerNode && (n === triggerNode || n.contains(triggerNode))) continue;
+                        var r = n.getBoundingClientRect();
+                        if (r.width < 140 || r.height < 100 || r.width > 650 || r.height > 650) continue;
+                        var txt = (n.innerText || '').trim();
+                        if (/\b(19\d\d|20\d\d)\s*[-~–—]\s*(19\d\d|20\d\d)\b/.test(txt)) {
+                            var alreadyCovered = false;
+                            for (var j = 0; j < list.length; j++) {
+                                if (list[j] === n || list[j].contains(n) || n.contains(list[j])) {
+                                    alreadyCovered = true;
+                                    break;
+                                }
+                            }
+                            if (!alreadyCovered) list.push(n);
+                        }
+                    }
+                    return list;
                 }
 
-                window._auraActiveDateAttempts = (window._auraActiveDateAttempts || 1) + 1;
+                function openDatePickerTrigger(triggerNode) {
+                    if (!triggerNode) return;
+                    openDropdownOrSheetTrigger(triggerNode);
+                    // If tapping the input itself didn't immediately open a calendar overlay, check for an adjacent calendar icon/button
+                    if (findDatePickerOverlays(triggerNode).length === 0 && triggerNode.parentElement) {
+                        var iconBtn = triggerNode.parentElement.querySelector('.input-group-addon, .input-group-append, .ant-picker-suffix, .el-input__prefix, .el-input__suffix, [class*="calendar"], [class*="icon"], button, [role="button"]');
+                        if (iconBtn && iconBtn !== triggerNode && isNodeVisible(iconBtn)) {
+                            dispatchHumanTap(iconBtn);
+                        }
+                    }
+                }
 
-                // Try selecting Year, Month, and Day inside the open Bottom Sheet or Calendar Popup
-                var selectedInsideOverlay = false;
-                for (var v = 0; v < overlays.length; v++) {
-                    var ov = overlays[v];
+                function tapCalendarCell(cellObj) {
+                    if (!cellObj) return;
+                    if (cellObj.node) {
+                        dispatchHumanTap(cellObj.node);
+                    }
+                    if (cellObj.cellRoot && cellObj.cellRoot !== cellObj.node) {
+                        dispatchHumanTap(cellObj.cellRoot);
+                    }
+                }
+
+                function isCalendarCellMuted(cellObj) {
+                    if (!cellObj || !cellObj.node) return true;
+                    var n = cellObj.node;
+                    var root = cellObj.cellRoot || n;
+                    if (n.disabled || root.disabled) return true;
+                    if (n.getAttribute('aria-disabled') === 'true' || root.getAttribute('aria-disabled') === 'true') return true;
+                    var cls = (
+                        (n.className && typeof n.className === 'string' ? n.className : '') + ' ' +
+                        (n.parentElement && n.parentElement.className && typeof n.parentElement.className === 'string' ? n.parentElement.className : '') + ' ' +
+                        (root.className && typeof root.className === 'string' ? root.className : '')
+                    ).toLowerCase();
+                    if (/\b(old|new|disabled|muted|other|outside|prev-month|next-month|not-current-month|off|adj|adjacent|gray|grey|out-of-view)\b/.test(cls)) {
+                        return true;
+                    }
+                    if (/prevmonthday|nextmonthday|outside-month|--disabled/.test(cls)) {
+                        return true;
+                    }
+                    if (cls.indexOf('ant-picker-cell') >= 0 && cls.indexOf('ant-picker-cell-in-view') < 0) {
+                        return true;
+                    }
+                    return false;
+                }
+
+                function findCalendarHeaderSwitch(ov) {
+                    var switchSelectors = [
+                        '.datepicker-switch',
+                        '.vdp-datepicker .day__month_btn',
+                        '.vdp-datepicker header .up',
+                        '.mx-btn-current-year',
+                        '.mx-btn-current-month',
+                        '.ant-picker-header-view',
+                        '.el-date-picker__header-label',
+                        '.MuiPickersCalendarHeader-switchViewButton',
+                        '.MuiPickersCalendarHeader-label',
+                        '.flatpickr-current-month',
+                        '.react-datepicker__current-month',
+                        'thead th[colspan]'
+                    ].join(', ');
+                    var matches = ov.querySelectorAll(switchSelectors);
+                    for (var i = 0; i < matches.length; i++) {
+                        if (isNodeVisible(matches[i])) return matches[i];
+                    }
+                    var ovRect = ov.getBoundingClientRect();
+                    var candidates = ov.querySelectorAll('th, button, span, div, a');
+                    for (var c = 0; c < candidates.length; c++) {
+                        var cand = candidates[c];
+                        if (!isNodeVisible(cand)) continue;
+                        var r = cand.getBoundingClientRect();
+                        if (r.top - ovRect.top > Math.max(65, ovRect.height * 0.28)) continue;
+                        var t = (cand.innerText || cand.textContent || '').trim();
+                        if (/^(19\d\d|20\d\d)\s*[-~–—]\s*(19\d\d|20\d\d)$/.test(t) || /^(19\d\d|20\d\d)$/.test(t)) {
+                            return cand;
+                        }
+                    }
+                    return null;
+                }
+
+                function findCalendarNavBtn(ov, dir, preferSuper) {
+                    var isPrev = (dir === 'prev');
+                    var superSel = isPrev
+                        ? '.ant-picker-header-super-prev-btn, .mx-btn-icon-double-left, .el-icon-d-arrow-left, [aria-label*="previous year" i], [aria-label*="prev year" i], [aria-label*="previous decade" i]'
+                        : '.ant-picker-header-super-next-btn, .mx-btn-icon-double-right, .el-icon-d-arrow-right, [aria-label*="next year" i], [aria-label*="next decade" i]';
+                    if (preferSuper) {
+                        var superBtns = ov.querySelectorAll(superSel);
+                        for (var s = 0; s < superBtns.length; s++) {
+                            if (isNodeVisible(superBtns[s])) return superBtns[s];
+                        }
+                    }
+                    var stdSel = isPrev
+                        ? '.prev, th.prev, button.prev, .vdp-datepicker header .prev, .mx-btn-icon-left, .ant-picker-header-prev-btn, .el-date-picker__prev-btn, .flatpickr-prev-month, .react-datepicker__navigation--previous, [aria-label*="prev" i], [title*="prev" i]'
+                        : '.next, th.next, button.next, .vdp-datepicker header .next, .mx-btn-icon-right, .ant-picker-header-next-btn, .el-date-picker__next-btn, .flatpickr-next-month, .react-datepicker__navigation--next, [aria-label*="next" i], [title*="next" i]';
+                    var stdBtns = ov.querySelectorAll(stdSel);
+                    for (var j = 0; j < stdBtns.length; j++) {
+                        if (isNodeVisible(stdBtns[j])) return stdBtns[j];
+                    }
+                    // Text match in top header area of ov (e.g. «, <<, ‹, <, », >>, ›, >)
+                    var ovRect = ov.getBoundingClientRect();
+                    var headerMaxY = ovRect.top + Math.max(72, ovRect.height * 0.32);
+                    var arrowRe = isPrev ? /^(«|<<|‹|<|⟨|⟪|prev|previous)$/i : /^(»|>>|›|>|⟩|⟫|next)$/i;
+                    var allHeaderNodes = ov.querySelectorAll('th, button, a, span, div, i');
+                    for (var k = 0; k < allHeaderNodes.length; k++) {
+                        var hn = allHeaderNodes[k];
+                        if (!isNodeVisible(hn)) continue;
+                        var hr = hn.getBoundingClientRect();
+                        if (hr.top > headerMaxY || hr.width > 90 || hr.height > 70) continue;
+                        var hTxt = (hn.innerText || hn.textContent || '').trim();
+                        if (arrowRe.test(hTxt)) return hn;
+                    }
+                    // Positional fallback relative to header switch element
+                    var hdrSwitch = findCalendarHeaderSwitch(ov);
+                    if (hdrSwitch) {
+                        var swRect = hdrSwitch.getBoundingClientRect();
+                        var bestBtn = null;
+                        for (var p = 0; p < allHeaderNodes.length; p++) {
+                            var cand = allHeaderNodes[p];
+                            if (cand === hdrSwitch || cand.contains(hdrSwitch) || hdrSwitch.contains(cand)) continue;
+                            if (!isNodeVisible(cand)) continue;
+                            var cr = cand.getBoundingClientRect();
+                            if (Math.abs((cr.top + cr.height / 2) - (swRect.top + swRect.height / 2)) > 28) continue;
+                            if (cr.width < 12 || cr.width > 80 || cr.height < 12 || cr.height > 64) continue;
+                            if (isPrev && (cr.left + cr.width / 2) < swRect.left) {
+                                bestBtn = cand;
+                                break;
+                            }
+                            if (!isPrev && (cr.left + cr.width / 2) > swRect.right) {
+                                bestBtn = cand;
+                            }
+                        }
+                        if (bestBtn) return bestBtn;
+                    }
+                    return null;
+                }
+
+                function collectVisibleCalendarCells(ov) {
+                    var cells = [];
+                    var seenRoots = [];
+                    var ovRect = ov.getBoundingClientRect();
+                    var hdrSwitch = findCalendarHeaderSwitch(ov);
+                    var rawNodes = ov.querySelectorAll('tbody td, tbody span, tbody button, tbody div, tbody a, .datepicker-years span, .datepicker-months span, .datepicker-days td, .vdp-datepicker__calendar .cell, .mx-calendar-content td, .ant-picker-body td, .el-picker-panel__content td, .flatpickr-day, .react-datepicker__day, .react-datepicker__month-text, .react-datepicker__year-text, .MuiPickersDay-root, .MuiPickersYear-yearButton, .MuiPickersMonth-monthButton, [role="gridcell"], td, span, button, div');
+
+                    for (var i = 0; i < rawNodes.length; i++) {
+                        var n = rawNodes[i];
+                        if (!isNodeVisible(n)) continue;
+                        if (hdrSwitch && (n === hdrSwitch || n.contains(hdrSwitch) || hdrSwitch.contains(n))) continue;
+                        if (n.closest && n.closest('thead, header, .datepicker-header, .ant-picker-header, .mx-calendar-header, .el-date-picker__header, .MuiPickersCalendarHeader-root, .flatpickr-months, .flatpickr-weekdays, .react-datepicker__header, th, .dow')) continue;
+
+                        var nr = n.getBoundingClientRect();
+                        if (nr.width < 16 || nr.height < 14 || nr.width > 160 || nr.height > 90) continue;
+                        // Skip top header navigation bar if not inside tbody
+                        if (!n.closest('tbody') && (nr.top - ovRect.top) < 38 && nr.height < 42) {
+                            var topTxt = (n.innerText || n.textContent || '').trim();
+                            if (/^(«|<<|‹|<|»|>>|›|>|\d{4}\s*[-~–—]\s*\d{4})$/.test(topTxt)) continue;
+                        }
+
+                        var txt = (n.innerText || n.textContent || '').replace(/\s+/g, ' ').trim();
+                        if (!txt || txt.length > 16) continue;
+                        if (/^(su|mo|tu|we|th|fr|sa|sun|mon|tue|wed|thu|fri|sat|«|»|‹|›|<|>|today|clear|now|cancel|ok|confirm|done)$/i.test(txt)) continue;
+
+                        // Prefer innermost leaf node for text, while tracking cellRoot (e.g. <td>)
+                        var hasChildWithSameText = false;
+                        for (var ch = 0; ch < n.children.length; ch++) {
+                            var childEl = n.children[ch];
+                            if (isNodeVisible(childEl) && (childEl.innerText || childEl.textContent || '').replace(/\s+/g, ' ').trim() === txt) {
+                                hasChildWithSameText = true;
+                                break;
+                            }
+                        }
+                        if (hasChildWithSameText) continue;
+
+                        var cellRoot = (n.closest ? n.closest('td, [role="gridcell"], button, .cell, .year, .month, .day') : null) || n;
+                        if (seenRoots.indexOf(cellRoot) >= 0) continue;
+                        seenRoots.push(cellRoot);
+
+                        cells.push({
+                            node: n,
+                            cellRoot: cellRoot,
+                            text: txt
+                        });
+                    }
+                    return cells;
+                }
+
+                function stepSingleCalendarOverlay(ov) {
+                    if (!ov || !isNodeVisible(ov)) return 'NONE';
+
+                    // A. Native <select> or Flatpickr year <input> inside the calendar popup
                     if (fillSplitDobSelects(ov)) {
-                        selectedInsideOverlay = true;
+                        window._auraDateYearSelected = true;
+                        window._auraDateMonthSelected = true;
+                    }
+                    var flatpickrYearInp = ov.querySelector('input.numInput.cur-year, input[aria-label*="Year" i]');
+                    if (flatpickrYearInp && isNodeVisible(flatpickrYearInp) && flatpickrYearInp.value !== yearStr) {
+                        setNativeInputValueNoKeyboard(flatpickrYearInp, yearStr);
+                        window._auraDateYearSelected = true;
                     }
 
-                    // Check for wheel/picker columns inside the bottom sheet (e.g. 3 columns for Month/Day/Year)
-                    var columns = ov.querySelectorAll('.picker-column, .wheel-column, .adm-picker-column, [role="listbox"], ul');
-                    if (columns.length >= 2) {
-                        for (var c = 0; c < columns.length; c++) {
-                            var colText = (columns[c].innerText || '').toLowerCase();
+                    // B. Mobile Bottom-Sheet Wheel / Scroll Columns (2 or 3 columns for Year / Month / Day)
+                    var wheelCols = ov.querySelectorAll('.picker-column, .wheel-column, .adm-picker-column, .van-picker-column');
+                    if (wheelCols.length >= 2) {
+                        var tappedWheel = false;
+                        for (var wc = 0; wc < wheelCols.length; wc++) {
+                            var colText = (wheelCols[wc].innerText || '').toLowerCase();
                             var colTarget = dayPad;
                             var colHint = 'dobDay';
                             if (/199\d|200\d/.test(colText)) {
@@ -2646,7 +2879,7 @@ object AutomationScripts {
                                 colTarget = monthPad;
                                 colHint = 'dobMonth';
                             }
-                            var colOpts = collectClickableOptionsFromOverlays([columns[c]], el);
+                            var colOpts = collectClickableOptionsFromOverlays([wheelCols[wc]], el);
                             var colSyns = buildTargetSynonyms(colTarget, colHint);
                             var bestColOpt = null;
                             var bestColSc = -1;
@@ -2659,51 +2892,335 @@ object AutomationScripts {
                             }
                             if (bestColOpt) {
                                 dispatchHumanTap(bestColOpt);
-                                selectedInsideOverlay = true;
+                                tappedWheel = true;
+                            }
+                        }
+                        if (tappedWheel) {
+                            clickBottomSheetConfirmIfPresent([ov], null);
+                            return 'DONE';
+                        }
+                    }
+
+                    // C. Multi-Stage Calendar Grid Views (Decades -> Years -> Months -> Days)
+                    var cells = collectVisibleCalendarCells(ov);
+                    if (cells.length === 0) return 'NONE';
+
+                    // Stage 1: Decade-Range Cells View (e.g. cells are "1990-1999", "2000-2009")
+                    var decadeRangeCells = [];
+                    for (var d = 0; d < cells.length; d++) {
+                        var dm = cells[d].text.match(/^(19\d0|20\d0)\s*[-~–—]\s*(19\d9|20\d9)$/);
+                        if (dm) {
+                            decadeRangeCells.push({
+                                cell: cells[d],
+                                startY: parseInt(dm[1], 10),
+                                endY: parseInt(dm[2], 10)
+                            });
+                        }
+                    }
+                    if (decadeRangeCells.length >= 4) {
+                        for (var dr = 0; dr < decadeRangeCells.length; dr++) {
+                            if (targetYearNum >= decadeRangeCells[dr].startY && targetYearNum <= decadeRangeCells[dr].endY) {
+                                tapCalendarCell(decadeRangeCells[dr].cell);
+                                return 'STEPPED:DECADE_CELL';
+                            }
+                        }
+                        var minDecStart = decadeRangeCells[0].startY;
+                        var maxDecEnd = decadeRangeCells[decadeRangeCells.length - 1].endY;
+                        if (targetYearNum < minDecStart) {
+                            var prevCenturyBtn = findCalendarNavBtn(ov, 'prev', true);
+                            if (prevCenturyBtn) {
+                                dispatchHumanTap(prevCenturyBtn);
+                                return 'STEPPED:CENTURY_PREV';
+                            }
+                        } else if (targetYearNum > maxDecEnd) {
+                            var nextCenturyBtn = findCalendarNavBtn(ov, 'next', true);
+                            if (nextCenturyBtn) {
+                                dispatchHumanTap(nextCenturyBtn);
+                                return 'STEPPED:CENTURY_NEXT';
                             }
                         }
                     }
 
-                    // Check for calendar day grid cells (.flatpickr-day, .react-datepicker__day, .MuiPickersDay-root, [role="gridcell"], td button)
-                    var dayCells = ov.querySelectorAll('.flatpickr-day:not(.disabled):not(.prevMonthDay):not(.nextMonthDay), .react-datepicker__day:not(.react-datepicker__day--disabled):not(.react-datepicker__day--outside-month), .MuiPickersDay-root:not(:disabled), .ant-picker-cell-in-view .ant-picker-cell-inner, [role="gridcell"]:not([aria-disabled="true"]), td button:not(:disabled)');
-                    if (dayCells.length > 0) {
-                        var matchedCell = null;
-                        for (var dc = 0; dc < dayCells.length; dc++) {
-                            var cellTxt = (dayCells[dc].innerText || dayCells[dc].textContent || '').trim();
-                            if (cellTxt === dayNumStr || cellTxt === dayPad) {
-                                matchedCell = dayCells[dc];
+                    // Stage 2: Years Grid View (e.g. account.fydeos.io showing header "2020-2029" and 12 cells 2019..2030)
+                    var yearCells = [];
+                    for (var y = 0; y < cells.length; y++) {
+                        if (/^(19\d\d|20\d\d)$/.test(cells[y].text)) {
+                            yearCells.push({
+                                cell: cells[y],
+                                year: parseInt(cells[y].text, 10),
+                                muted: isCalendarCellMuted(cells[y])
+                            });
+                        }
+                    }
+                    if (yearCells.length >= 4) {
+                        // Determine active in-decade range [minDecadeYear, maxDecadeYear]
+                        var ovText = (ov.innerText || '').trim();
+                        var hdrRangeMatch = ovText.match(/\b(19\d\d|20\d\d)\s*[-~–—]\s*(19\d\d|20\d\d)\b/);
+                        var minDecadeYear = yearCells[0].year;
+                        var maxDecadeYear = yearCells[yearCells.length - 1].year;
+
+                        if (hdrRangeMatch) {
+                            minDecadeYear = parseInt(hdrRangeMatch[1], 10);
+                            maxDecadeYear = parseInt(hdrRangeMatch[2], 10);
+                        } else if (yearCells.length === 12 && (yearCells[0].year % 10 === 9) && (yearCells[11].year % 10 === 0)) {
+                            // Standard 12-cell decade grid (e.g. 2019..2030 where 2019 and 2030 are boundary years)
+                            minDecadeYear = yearCells[1].year;
+                            maxDecadeYear = yearCells[10].year;
+                        } else {
+                            var activeYears = [];
+                            for (var ay = 0; ay < yearCells.length; ay++) {
+                                if (!yearCells[ay].muted) activeYears.push(yearCells[ay].year);
+                            }
+                            if (activeYears.length > 0) {
+                                minDecadeYear = Math.min.apply(null, activeYears);
+                                maxDecadeYear = Math.max.apply(null, activeYears);
+                            }
+                        }
+
+                        // If targetYearNum is inside the current decade range, tap that year cell!
+                        if (targetYearNum >= minDecadeYear && targetYearNum <= maxDecadeYear) {
+                            var exactYearCell = null;
+                            for (var yc = 0; yc < yearCells.length; yc++) {
+                                if (yearCells[yc].year === targetYearNum && !yearCells[yc].muted) {
+                                    exactYearCell = yearCells[yc].cell;
+                                    break;
+                                }
+                            }
+                            if (!exactYearCell) {
+                                for (var yc2 = 0; yc2 < yearCells.length; yc2++) {
+                                    if (yearCells[yc2].year === targetYearNum) {
+                                        exactYearCell = yearCells[yc2].cell;
+                                        break;
+                                    }
+                                }
+                            }
+                            if (exactYearCell) {
+                                tapCalendarCell(exactYearCell);
+                                window._auraDateYearSelected = true;
+                                return 'STEPPED:YEAR_SELECTED';
+                            }
+                        }
+
+                        // Otherwise navigate Previous («) or Next (») decade
+                        if (targetYearNum < minDecadeYear && (window._auraDecadeNavClicks || 0) < 10) {
+                            var prevDecBtn = findCalendarNavBtn(ov, 'prev', true);
+                            if (prevDecBtn) {
+                                window._auraDecadeNavClicks = (window._auraDecadeNavClicks || 0) + 1;
+                                dispatchHumanTap(prevDecBtn);
+                                return 'STEPPED:DECADE_PREV';
+                            }
+                        } else if (targetYearNum > maxDecadeYear && (window._auraDecadeNavClicks || 0) < 10) {
+                            var nextDecBtn = findCalendarNavBtn(ov, 'next', true);
+                            if (nextDecBtn) {
+                                window._auraDecadeNavClicks = (window._auraDecadeNavClicks || 0) + 1;
+                                dispatchHumanTap(nextDecBtn);
+                                return 'STEPPED:DECADE_NEXT';
+                            }
+                        }
+
+                        // Fallback if decade navigation reached limit or buttons unavailable: pick closest active year cell
+                        var fallbackYearObj = yearCells[Math.min(1, yearCells.length - 1)];
+                        tapCalendarCell(fallbackYearObj.cell);
+                        window._auraDateYearSelected = true;
+                        return 'STEPPED:YEAR_FALLBACK';
+                    }
+
+                    // Stage 3: Months Grid View (12 cells: Jan..Dec, January..December, or 1..12 inside month table)
+                    var monthCells = [];
+                    for (var m = 0; m < cells.length; m++) {
+                        var mNum = detectMonthNumFromText(cells[m].text);
+                        if (mNum > 0) {
+                            monthCells.push({ cell: cells[m], monthNum: mNum });
+                        }
+                    }
+                    var isTwelveCellMonthGrid = (monthCells.length === 0 && cells.length === 12 &&
+                        cells.every(function(c) { return /^(0?[1-9]|1[0-2])(月)?$/.test(c.text); }));
+                    if (monthCells.length >= 6 || isTwelveCellMonthGrid) {
+                        var chosenMonthCell = null;
+                        if (monthCells.length >= 6) {
+                            for (var mc = 0; mc < monthCells.length; mc++) {
+                                if (monthCells[mc].monthNum === targetMonthNum) {
+                                    chosenMonthCell = monthCells[mc].cell;
+                                    break;
+                                }
+                            }
+                            if (!chosenMonthCell) chosenMonthCell = monthCells[Math.min(targetMonthNum - 1, monthCells.length - 1)].cell;
+                        } else {
+                            chosenMonthCell = cells[Math.min(targetMonthNum - 1, cells.length - 1)];
+                        }
+                        if (chosenMonthCell) {
+                            tapCalendarCell(chosenMonthCell);
+                            window._auraDateMonthSelected = true;
+                            return 'STEPPED:MONTH_SELECTED';
+                        }
+                    }
+
+                    // Stage 4: Days Grid View (28-42 cells: 1..31)
+                    var rawDayCells = [];
+                    for (var dc = 0; dc < cells.length; dc++) {
+                        if (/^(0?[1-9]|[12]\d|3[01])$/.test(cells[dc].text)) {
+                            rawDayCells.push(cells[dc]);
+                        }
+                    }
+                    if (rawDayCells.length >= 15) {
+                        // Check if the calendar opened directly on Days View with the wrong year (e.g. current year 2026)
+                        var hdrSw = findCalendarHeaderSwitch(ov);
+                        var hdrTxt = hdrSw ? (hdrSw.innerText || hdrSw.textContent || '').trim() : '';
+                        var hdrYearMatch = hdrTxt.match(/\b(19\d\d|20\d\d)\b/);
+                        if (hdrSw && hdrYearMatch && hdrYearMatch[1] !== yearStr && !window._auraDateYearSelected && (window._auraHeaderSwitchClicks || 0) < 2) {
+                            window._auraHeaderSwitchClicks = (window._auraHeaderSwitchClicks || 0) + 1;
+                            dispatchHumanTap(hdrSw);
+                            return 'STEPPED:OPEN_YEAR_SWITCH';
+                        }
+
+                        // Slice between the first '1' (start of current month) and the second '1' (start of next month)
+                        // AND filter out cells with muted/old/new/outside classes
+                        var firstOneIdx = -1;
+                        var secondOneIdx = rawDayCells.length;
+                        for (var idx = 0; idx < rawDayCells.length; idx++) {
+                            var dVal = parseInt(rawDayCells[idx].text, 10);
+                            if (dVal === 1) {
+                                if (firstOneIdx < 0 && idx <= 10) {
+                                    firstOneIdx = idx;
+                                } else if (firstOneIdx >= 0 && idx > firstOneIdx + 20) {
+                                    secondOneIdx = idx;
+                                    break;
+                                }
+                            }
+                        }
+                        var slicedDayCells = (firstOneIdx >= 0)
+                            ? rawDayCells.slice(firstOneIdx, secondOneIdx)
+                            : rawDayCells;
+
+                        var inMonthDayCells = [];
+                        for (var im = 0; im < slicedDayCells.length; im++) {
+                            if (!isCalendarCellMuted(slicedDayCells[im])) {
+                                inMonthDayCells.push(slicedDayCells[im]);
+                            }
+                        }
+                        if (inMonthDayCells.length === 0) {
+                            inMonthDayCells = slicedDayCells;
+                        }
+
+                        var targetDayCell = null;
+                        for (var td = 0; td < inMonthDayCells.length; td++) {
+                            if (parseInt(inMonthDayCells[td].text, 10) === targetDayNum) {
+                                targetDayCell = inMonthDayCells[td];
                                 break;
                             }
                         }
-                        if (!matchedCell) matchedCell = dayCells[Math.min(14, dayCells.length - 1)];
-                        if (matchedCell) {
-                            dispatchHumanTap(matchedCell);
-                            selectedInsideOverlay = true;
+                        if (!targetDayCell) {
+                            targetDayCell = inMonthDayCells[Math.min(14, inMonthDayCells.length - 1)];
                         }
+
+                        if (targetDayCell) {
+                            tapCalendarCell(targetDayCell);
+                            clickBottomSheetConfirmIfPresent([ov], targetDayCell.node);
+                            return 'DONE';
+                        }
+                    }
+
+                    return 'NONE';
+                }
+
+                function getOverlaysSignature(ovList) {
+                    var sig = [];
+                    for (var i = 0; i < ovList.length; i++) {
+                        if (isNodeVisible(ovList[i])) {
+                            sig.push((ovList[i].innerText || '').replace(/\s+/g, ' ').trim());
+                        }
+                    }
+                    return sig.join('|');
+                }
+
+                var stepKey = 'dob_' + '$escapedSelector';
+                var overlays = findDatePickerOverlays(el);
+
+                // Phase 1: If no datepicker popup is open yet on the first attempt, tap the trigger to open it
+                if (overlays.length === 0 && window._auraActiveDateKey !== stepKey) {
+                    window._auraActiveDateKey = stepKey;
+                    window._auraActiveDateAttempts = 1;
+                    window._auraDateYearSelected = false;
+                    window._auraDateMonthSelected = false;
+                    window._auraHeaderSwitchClicks = 0;
+                    window._auraDecadeNavClicks = 0;
+                    openDatePickerTrigger(el);
+                    overlays = findDatePickerOverlays(el);
+                    if (overlays.length === 0) {
+                        return 'PENDING:OPENED_DATE_PICKER';
+                    }
+                } else {
+                    window._auraActiveDateAttempts = (window._auraActiveDateAttempts || 1) + 1;
+                }
+
+                // Phase 2: Drive open calendar / bottom-sheet popup through Decade -> Year -> Month -> Day
+                if (overlays.length > 0) {
+                    for (var syncStep = 0; syncStep < 10; syncStep++) {
+                        overlays = findDatePickerOverlays(el);
+                        if (overlays.length === 0) break;
+
+                        var beforeSig = getOverlaysSignature(overlays);
+                        var stepOut = 'NONE';
+                        for (var v = 0; v < overlays.length; v++) {
+                            stepOut = stepSingleCalendarOverlay(overlays[v]);
+                            if (stepOut !== 'NONE') break;
+                        }
+
+                        if (stepOut === 'DONE') {
+                            window._auraActiveDateKey = '';
+                            window._auraActiveDateAttempts = 0;
+                            // Non-destructive check after framework nextTick in case readonly input still needs value
+                            setTimeout(function() {
+                                try {
+                                    if (tag === 'input' && (!el.value || el.value.trim() === '')) {
+                                        setNativeInputValueNoKeyboard(el, formattedDate);
+                                    }
+                                } catch (e) {}
+                            }, 140);
+                            return 'SUCCESS:DATE_PICKER_SELECTED';
+                        }
+
+                        if (stepOut.indexOf('STEPPED') === 0) {
+                            var afterOverlays = findDatePickerOverlays(el);
+                            var afterSig = getOverlaysSignature(afterOverlays);
+                            if (afterSig && afterSig !== beforeSig) {
+                                // DOM updated synchronously; continue immediately in this loop
+                                continue;
+                            }
+                            // Wait for next animation/framework tick via evaluateJsWithRetry
+                            return 'PENDING:' + stepOut;
+                        }
+
+                        break;
                     }
                 }
 
-                // Also ensure that if el is a readonly <input>, its underlying value is populated
-                if (tag === 'input' && (!el.value || el.value.trim() === '')) {
+                var isCustomPickerTrigger = (
+                    tag !== 'input' ||
+                    el.readOnly ||
+                    el.hasAttribute('data-datepicker') ||
+                    el.getAttribute('aria-haspopup') === 'dialog' ||
+                    el.getAttribute('role') === 'combobox' ||
+                    /datepicker|date-picker|flatpickr|ant-picker|MuiPickers|react-datepicker|vdp-datepicker|mx-datepicker/i.test((el.className || '') + ' ' + (el.parentElement ? el.parentElement.className : ''))
+                );
+
+                if (isCustomPickerTrigger && window._auraActiveDateAttempts <= 3) {
+                    openDatePickerTrigger(el);
+                    return 'PENDING:WAITING_FOR_DATE_PICKER';
+                }
+
+                // Phase 3: Standard editable text/masked DOB input (when no popup calendar exists)
+                if (tag === 'input') {
                     try {
                         el.readOnly = false;
                         el.removeAttribute('readonly');
-                        setNativeInputValueNoKeyboard(el, formattedDate);
                     } catch (e) {}
+                    typeMaskedDigitsIfNeeded(el, formattedDate);
+                    fillSplitDobSelects(document);
                 }
-
-                if (selectedInsideOverlay || overlays.length > 0 || window._auraActiveDateAttempts >= 2) {
-                    clickBottomSheetConfirmIfPresent(overlays, null);
-                    window._auraActiveDateKey = '';
-                    window._auraActiveDateAttempts = 0;
-                    try {
-                        if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
-                    } catch (e) {}
-                    return 'SUCCESS:DATE_PICKER_SELECTED';
-                }
-
-                openDropdownOrSheetTrigger(el);
-                return 'PENDING:WAITING_FOR_DATE_PICKER';
+                window._auraActiveDateKey = '';
+                window._auraActiveDateAttempts = 0;
+                return 'SUCCESS:FORMATTED_DATE_INPUT';
             })();
         """.trimIndent()
     }

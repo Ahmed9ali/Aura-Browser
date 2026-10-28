@@ -688,4 +688,25 @@ class ExampleUnitTest {
         assertTrue(checkJs.contains("READY:TARGET_MOUNTED"))
         assertTrue(checkJs.contains("READY:COMPLETE"))
     }
+
+    @Test
+    fun testMultiStageDatePickerDobSelectionScript() {
+        val dobJs = com.example.automation.AutomationScripts.createSelectDateScript(
+            selector = "input[name='birthday']",
+            isoDate = "1980-08-19",
+            day = "19",
+            month = "08",
+            year = "1980",
+            fallbackHint = "dob"
+        )
+        // Verify multi-stage Decade -> Year -> Month -> Day navigation logic is present
+        assertTrue(dobJs.contains("stepSingleCalendarOverlay"))
+        assertTrue(dobJs.contains("STEPPED:DECADE_PREV"))
+        assertTrue(dobJs.contains("STEPPED:YEAR_SELECTED"))
+        assertTrue(dobJs.contains("STEPPED:MONTH_SELECTED"))
+        assertTrue(dobJs.contains("SUCCESS:DATE_PICKER_SELECTED"))
+        assertTrue(dobJs.contains("var yearStr = '1980'"))
+        assertTrue(dobJs.contains("var monthPad = '08'"))
+        assertTrue(dobJs.contains("var dayNumStr = '19'"))
+    }
 }

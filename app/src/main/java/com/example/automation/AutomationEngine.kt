@@ -1423,17 +1423,17 @@ class AutomationEngine(
                             val ok = when (stepFieldKey) {
                                 "dobDay", "dobMonth", "dobYear" -> {
                                     val js = AutomationScripts.createSelectDropdownScript(step.selector, resolvedValue, stepFieldKey)
-                                    evaluateJsWithRetry(js, maxAttempts = 10, retryDelayMs = 350L)
+                                    evaluateJsWithRetry(js, maxAttempts = 12, retryDelayMs = 280L)
                                 }
                                 "dob" -> {
                                     val (y, m, d) = parseDobTriplet(resolvedValue, currentDefaultRecord)
                                     val js = AutomationScripts.createSelectDateScript(step.selector, "$y-$m-$d", d, m, y, fallbackHint)
-                                    evaluateJsWithRetry(js, maxAttempts = 10, retryDelayMs = 350L)
+                                    evaluateJsWithRetry(js, maxAttempts = 20, retryDelayMs = 220L)
                                 }
                                 "countryCode" -> {
                                     val code = resolvedValue.ifBlank { currentDefaultRecord.countryCode }
                                     val js = AutomationScripts.createSelectCountryCodeScript(step.selector, code, fallbackHint)
-                                    evaluateJsWithRetry(js, maxAttempts = 10, retryDelayMs = 350L)
+                                    evaluateJsWithRetry(js, maxAttempts = 12, retryDelayMs = 280L)
                                 }
                                 else -> {
                                     val js = AutomationScripts.createInputScript(step.selector, resolvedValue, step.clearBeforeInput, fallbackHint)
@@ -1447,31 +1447,31 @@ class AutomationEngine(
                                 "countryCode" -> {
                                     val code = resolvedValue.ifBlank { currentDefaultRecord.countryCode }
                                     val js = AutomationScripts.createSelectCountryCodeScript(step.selector, code, fallbackHint)
-                                    evaluateJsWithRetry(js, maxAttempts = 10, retryDelayMs = 350L)
+                                    evaluateJsWithRetry(js, maxAttempts = 12, retryDelayMs = 280L)
                                 }
                                 "dob" -> {
                                     val (y, m, d) = parseDobTriplet(resolvedValue, currentDefaultRecord)
                                     val js = AutomationScripts.createSelectDateScript(step.selector, "$y-$m-$d", d, m, y, fallbackHint)
-                                    evaluateJsWithRetry(js, maxAttempts = 10, retryDelayMs = 350L)
+                                    evaluateJsWithRetry(js, maxAttempts = 20, retryDelayMs = 220L)
                                 }
                                 "dobDay" -> {
                                     val d = resolvedValue.ifBlank { currentDefaultRecord.dobDay }
                                     val js = AutomationScripts.createSelectDropdownScript(step.selector, d, "day")
-                                    evaluateJsWithRetry(js, maxAttempts = 10, retryDelayMs = 350L)
+                                    evaluateJsWithRetry(js, maxAttempts = 12, retryDelayMs = 280L)
                                 }
                                 "dobMonth" -> {
                                     val m = resolvedValue.ifBlank { currentDefaultRecord.dobMonth }
                                     val js = AutomationScripts.createSelectDropdownScript(step.selector, m, "month")
-                                    evaluateJsWithRetry(js, maxAttempts = 10, retryDelayMs = 350L)
+                                    evaluateJsWithRetry(js, maxAttempts = 12, retryDelayMs = 280L)
                                 }
                                 "dobYear" -> {
                                     val y = resolvedValue.ifBlank { currentDefaultRecord.dobYear }
                                     val js = AutomationScripts.createSelectDropdownScript(step.selector, y, "year")
-                                    evaluateJsWithRetry(js, maxAttempts = 10, retryDelayMs = 350L)
+                                    evaluateJsWithRetry(js, maxAttempts = 12, retryDelayMs = 280L)
                                 }
                                 else -> {
                                     val js = AutomationScripts.createSelectDropdownScript(step.selector, resolvedValue, fallbackHint)
-                                    evaluateJsWithRetry(js, maxAttempts = 10, retryDelayMs = 350L)
+                                    evaluateJsWithRetry(js, maxAttempts = 12, retryDelayMs = 280L)
                                 }
                             }
                             addLog("[Run $iteration] ${if (ok) "Selected" else "Attempted select"} '$resolvedValue' in ${step.elementDescription}")
@@ -1479,14 +1479,14 @@ class AutomationEngine(
                         AutomationActionType.SELECT_COUNTRY_CODE -> {
                             val code = resolvedValue.ifBlank { currentDefaultRecord.countryCode }
                             val js = AutomationScripts.createSelectCountryCodeScript(step.selector, code, fallbackHint)
-                            val ok = evaluateJsWithRetry(js, maxAttempts = 10, retryDelayMs = 350L)
+                            val ok = evaluateJsWithRetry(js, maxAttempts = 12, retryDelayMs = 280L)
                             addLog("[Run $iteration] ${if (ok) "Selected" else "Attempted"} Country Code '$code'")
                         }
                         AutomationActionType.SELECT_DATE -> {
                             val dob = resolvedValue.ifBlank { currentDefaultRecord.dob }
                             val (y, m, d) = parseDobTriplet(dob, currentDefaultRecord)
                             val js = AutomationScripts.createSelectDateScript(step.selector, "$y-$m-$d", d, m, y, fallbackHint)
-                            val ok = evaluateJsWithRetry(js, maxAttempts = 10, retryDelayMs = 350L)
+                            val ok = evaluateJsWithRetry(js, maxAttempts = 20, retryDelayMs = 220L)
                             addLog("[Run $iteration] ${if (ok) "Selected" else "Attempted"} Date: '$y-$m-$d'")
                         }
                         AutomationActionType.UPLOAD_FILE -> {
@@ -1824,7 +1824,6 @@ class AutomationEngine(
         val webView = webViewProvider?.invoke() ?: return
         webView.post {
             try {
-                webView.clearFocus()
                 val imm = webView.context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
                 imm?.hideSoftInputFromWindow(webView.windowToken, 0)
             } catch (_: Exception) {
