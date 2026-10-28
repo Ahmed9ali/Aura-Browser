@@ -275,13 +275,26 @@ fun BrowserApp(
                     NavScreen.BOOKMARK -> {
                         BookmarksScreen(
                             bookmarks = uiState.bookmarks,
+                            bookmarkFolders = uiState.bookmarkFolders,
                             selectedFolder = uiState.selectedBookmarkFolder,
+                            sortOption = uiState.bookmarkSortOption,
                             onSelectFolder = { f -> viewModel.setSelectedBookmarkFolder(f) },
+                            onSelectSortOption = { opt -> viewModel.setBookmarkSortOption(opt) },
                             onOpenBookmark = { url -> viewModel.loadUrl(url) },
                             onOpenInNewTab = { url, title -> viewModel.openNewTab(url = url, title = title) },
                             onDeleteBookmark = { id -> viewModel.removeBookmark(id) },
-                            onAddBookmark = { title, url, folder -> viewModel.addBookmark(title, url, folder) },
-                            onCopyUrl = { url -> viewModel.copyToClipboard(context, url) }
+                            onTogglePinBookmark = { id -> viewModel.toggleBookmarkPin(id) },
+                            onAddBookmark = { title, url, folder, isPinned ->
+                                viewModel.addBookmark(title, url, folder, isPinned)
+                            },
+                            onAddGroup = { groupName -> viewModel.addBookmarkFolder(groupName) },
+                            onImportBookmarks = { content, defaultFolder ->
+                                viewModel.importBookmarks(content, defaultFolder)
+                            },
+                            onExportBookmarksJson = { viewModel.exportBookmarksJson() },
+                            onExportBookmarksHtml = { viewModel.exportBookmarksHtml() },
+                            onCopyUrl = { url -> viewModel.copyToClipboard(context, url, "Bookmarks") },
+                            onShowMessage = { msg -> viewModel.showMessage(msg) }
                         )
                     }
 

@@ -425,7 +425,7 @@ fun BrowserTopBar(
 fun AuraSubScreenTopBar(
     title: String,
     subtitle: String? = null,
-    icon: ImageVector,
+    icon: ImageVector? = null,
     accentColor: Color = MaterialTheme.colorScheme.primary,
     onNavigateBack: (() -> Unit)? = null,
     backButtonTestTag: String? = null,
@@ -481,19 +481,21 @@ fun AuraSubScreenTopBar(
                         }
                     }
 
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = accentColor.copy(alpha = 0.15f),
-                        border = BorderStroke(1.dp, accentColor.copy(alpha = 0.3f)),
-                        modifier = Modifier.size(40.dp)
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = icon,
-                                contentDescription = null,
-                                tint = accentColor,
-                                modifier = Modifier.size(20.dp)
-                            )
+                    if (icon != null) {
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = accentColor.copy(alpha = 0.15f),
+                            border = BorderStroke(1.dp, accentColor.copy(alpha = 0.3f)),
+                            modifier = Modifier.size(40.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = icon,
+                                    contentDescription = null,
+                                    tint = accentColor,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
                         }
                     }
 

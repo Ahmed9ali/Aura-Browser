@@ -1,3 +1,12 @@
 <resources>
     <string name="app_name">Aura</string>
+    <string name="bookmarks_title">Bookmarks</string>
+    <string name="bookmarks_add">Add Bookmark</string>
+    <string name="bookmarks_add_group">Add Group</string>
+    <string name="bookmarks_sort">Sort Bookmarks</string>
+    <string name="bookmarks_more_options">More Options</string>
+    <string name="bookmarks_import">Import Bookmarks</string>
+    <string name="bookmarks_export">Export Bookmarks</string>
+    <string name="bookmarks_pin">Pin Bookmark</string>
+    <string name="bookmarks_unpin">Unpin Bookmark</string>
 </resources>

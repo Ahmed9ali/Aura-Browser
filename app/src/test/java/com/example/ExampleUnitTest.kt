@@ -118,8 +118,28 @@ class ExampleUnitTest {
         repository.addBookmark(title = testTitle, url = testUrl, folder = testFolder)
         assertTrue(repository.isBookmarked(testUrl))
 
+        // Pin and unpin bookmark
+        val addedItem = repository.bookmarks.value.first { it.url == testUrl }
+        assertFalse(addedItem.isPinned)
+        repository.toggleBookmarkPin(addedItem.id)
+        assertTrue(repository.bookmarks.value.first { it.id == addedItem.id }.isPinned)
+
+        // Add custom bookmark group
+        assertTrue(repository.addBookmarkFolder("Research"))
+        assertTrue(repository.bookmarkFolders.value.contains("Research"))
+        assertFalse("Duplicate group should return false", repository.addBookmarkFolder("research"))
+
+        // Export JSON and re-import after clearing
+        val exportedJson = repository.exportBookmarksJson()
+        assertTrue(exportedJson.contains(testUrl))
+
         repository.removeBookmarkByUrl(testUrl)
         assertFalse(repository.isBookmarked(testUrl))
+
+        val importedCount = repository.importBookmarksFromText(exportedJson)
+        assertEquals(1, importedCount)
+        assertTrue(repository.isBookmarked(testUrl))
+        assertTrue(repository.bookmarks.value.first { it.url == testUrl }.isPinned)
     }
 
     @Test
@@ -338,6 +358,72 @@ class ExampleUnitTest {
         assertEquals("When starting playback from Page 3, engine must navigate to Page 1 first", page1Url, navigatedToUrl)
         engine.stopPlayback()
     }
+
+    @Test
+    fun testBottomSheetsDropdownsDobAndCountryCodeEngine() {
+        val testScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Unconfined)
+        val engine = com.example.automation.AutomationEngine(testScope)
+
+        // 1. Verify DataSheet automatically derives dobDay, dobMonth, dobYear from 'dob' column
+        val sheet = com.example.model.DataSheet(
+            name = "Profile Data",
+            fields = mapOf(
+                "dob" to listOf("1998-05-14", "23/11/2001"),
+                "countryCode" to listOf("+92", "+44")
+            )
+        )
+        assertEquals(listOf("14", "23"), sheet.getFieldValues("dobDay"))
+        assertEquals(listOf("05", "11"), sheet.getFieldValues("dobMonth"))
+        assertEquals(listOf("1998", "2001"), sheet.getFieldValues("dobYear"))
+
+        // 2. Verify scanning custom bottom-sheet triggers for Country Code, DOB, Split DOB, and Dropdowns
+        val pageUrl = "https://example.com/register"
+        engine.onPageLoaded(pageUrl)
+        engine.triggerScan(autoReadySteps = true)
+        val scanJson = """
+            [
+              {"tagName":"div","type":"","nameAttr":"","idAttr":"country_trigger","placeholder":"","text":"+1","selector":"#country_trigger","pageUrl":"https://example.com/register","isInput":true,"isButton":false,"semanticType":"COUNTRY_CODE","detectedOptions":[]},
+              {"tagName":"button","type":"button","nameAttr":"","idAttr":"dob_month_sheet","placeholder":"Month","text":"Select Month","selector":"#dob_month_sheet","pageUrl":"https://example.com/register","isInput":true,"isButton":false,"semanticType":"DOB_MONTH","detectedOptions":[]},
+              {"tagName":"button","type":"button","nameAttr":"","idAttr":"dob_day_sheet","placeholder":"Day","text":"Select Day","selector":"#dob_day_sheet","pageUrl":"https://example.com/register","isInput":true,"isButton":false,"semanticType":"DOB_DAY","detectedOptions":[]},
+              {"tagName":"button","type":"button","nameAttr":"","idAttr":"dob_year_sheet","placeholder":"Year","text":"Select Year","selector":"#dob_year_sheet","pageUrl":"https://example.com/register","isInput":true,"isButton":false,"semanticType":"DOB_YEAR","detectedOptions":[]},
+              {"tagName":"input","type":"text","nameAttr":"dob","idAttr":"dob_picker","placeholder":"MM/DD/YYYY","text":"","selector":"#dob_picker","pageUrl":"https://example.com/register","isInput":true,"isButton":false,"semanticType":"DOB","detectedOptions":[]},
+              {"tagName":"div","type":"","nameAttr":"gender","idAttr":"gender_sheet","placeholder":"Gender","text":"Select Gender","selector":"#gender_sheet","pageUrl":"https://example.com/register","isInput":true,"isButton":false,"semanticType":"GENDER","detectedOptions":[]}
+            ]
+        """.trimIndent()
+        engine.jsInterface.onScanResults(scanJson)
+
+        val steps = engine.currentScript.value.steps
+        assertEquals(6, steps.size)
+        assertEquals(com.example.model.AutomationActionType.SELECT_COUNTRY_CODE, steps[0].actionType)
+        assertEquals("countryCode", steps[0].variableKey)
+        assertEquals(com.example.model.AutomationActionType.SELECT_DROPDOWN, steps[1].actionType)
+        assertEquals("dobMonth", steps[1].variableKey)
+        assertEquals(com.example.model.AutomationActionType.SELECT_DROPDOWN, steps[2].actionType)
+        assertEquals("dobDay", steps[2].variableKey)
+        assertEquals(com.example.model.AutomationActionType.SELECT_DROPDOWN, steps[3].actionType)
+        assertEquals("dobYear", steps[3].variableKey)
+        assertEquals(com.example.model.AutomationActionType.SELECT_DATE, steps[4].actionType)
+        assertEquals("dob", steps[4].variableKey)
+        assertEquals(com.example.model.AutomationActionType.SELECT_DROPDOWN, steps[5].actionType)
+        assertEquals("gender", steps[5].variableKey)
+
+        // 3. Verify generated JS scripts include multi-phase bottom-sheet handling, confirm clickers, and synonym tables
+        val dropdownJs = com.example.automation.AutomationScripts.createSelectDropdownScript("#dob_month_sheet", "05", "dobMonth")
+        assertTrue(dropdownJs.contains("PENDING:OPENED_DROPDOWN_TRIGGER"))
+        assertTrue(dropdownJs.contains("clickBottomSheetConfirmIfPresent"))
+        assertTrue(dropdownJs.contains("MONTH_TABLE"))
+
+        val countryJs = com.example.automation.AutomationScripts.createSelectCountryCodeScript("#country_trigger", "+92", "countryCode")
+        assertTrue(countryJs.contains("PENDING:OPENED_COUNTRY_SHEET"))
+        assertTrue(countryJs.contains("pakistan"))
+        assertTrue(countryJs.contains("clickBottomSheetConfirmIfPresent"))
+
+        val dateJs = com.example.automation.AutomationScripts.createSelectDateScript("#dob_picker", "1998-05-14", "14", "05", "1998", "dob")
+        assertTrue(dateJs.contains("PENDING:OPENED_DATE_PICKER"))
+        assertTrue(dateJs.contains("fillSplitDobSelects"))
+        assertTrue(dateJs.contains("clickBottomSheetConfirmIfPresent"))
+    }
 }
+
 
 

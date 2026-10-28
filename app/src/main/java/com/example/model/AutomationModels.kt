@@ -89,8 +89,43 @@ data class DataSheet(
     val exhaustionPolicy: DataExhaustionPolicy = DataExhaustionPolicy.ADD_NEW,
     val createdAt: Long = System.currentTimeMillis()
 ) {
-    fun getFieldValues(key: String): List<String> =
-        fields[key]?.map { it.trim() }?.filter { it.isNotBlank() } ?: emptyList()
+    fun getFieldValues(key: String): List<String> {
+        val direct = fields[key]?.map { it.trim() }?.filter { it.isNotBlank() } ?: emptyList()
+        if (direct.isNotEmpty()) return direct
+
+        // Automatically derive split DOB fields (dobDay, dobMonth, dobYear) from 'dob' column if present
+        if (key.equals("dobDay", ignoreCase = true) ||
+            key.equals("dobMonth", ignoreCase = true) ||
+            key.equals("dobYear", ignoreCase = true)
+        ) {
+            val dobList = fields["dob"]?.map { it.trim() }?.filter { it.isNotBlank() } ?: emptyList()
+            if (dobList.isNotEmpty()) {
+                return dobList.mapNotNull { rawDob ->
+                    val parts = rawDob.split(Regex("[-/.\\s]+")).filter { it.isNotBlank() }
+                    if (parts.size >= 3) {
+                        val (y, m, d) = when {
+                            parts[0].length == 4 -> Triple(parts[0], parts[1].padStart(2, '0'), parts[2].padStart(2, '0'))
+                            parts[2].length == 4 -> {
+                                val firstNum = parts[0].toIntOrNull() ?: 1
+                                if (firstNum > 12) {
+                                    Triple(parts[2], parts[1].padStart(2, '0'), parts[0].padStart(2, '0'))
+                                } else {
+                                    Triple(parts[2], parts[0].padStart(2, '0'), parts[1].padStart(2, '0'))
+                                }
+                            }
+                            else -> Triple(parts[0], parts[1].padStart(2, '0'), parts[2].padStart(2, '0'))
+                        }
+                        when {
+                            key.equals("dobYear", ignoreCase = true) -> y
+                            key.equals("dobMonth", ignoreCase = true) -> m
+                            else -> d
+                        }
+                    } else null
+                }
+            }
+        }
+        return emptyList()
+    }
 
     fun totalRows(): Int {
         return fields.values.maxOfOrNull { list -> list.count { it.isNotBlank() } } ?: 0

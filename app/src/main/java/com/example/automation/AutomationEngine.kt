@@ -6,6 +6,7 @@ import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import com.example.model.AutomationActionType
 import com.example.model.AutomationDataGenerator
+import com.example.model.AutomationDataRecord
 import com.example.model.AutomationExecutionState
 import com.example.model.AutomationScript
 import com.example.model.AutomationStatus
@@ -446,16 +447,49 @@ class AutomationEngine(
             combined.contains("first") && combined.contains("name") -> "firstName"
             combined.contains("last") && combined.contains("name") -> "lastName"
             combined.contains("full") && combined.contains("name") -> "fullName"
-            combined.contains("country") && (combined.contains("code") || combined.contains("dial")) -> "countryCode"
+            combined.contains("countrycode") || combined.contains("dial-code") || combined.contains("iti__selected-flag") ||
+                    (combined.contains("country") && (combined.contains("code") || combined.contains("dial") || combined.contains("prefix"))) -> "countryCode"
             combined.contains("phone") || combined.contains("mobile") || combined.contains("tel") -> "phoneNumber"
+            combined.contains("dobday") || combined.contains("birth_day") || combined.contains("bday-day") ||
+                    (Regex("\\b(day|dd)\\b").containsMatchIn(combined) && (combined.contains("dob") || combined.contains("birth") || combined.contains("select"))) -> "dobDay"
+            combined.contains("dobmonth") || combined.contains("birth_month") || combined.contains("bday-month") ||
+                    (Regex("\\b(month|mm)\\b").containsMatchIn(combined) && (combined.contains("dob") || combined.contains("birth") || combined.contains("select"))) -> "dobMonth"
+            combined.contains("dobyear") || combined.contains("birth_year") || combined.contains("bday-year") ||
+                    (Regex("\\b(year|yyyy)\\b").containsMatchIn(combined) && (combined.contains("dob") || combined.contains("birth") || combined.contains("select"))) -> "dobYear"
+            combined.contains("birth") || combined.contains("dob") || combined.contains("bday") || combined.contains("datepicker") -> "dob"
             combined.contains("gender") || combined.contains("sex") -> "gender"
-            combined.contains("birth") || combined.contains("dob") -> "dob"
             combined.contains("zip") || combined.contains("postal") || combined.contains("pin") -> "zipCode"
             combined.contains("city") -> "city"
-            combined.contains("state") -> "state"
+            combined.contains("state") || combined.contains("province") -> "state"
             combined.contains("address") -> "address"
             combined.contains("file") || combined.contains("upload") || combined.contains("resume") -> "fileName"
             else -> null
+        }
+    }
+
+    private fun extractRecordFieldValue(record: AutomationDataRecord, fieldKey: String): String {
+        return when (fieldKey.lowercase()) {
+            "email" -> record.email
+            "username", "user", "login" -> record.username
+            "password", "pass" -> record.password
+            "confirmpassword" -> record.confirmPassword
+            "firstname" -> record.firstName
+            "lastname" -> record.lastName
+            "fullname", "name" -> record.fullName
+            "phone", "phonenumber", "mobile" -> record.phoneNumber
+            "countrycode" -> record.countryCode
+            "gender", "sex" -> record.gender
+            "dob", "birthdate" -> record.dob
+            "dobday" -> record.dobDay
+            "dobmonth" -> record.dobMonth
+            "dobyear" -> record.dobYear
+            "address" -> record.address
+            "addressline2" -> record.addressLine2
+            "city" -> record.city
+            "state" -> record.state
+            "zipcode", "zip", "pin", "pincode" -> record.zipCode
+            "filename", "file" -> record.fileName
+            else -> AutomationDataGenerator.generateSingleFieldValue(fieldKey)
         }
     }
 
@@ -1077,8 +1111,7 @@ class AutomationEngine(
                                 shuffledOrders = fieldShuffledOrders,
                                 forcedDefaultFields = fieldsForcedToDefault,
                                 defaultFallback = {
-                                    currentDefaultRecord = AutomationDataGenerator.generateSingleRandomRecord()
-                                    val v = AutomationDataGenerator.generateSingleFieldValue(stepFieldKey)
+                                    val v = extractRecordFieldValue(currentDefaultRecord, stepFieldKey)
                                     if (stepFieldKey == "password") lastResolvedPassword = v
                                     v
                                 }
@@ -1126,24 +1159,37 @@ class AutomationEngine(
                         }
                         AutomationActionType.SELECT_DROPDOWN -> {
                             val js = AutomationScripts.createSelectDropdownScript(step.selector, resolvedValue, fallbackHint)
-                            val ok = evaluateJsWithRetry(js)
+                            val ok = evaluateJsWithRetry(js, maxAttempts = 8, retryDelayMs = 380L)
                             addLog("[Run $iteration] ${if (ok) "Selected" else "Attempted select"} '$resolvedValue' in ${step.elementDescription}")
                         }
                         AutomationActionType.SELECT_COUNTRY_CODE -> {
                             val code = resolvedValue.ifBlank { currentDefaultRecord.countryCode }
-                            val js = AutomationScripts.createSelectCountryCodeScript(step.selector, code)
-                            evaluateJsWithRetry(js)
-                            addLog("[Run $iteration] Selected Country Code '$code'")
+                            val js = AutomationScripts.createSelectCountryCodeScript(step.selector, code, fallbackHint)
+                            val ok = evaluateJsWithRetry(js, maxAttempts = 8, retryDelayMs = 380L)
+                            addLog("[Run $iteration] ${if (ok) "Selected" else "Attempted"} Country Code '$code'")
                         }
                         AutomationActionType.SELECT_DATE -> {
                             val dob = resolvedValue.ifBlank { currentDefaultRecord.dob }
-                            val parts = dob.split("-")
-                            val y = parts.getOrNull(0) ?: currentDefaultRecord.dobYear
-                            val m = parts.getOrNull(1) ?: currentDefaultRecord.dobMonth
-                            val d = parts.getOrNull(2) ?: currentDefaultRecord.dobDay
-                            val js = AutomationScripts.createSelectDateScript(step.selector, dob, d, m, y)
-                            evaluateJsWithRetry(js)
-                            addLog("[Run $iteration] Selected Date: '$dob'")
+                            val parts = dob.split(Regex("[-/.\\s]+")).filter { it.isNotBlank() }
+                            val (y, m, d) = if (parts.size >= 3) {
+                                when {
+                                    parts[0].length == 4 -> Triple(parts[0], parts[1].padStart(2, '0'), parts[2].padStart(2, '0'))
+                                    parts[2].length == 4 -> {
+                                        val firstNum = parts[0].toIntOrNull() ?: 1
+                                        if (firstNum > 12) {
+                                            Triple(parts[2], parts[1].padStart(2, '0'), parts[0].padStart(2, '0'))
+                                        } else {
+                                            Triple(parts[2], parts[0].padStart(2, '0'), parts[1].padStart(2, '0'))
+                                        }
+                                    }
+                                    else -> Triple(parts[0], parts[1].padStart(2, '0'), parts[2].padStart(2, '0'))
+                                }
+                            } else {
+                                Triple(currentDefaultRecord.dobYear, currentDefaultRecord.dobMonth, currentDefaultRecord.dobDay)
+                            }
+                            val js = AutomationScripts.createSelectDateScript(step.selector, "$y-$m-$d", d, m, y, fallbackHint)
+                            val ok = evaluateJsWithRetry(js, maxAttempts = 8, retryDelayMs = 380L)
+                            addLog("[Run $iteration] ${if (ok) "Selected" else "Attempted"} Date: '$y-$m-$d'")
                         }
                         AutomationActionType.UPLOAD_FILE -> {
                             val fileName = resolvedValue.ifBlank { currentDefaultRecord.fileName }

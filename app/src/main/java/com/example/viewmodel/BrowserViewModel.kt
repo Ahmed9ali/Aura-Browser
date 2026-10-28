@@ -25,12 +25,16 @@ import kotlinx.coroutines.flow.stateIn
 import java.net.URLEncoder
 import com.example.automation.AutomationEngine
 
+import com.example.model.BookmarkSortOption
+
 data class BrowserUiState(
     val currentScreen: NavScreen = NavScreen.HOME,
     val tabs: List<BrowserTab> = emptyList(),
     val activeTab: BrowserTab? = null,
     val tabGroups: List<TabGroup> = emptyList(),
     val bookmarks: List<BookmarkItem> = emptyList(),
+    val bookmarkFolders: List<String> = listOf("Favorites", "Work", "Reading List"),
+    val bookmarkSortOption: BookmarkSortOption = BookmarkSortOption.PINNED,
     val history: List<HistoryItem> = emptyList(),
     val settings: BrowserSettings = BrowserSettings(),
     val speedDials: List<SpeedDial> = emptyList(),
@@ -65,6 +69,7 @@ class BrowserViewModel(
     private val _canGoBack = MutableStateFlow(false)
     private val _canGoForward = MutableStateFlow(false)
     private val _selectedBookmarkFolder = MutableStateFlow("All")
+    private val _bookmarkSortOption = MutableStateFlow(BookmarkSortOption.PINNED)
     private val _showCreateGroupDialog = MutableStateFlow(false)
     private val _tabToMove = MutableStateFlow<BrowserTab?>(null)
     private val _showMoreSheet = MutableStateFlow(false)
@@ -127,7 +132,9 @@ class BrowserViewModel(
             _proxyNode,
             _showProxyDialog,
             _snackbarMessage,
-            _dismissedClipboardTexts
+            _dismissedClipboardTexts,
+            repository.bookmarkFolders,
+            _bookmarkSortOption
         )
     ) { params ->
         val screen = params[0] as NavScreen
@@ -159,6 +166,9 @@ class BrowserViewModel(
         val snackbarMessage = params[21] as String?
         @Suppress("UNCHECKED_CAST")
         val dismissedClipboard = params[22] as Set<String>
+        @Suppress("UNCHECKED_CAST")
+        val bookmarkFolders = params[23] as List<String>
+        val bookmarkSortOption = params[24] as BookmarkSortOption
 
         val activeTab = tabs.find { it.id == activeTabId } ?: tabs.firstOrNull()
 
@@ -175,6 +185,8 @@ class BrowserViewModel(
             activeTab = activeTab,
             tabGroups = tabGroups,
             bookmarks = bookmarks,
+            bookmarkFolders = bookmarkFolders,
+            bookmarkSortOption = bookmarkSortOption,
             history = history,
             settings = settings,
             speedDials = speedDialsList,
@@ -449,9 +461,48 @@ class BrowserViewModel(
         }
     }
 
-    fun addBookmark(title: String, url: String, folder: String) {
-        repository.addBookmark(title, url, folder)
+    fun addBookmark(title: String, url: String, folder: String, isPinned: Boolean = false) {
+        repository.addBookmark(title, url, folder, isPinned)
+        _snackbarMessage.value = "Bookmark saved to $folder"
     }
+
+    fun toggleBookmarkPin(id: String) {
+        repository.toggleBookmarkPin(id)
+        val item = repository.bookmarks.value.find { it.id == id }
+        if (item != null) {
+            _snackbarMessage.value = if (item.isPinned) "Pinned \"${item.title}\"" else "Unpinned \"${item.title}\""
+        }
+    }
+
+    fun addBookmarkFolder(folderName: String) {
+        val added = repository.addBookmarkFolder(folderName)
+        if (added) {
+            val cleaned = folderName.trim()
+            _selectedBookmarkFolder.value = cleaned
+            _snackbarMessage.value = "Bookmark group \"$cleaned\" created"
+        } else {
+            _snackbarMessage.value = "Group \"$folderName\" already exists"
+        }
+    }
+
+    fun setBookmarkSortOption(option: BookmarkSortOption) {
+        _bookmarkSortOption.value = option
+        _snackbarMessage.value = "Sorted bookmarks by ${option.label}"
+    }
+
+    fun importBookmarks(rawContent: String, defaultFolder: String = "Favorites"): Int {
+        val count = repository.importBookmarksFromText(rawContent, defaultFolder)
+        _snackbarMessage.value = if (count > 0) {
+            "Imported $count bookmark${if (count == 1) "" else "s"}"
+        } else {
+            "No valid bookmarks found to import"
+        }
+        return count
+    }
+
+    fun exportBookmarksJson(): String = repository.exportBookmarksJson()
+
+    fun exportBookmarksHtml(): String = repository.exportBookmarksHtml()
 
     fun removeBookmark(id: String) {
         repository.removeBookmark(id)

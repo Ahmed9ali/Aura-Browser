@@ -66,6 +66,9 @@ class BrowserRepository(
     private val _bookmarks = MutableStateFlow<List<BookmarkItem>>(emptyList())
     val bookmarks: StateFlow<List<BookmarkItem>> = _bookmarks.asStateFlow()
 
+    private val _bookmarkFolders = MutableStateFlow<List<String>>(listOf("Favorites", "Work", "Reading List"))
+    val bookmarkFolders: StateFlow<List<String>> = _bookmarkFolders.asStateFlow()
+
     private val _history = MutableStateFlow<List<HistoryItem>>(emptyList())
     val history: StateFlow<List<HistoryItem>> = _history.asStateFlow()
 
@@ -253,15 +256,51 @@ class BrowserRepository(
     }
 
     // Bookmarks Operations
-    fun addBookmark(title: String, url: String, folder: String = "Favorites") {
-        if (_bookmarks.value.none { it.url == url }) {
+    fun addBookmark(
+        title: String,
+        url: String,
+        folder: String = "Favorites",
+        isPinned: Boolean = false
+    ) {
+        val cleanFolder = folder.trim().ifBlank { "Favorites" }
+        if (cleanFolder != "All" && _bookmarkFolders.value.none { it.equals(cleanFolder, ignoreCase = true) }) {
+            _bookmarkFolders.value = _bookmarkFolders.value + cleanFolder
+        }
+        val cleanUrl = url.trim()
+        if (cleanUrl.isBlank()) return
+        if (_bookmarks.value.none { it.url == cleanUrl }) {
             val newBookmark = BookmarkItem(
-                title = title.ifBlank { url },
-                url = url,
-                folder = folder
+                title = title.trim().ifBlank { cleanUrl },
+                url = cleanUrl,
+                folder = cleanFolder,
+                isPinned = isPinned
             )
             _bookmarks.value = listOf(newBookmark) + _bookmarks.value
+        } else {
+            _bookmarks.value = _bookmarks.value.map { existing ->
+                if (existing.url == cleanUrl) {
+                    existing.copy(
+                        title = title.trim().ifBlank { existing.title },
+                        folder = cleanFolder,
+                        isPinned = isPinned || existing.isPinned
+                    )
+                } else existing
+            }
         }
+    }
+
+    fun toggleBookmarkPin(id: String) {
+        _bookmarks.value = _bookmarks.value.map { item ->
+            if (item.id == id) item.copy(isPinned = !item.isPinned) else item
+        }
+    }
+
+    fun addBookmarkFolder(folderName: String): Boolean {
+        val cleaned = folderName.trim()
+        if (cleaned.isBlank() || cleaned.equals("All", ignoreCase = true)) return false
+        if (_bookmarkFolders.value.any { it.equals(cleaned, ignoreCase = true) }) return false
+        _bookmarkFolders.value = _bookmarkFolders.value + cleaned
+        return true
     }
 
     fun removeBookmark(id: String) {
@@ -274,6 +313,193 @@ class BrowserRepository(
 
     fun isBookmarked(url: String): Boolean {
         return _bookmarks.value.any { it.url == url }
+    }
+
+    private fun escapeJsonString(input: String): String {
+        return buildString {
+            for (ch in input) {
+                when (ch) {
+                    '\\' -> append("\\\\")
+                    '"' -> append("\\\"")
+                    '\n' -> append("\\n")
+                    '\r' -> append("\\r")
+                    '\t' -> append("\\t")
+                    else -> append(ch)
+                }
+            }
+        }
+    }
+
+    private fun unescapeJsonString(input: String): String {
+        return input
+            .replace("\\\"", "\"")
+            .replace("\\n", "\n")
+            .replace("\\r", "\r")
+            .replace("\\t", "\t")
+            .replace("\\\\", "\\")
+    }
+
+    fun exportBookmarksJson(): String {
+        val items = _bookmarks.value
+        if (items.isEmpty()) return "[]"
+        val sb = StringBuilder("[\n")
+        items.forEachIndexed { index, b ->
+            sb.append("  {\n")
+            sb.append("    \"id\": \"${escapeJsonString(b.id)}\",\n")
+            sb.append("    \"title\": \"${escapeJsonString(b.title)}\",\n")
+            sb.append("    \"url\": \"${escapeJsonString(b.url)}\",\n")
+            sb.append("    \"folder\": \"${escapeJsonString(b.folder)}\",\n")
+            sb.append("    \"isPinned\": ${b.isPinned},\n")
+            sb.append("    \"createdAt\": ${b.createdAt}\n")
+            sb.append("  }")
+            if (index < items.lastIndex) sb.append(",")
+            sb.append("\n")
+        }
+        sb.append("]")
+        return sb.toString()
+    }
+
+    fun exportBookmarksHtml(): String {
+        val sb = StringBuilder()
+        sb.appendLine("<!DOCTYPE NETSCAPE-Bookmark-file-1>")
+        sb.appendLine("<META HTTP-EQUIV=\"Content-Type\" CONTENT=\"text/html; charset=UTF-8\">")
+        sb.appendLine("<TITLE>Bookmarks</TITLE>")
+        sb.appendLine("<H1>Bookmarks</H1>")
+        sb.appendLine("<DL><p>")
+        val grouped = _bookmarks.value.groupBy { it.folder }
+        grouped.forEach { (folder, items) ->
+            sb.appendLine("    <DT><H3>$folder</H3>")
+            sb.appendLine("    <DL><p>")
+            items.forEach { item ->
+                val pinAttr = if (item.isPinned) " PINNED=\"1\"" else ""
+                sb.appendLine("        <DT><A HREF=\"${item.url}\" ADD_DATE=\"${item.createdAt / 1000}\"$pinAttr>${item.title}</A>")
+            }
+            sb.appendLine("    </DL><p>")
+        }
+        sb.appendLine("</DL><p>")
+        return sb.toString()
+    }
+
+    fun importBookmarksFromText(rawContent: String, defaultFolder: String = "Favorites"): Int {
+        val trimmed = rawContent.trim()
+        if (trimmed.isBlank()) return 0
+        var importedCount = 0
+
+        // 1. Try JSON array parsing (pure Kotlin, works in Android runtime and JVM unit tests)
+        if (trimmed.startsWith("[")) {
+            val objectBlockRegex = Regex("""\{[^{}]*\}""", RegexOption.DOT_MATCHES_ALL)
+            val stringFieldRegex = { key: String ->
+                Regex(""""$key"\s*:\s*"((?:\\.|[^"\\])*)"""", RegexOption.IGNORE_CASE)
+            }
+            val boolFieldRegex = { key: String ->
+                Regex(""""$key"\s*:\s*(true|false)""", RegexOption.IGNORE_CASE)
+            }
+
+            objectBlockRegex.findAll(trimmed).forEach { blockMatch ->
+                val block = blockMatch.value
+                val rawUrl = stringFieldRegex("url").find(block)?.groupValues?.get(1)?.let { unescapeJsonString(it).trim() }.orEmpty()
+                if (rawUrl.isNotBlank()) {
+                    val normalizedUrl = normalizeBookmarkUrl(rawUrl)
+                    val title = stringFieldRegex("title").find(block)?.groupValues?.get(1)
+                        ?.let { unescapeJsonString(it).trim() }
+                        .orEmpty()
+                        .ifBlank { normalizedUrl }
+                    val folder = stringFieldRegex("folder").find(block)?.groupValues?.get(1)
+                        ?.let { unescapeJsonString(it).trim() }
+                        .orEmpty()
+                        .ifBlank { defaultFolder }
+                    val isPinned = boolFieldRegex("isPinned").find(block)?.groupValues?.get(1)
+                        ?.equals("true", ignoreCase = true) == true
+                    addBookmark(title = title, url = normalizedUrl, folder = folder, isPinned = isPinned)
+                    importedCount++
+                }
+            }
+            if (importedCount > 0) return importedCount
+        }
+
+        // 2. Try HTML (<A HREF="...">Title</A>) parsing
+        val htmlAnchorRegex = Regex("""<a\s+[^>]*href\s*=\s*["']([^"']+)["'][^>]*>(.*?)</a>""", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
+        val htmlMatches = htmlAnchorRegex.findAll(trimmed).toList()
+        if (htmlMatches.isNotEmpty()) {
+            htmlMatches.forEach { match ->
+                val rawUrl = match.groupValues[1].trim()
+                val rawTitle = match.groupValues[2].replace(Regex("<[^>]*>"), "").trim()
+                val isPinned = match.value.contains("PINNED=\"1\"", ignoreCase = true)
+                if (rawUrl.isNotBlank() && !rawUrl.startsWith("javascript:", ignoreCase = true)) {
+                    val normalizedUrl = normalizeBookmarkUrl(rawUrl)
+                    addBookmark(
+                        title = rawTitle.ifBlank { normalizedUrl },
+                        url = normalizedUrl,
+                        folder = defaultFolder,
+                        isPinned = isPinned
+                    )
+                    importedCount++
+                }
+            }
+            if (importedCount > 0) return importedCount
+        }
+
+        // 3. Fallback: Line-by-line parsing ("Title | URL | Folder" or "Title - URL" or plain URL)
+        trimmed.lines().forEach { line ->
+            val cleanLine = line.trim()
+            if (cleanLine.isBlank() || cleanLine.startsWith("#") || cleanLine.startsWith("//")) return@forEach
+
+            if (cleanLine.contains("|")) {
+                val parts = cleanLine.split("|").map { it.trim() }
+                if (parts.size >= 2) {
+                    val title = parts[0]
+                    val urlPart = parts[1]
+                    val folderPart = parts.getOrNull(2)?.ifBlank { defaultFolder } ?: defaultFolder
+                    val pinnedPart = parts.getOrNull(3)?.equals("pinned", ignoreCase = true) == true ||
+                            parts.getOrNull(3)?.equals("true", ignoreCase = true) == true
+                    if (urlPart.isNotBlank()) {
+                        val normalizedUrl = normalizeBookmarkUrl(urlPart)
+                        addBookmark(
+                            title = title.ifBlank { normalizedUrl },
+                            url = normalizedUrl,
+                            folder = folderPart,
+                            isPinned = pinnedPart
+                        )
+                        importedCount++
+                    }
+                }
+            } else {
+                val urlRegex = Regex("""(https?://[^\s,;"']+|[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(?:/[^\s,;"']*)?)""")
+                val match = urlRegex.find(cleanLine)
+                if (match != null) {
+                    val rawUrl = match.value
+                    val normalizedUrl = normalizeBookmarkUrl(rawUrl)
+                    val remainingTitle = cleanLine.replace(rawUrl, "")
+                        .trim(' ', '-', ':', ',', '|', '•', '\t')
+                        .ifBlank {
+                            normalizedUrl.removePrefix("https://")
+                                .removePrefix("http://")
+                                .removePrefix("www.")
+                                .substringBefore("/")
+                        }
+                    addBookmark(
+                        title = remainingTitle,
+                        url = normalizedUrl,
+                        folder = defaultFolder
+                    )
+                    importedCount++
+                }
+            }
+        }
+
+        return importedCount
+    }
+
+    private fun normalizeBookmarkUrl(rawUrl: String): String {
+        val trimmed = rawUrl.trim()
+        return if (!trimmed.startsWith("http://", ignoreCase = true) &&
+            !trimmed.startsWith("https://", ignoreCase = true) &&
+            !trimmed.startsWith("aura://", ignoreCase = true)
+        ) {
+            "https://$trimmed"
+        } else {
+            trimmed
+        }
     }
 
     // History Operations

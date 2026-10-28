@@ -167,6 +167,17 @@ fun WebViewScreen(
                         ViewGroup.LayoutParams.MATCH_PARENT
                     )
 
+                    // Avoid DRM rendernode (/dev/dri/renderD128) errors on headless/cloud emulators
+                    val useHardwareLayer = com.example.AuraApplication.hasHardwareRenderNode()
+                    setLayerType(
+                        if (useHardwareLayer) android.view.View.LAYER_TYPE_HARDWARE else android.view.View.LAYER_TYPE_SOFTWARE,
+                        null
+                    )
+
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                        setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, true)
+                    }
+
                     settings.apply {
                         javaScriptEnabled = true
                         domStorageEnabled = true
@@ -453,7 +464,17 @@ fun WebViewScreen(
 
     DisposableEffect(tab.id) {
         onDispose {
-            webViewInstance?.stopLoading()
+            try {
+                webViewInstance?.apply {
+                    stopLoading()
+                    removeJavascriptInterface("AuraAutomation")
+                    (parent as? ViewGroup)?.removeView(this)
+                    destroy()
+                }
+            } catch (_: Exception) {
+            } finally {
+                webViewInstance = null
+            }
         }
     }
 }

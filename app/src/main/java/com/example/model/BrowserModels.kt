@@ -27,8 +27,18 @@ data class BookmarkItem(
     val title: String,
     val url: String,
     val folder: String = "Favorites",
+    val isPinned: Boolean = false,
     val createdAt: Long = System.currentTimeMillis()
 )
+
+enum class BookmarkSortOption(val label: String) {
+    A_TO_Z("A–Z"),
+    Z_TO_A("Z–A"),
+    PINNED("Pinned First"),
+    NEWEST("Newest"),
+    OLDEST("Oldest"),
+    GROUP("Group (A–Z)")
+}
 
 data class HistoryItem(
     val id: String = UUID.randomUUID().toString(),
