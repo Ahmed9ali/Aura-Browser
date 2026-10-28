@@ -167,12 +167,8 @@ fun WebViewScreen(
                         ViewGroup.LayoutParams.MATCH_PARENT
                     )
 
-                    // Avoid DRM rendernode (/dev/dri/renderD128) errors on headless/cloud emulators
-                    val useHardwareLayer = com.example.AuraApplication.hasHardwareRenderNode()
-                    setLayerType(
-                        if (useHardwareLayer) android.view.View.LAYER_TYPE_HARDWARE else android.view.View.LAYER_TYPE_SOFTWARE,
-                        null
-                    )
+                    // Use software layer on WebView to prevent DRM rendernode (/dev/dri/renderD128) errors on cloud emulators
+                    setLayerType(android.view.View.LAYER_TYPE_SOFTWARE, null)
 
                     if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
                         setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, true)
@@ -230,6 +226,7 @@ fun WebViewScreen(
                             if (!url.isNullOrBlank()) {
                                 lastLoadedUrl = url
                                 automationEngine?.syncCurrentPageUrl(url)
+                                automationEngine?.onPageLoadStarted(url)
                             }
                             onWebStateChanged(
                                 null,
@@ -246,6 +243,8 @@ fun WebViewScreen(
                             if (!url.isNullOrBlank()) {
                                 lastLoadedUrl = url
                                 automationEngine?.onPageLoaded(url)
+                            } else {
+                                automationEngine?.onPageLoaded(lastLoadedUrl ?: "")
                             }
                             onWebStateChanged(
                                 view?.title,
@@ -266,6 +265,7 @@ fun WebViewScreen(
                             if (request?.isForMainFrame == true) {
                                 hasError = true
                                 errorMessage = error?.description?.toString() ?: "Failed to load page"
+                                automationEngine?.onPageLoaded(request.url?.toString() ?: lastLoadedUrl ?: "")
                                 onWebStateChanged(null, null, 100, false, null, null)
                             }
                         }
@@ -286,6 +286,7 @@ fun WebViewScreen(
                             // Prevent app crash if Chromium renderer terminates or restarts
                             hasError = true
                             errorMessage = "Page renderer reloaded. Tap 'Try Again'."
+                            automationEngine?.onPageLoaded(lastLoadedUrl ?: "")
                             return true
                         }
                     }
@@ -293,6 +294,7 @@ fun WebViewScreen(
                     webChromeClient = object : WebChromeClient() {
                         override fun onProgressChanged(view: WebView?, newProgress: Int) {
                             super.onProgressChanged(view, newProgress)
+                            automationEngine?.onPageLoadProgress(newProgress)
                             onWebStateChanged(
                                 null,
                                 null,

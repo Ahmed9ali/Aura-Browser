@@ -11,19 +11,28 @@ class AuraApplication : Application() {
             private set
 
         /**
-         * Checks whether the Linux DRM render node (/dev/dri/renderD128) is available.
-         * Cloud/headless Android emulators often run without a DRM render node, which causes
-         * "E/platform: Failed to open rendernode: No such file or directory" when WebView
-         * attempts hardware layer allocation.
+         * Checks whether the Linux DRM render node (/dev/dri/renderD128) is actually present
+         * and openable. Cloud/headless Android emulators often lack a DRM render node, which causes
+         * "E/platform: Failed to open rendernode: No such file or directory" when hardware
+         * gralloc/WebView layers attempt to open it.
          */
         fun hasHardwareRenderNode(): Boolean {
             return try {
                 val renderNode = File("/dev/dri/renderD128")
-                renderNode.exists() && renderNode.canRead()
+                if (!renderNode.exists() || !renderNode.canRead()) {
+                    false
+                } else {
+                    renderNode.inputStream().use { true }
+                }
             } catch (_: Exception) {
                 false
             }
         }
+    }
+
+    override fun attachBaseContext(base: android.content.Context?) {
+        super.attachBaseContext(base)
+        configureGraphicsEnvironment()
     }
 
     override fun onCreate() {
@@ -38,6 +47,7 @@ class AuraApplication : Application() {
             if (!hasHardwareRenderNode()) {
                 System.setProperty("debug.hwui.renderer", "skiagl")
                 System.setProperty("debug.hwui.use_vulkan", "false")
+                System.setProperty("hwui.disable_vsync", "true")
             }
         } catch (_: Exception) {
         }

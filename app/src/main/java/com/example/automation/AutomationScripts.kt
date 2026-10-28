@@ -2780,4 +2780,90 @@ object AutomationScripts {
             })();
         """.trimIndent()
     }
+
+    /**
+     * Checks whether the current website has finished loading and rendering its DOM/SPA content
+     * before the automation engine performs scanning or step execution.
+     *
+     * Verifies:
+     * 1. `document.readyState === 'complete'` (or `'interactive'` with target element already mounted)
+     * 2. `document.body` exists and has rendered content
+     * 3. No active full-screen loading spinners / masks blocking interaction
+     * 4. Optional `targetSelector` or interactive form controls are mounted in the DOM
+     */
+    fun createCheckPageReadyScript(
+        targetSelector: String = "",
+        requireInteractiveElements: Boolean = false
+    ): String {
+        val escapedSelector = targetSelector.replace("\\", "\\\\").replace("'", "\\'")
+        return """
+            (function() {
+                try {
+                    if (!document || !document.body) return 'LOADING:NO_BODY';
+                    var readyState = document.readyState;
+                    if (readyState === 'loading') return 'LOADING:READY_STATE_LOADING';
+
+                    // Check for active full-screen / blocking loading masks or spinners
+                    var spinnerSelectors = [
+                        '.loading-mask', '.el-loading-mask', '.ant-spin-spinning',
+                        '.van-loading', '.mui-backdrop-loading', '.hwid-loading',
+                        '.page-loading', '.global-loading', '[data-loading="true"]',
+                        '[aria-busy="true"]'
+                    ];
+                    for (var i = 0; i < spinnerSelectors.length; i++) {
+                        var spinners = document.querySelectorAll(spinnerSelectors[i]);
+                        for (var j = 0; j < spinners.length; j++) {
+                            var sp = spinners[j];
+                            if (!sp || !sp.getBoundingClientRect) continue;
+                            var style = window.getComputedStyle(sp);
+                            if (style.display === 'none' || style.visibility === 'hidden' || parseFloat(style.opacity || '1') < 0.05) continue;
+                            var rect = sp.getBoundingClientRect();
+                            // Only treat as blocking if visible and occupies significant area
+                            if (rect.width > 24 && rect.height > 24) {
+                                // Ignore aria-busy on small inline elements if target is already visible
+                                if (spinnerSelectors[i] === '[aria-busy="true"]' && rect.width < 120 && rect.height < 120) continue;
+                                return 'LOADING:SPINNER_ACTIVE';
+                            }
+                        }
+                    }
+
+                    // If a specific target selector is requested, check if it's already mounted and visible
+                    var sel = '$escapedSelector';
+                    if (sel && sel.length > 0 && !sel.startsWith('http://') && !sel.startsWith('https://')) {
+                        try {
+                            var targetEl = document.querySelector(sel);
+                            if (targetEl) {
+                                var r = targetEl.getBoundingClientRect();
+                                if (r.width > 0 && r.height > 0) {
+                                    return 'READY:TARGET_MOUNTED';
+                                }
+                            }
+                        } catch (e) {}
+                    }
+
+                    if (readyState !== 'complete') {
+                        return 'LOADING:READY_STATE_' + readyState;
+                    }
+
+                    // Ensure SPA root is hydrated (body has meaningful children or interactive controls)
+                    var bodyChildren = document.body.children ? document.body.children.length : 0;
+                    if (bodyChildren === 0) return 'LOADING:EMPTY_BODY';
+
+                    if ($requireInteractiveElements) {
+                        var interactiveCount = document.querySelectorAll(
+                            'input, select, textarea, button, a[href], [role="button"], [role="combobox"], [role="listbox"], .hwid-input-root, .hwid-callingCodePhone-root, .hwid-birthday-root'
+                        ).length;
+                        if (interactiveCount === 0) {
+                            return 'LOADING:NO_INTERACTIVE_ELEMENTS';
+                        }
+                    }
+
+                    return 'READY:COMPLETE';
+                } catch (e) {
+                    return 'READY:FALLBACK';
+                }
+            })();
+        """.trimIndent()
+    }
 }
+

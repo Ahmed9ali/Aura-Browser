@@ -322,6 +322,8 @@ data class AutomationExecutionState(
     val currentDataSummary: String = "",
     val logMessages: List<String> = emptyList(),
     val isHudVisible: Boolean = false,
+    val isWaitingForPageLoad: Boolean = false,
+    val pageLoadProgress: Int = 100,
     val isAwaitingExhaustionChoice: Boolean = false,
     val exhaustedFieldKey: String? = null,
     val exhaustedSheetId: String? = null,

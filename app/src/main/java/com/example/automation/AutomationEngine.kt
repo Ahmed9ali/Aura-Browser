@@ -65,6 +65,10 @@ class AutomationEngine(
     private var pageLoadWaiter: CompletableDeferred<String>? = null
     @Volatile
     private var lastKnownPageUrl: String = ""
+    @Volatile
+    private var isWebViewPageLoading: Boolean = false
+    @Volatile
+    private var currentLoadProgress: Int = 100
     // Only true when the user explicitly clicks "Grab Elements"
     private var autoReadyOnNextScan: Boolean = false
 
@@ -533,11 +537,62 @@ class AutomationEngine(
     }
 
     /**
-     * Called when WebView finishes loading a page.
+     * Called when WebView starts loading a new page (`onPageStarted`).
+     * Marks the engine as waiting for website load so functions wait until the page is ready.
+     */
+    fun onPageLoadStarted(url: String) {
+        if (url.isBlank() || url.startsWith("aura://") || url == "about:blank") return
+        lastKnownPageUrl = url
+        isWebViewPageLoading = true
+        currentLoadProgress = 10
+        if (pageLoadWaiter == null || pageLoadWaiter?.isCompleted == true) {
+            pageLoadWaiter = CompletableDeferred()
+        }
+        _executionState.value = _executionState.value.copy(
+            isWaitingForPageLoad = true,
+            pageLoadProgress = 10
+        )
+    }
+
+    /**
+     * Called when WebView reports page loading progress (`onProgressChanged`).
+     */
+    fun onPageLoadProgress(progress: Int) {
+        val clamped = progress.coerceIn(0, 100)
+        currentLoadProgress = clamped
+        if (clamped >= 100) {
+            isWebViewPageLoading = false
+            pageLoadWaiter?.complete(lastKnownPageUrl)
+            _executionState.value = _executionState.value.copy(
+                isWaitingForPageLoad = false,
+                pageLoadProgress = 100
+            )
+        } else {
+            _executionState.value = _executionState.value.copy(
+                pageLoadProgress = clamped
+            )
+        }
+    }
+
+    fun isWebsiteCurrentlyLoading(): Boolean {
+        return isWebViewPageLoading || currentLoadProgress < 100
+    }
+
+    /**
+     * Called when WebView finishes loading a page (`onPageFinished`).
      * Note: Does NOT auto-trigger bulk scan so user deletions are never overwritten in a loop.
      */
     fun onPageLoaded(url: String) {
-        if (url.isBlank() || url.startsWith("aura://")) return
+        isWebViewPageLoading = false
+        currentLoadProgress = 100
+        _executionState.value = _executionState.value.copy(
+            isWaitingForPageLoad = false,
+            pageLoadProgress = 100
+        )
+        if (url.isBlank() || url.startsWith("aura://")) {
+            pageLoadWaiter?.complete(url)
+            return
+        }
         lastKnownPageUrl = url
         pageLoadWaiter?.complete(url)
 
@@ -789,15 +844,22 @@ class AutomationEngine(
         }
     }
 
-    // Scanner (Grab Elements & Ready Use)
+    // Scanner (Grab Elements & Ready Use) - Waits for website to load before scanning
     fun triggerScan(autoReadySteps: Boolean = true) {
         autoReadyOnNextScan = autoReadySteps
         if (_executionState.value.status != AutomationStatus.RECORDING) {
             _executionState.value = _executionState.value.copy(status = AutomationStatus.SCANNING)
         }
         hideWebViewSoftKeyboard()
-        addLog("Scanning & grabbing page elements...")
-        injectJs(AutomationScripts.DOM_SCANNER)
+        scope.launch {
+            waitForWebsiteLoadAndDomReady(
+                requireInteractiveElements = true,
+                reason = "Grab Elements",
+                timeoutMs = 8000L
+            )
+            addLog("Scanning & grabbing page elements...")
+            injectJs(AutomationScripts.DOM_SCANNER)
+        }
     }
 
     fun clearScanHighlights() {
@@ -935,38 +997,167 @@ class AutomationEngine(
         }
     }
 
-    private suspend fun navigateWebViewAndWait(targetUrl: String, timeoutMs: Long = 4500L) {
+    /**
+     * Evaluates raw JavaScript on the attached WebView safely on the UI thread and returns the result.
+     */
+    private suspend fun evaluateRawJs(
+        webView: WebView,
+        js: String,
+        timeoutMs: Long = 1800L
+    ): String? {
+        val deferred = CompletableDeferred<String?>()
+        try {
+            webView.post {
+                try {
+                    webView.evaluateJavascript(js) { result ->
+                        deferred.complete(result)
+                    }
+                } catch (e: Exception) {
+                    deferred.complete(null)
+                }
+            }
+        } catch (e: Exception) {
+            deferred.complete(null)
+        }
+        return withTimeoutOrNull(timeoutMs) { deferred.await() }
+    }
+
+    /**
+     * Waits for the website to finish loading both at the WebView network/navigation layer
+     * (`onPageStarted` -> `onProgressChanged(100)` / `onPageFinished`) AND at the DOM/SPA layer
+     * (`document.readyState === 'complete'`, no blocking full-screen loading spinners, and
+     * optional `targetSelector` or interactive elements mounted) before performing functions.
+     */
+    suspend fun waitForWebsiteLoadAndDomReady(
+        targetSelector: String = "",
+        requireInteractiveElements: Boolean = false,
+        reason: String = "",
+        timeoutMs: Long = 10000L
+    ): Boolean {
+        val startMs = System.currentTimeMillis()
+        val prevStepDesc = _executionState.value.currentStepDescription
+
+        // Phase 1: Wait for active WebView page load (network/frame load) to complete
+        if (isWebViewPageLoading || currentLoadProgress < 100 || (pageLoadWaiter != null && pageLoadWaiter?.isCompleted == false)) {
+            val waitLabel = if (reason.isNotBlank()) "Waiting for website to load ($reason)..." else "Waiting for website to load..."
+            _executionState.value = _executionState.value.copy(
+                isWaitingForPageLoad = true,
+                pageLoadProgress = currentLoadProgress,
+                currentStepDescription = waitLabel
+            )
+            addLog(waitLabel)
+
+            val waiter = pageLoadWaiter ?: CompletableDeferred<String>().also { pageLoadWaiter = it }
+            withTimeoutOrNull(timeoutMs) {
+                waiter.await()
+            }
+            isWebViewPageLoading = false
+            currentLoadProgress = 100
+            pageLoadWaiter = null
+        }
+
+        // Phase 2: If a live WebView is attached, poll DOM readiness & SPA hydration via JS
+        val webView = webViewProvider?.invoke()
+        if (webView != null) {
+            val remainingMs = (timeoutMs - (System.currentTimeMillis() - startMs)).coerceIn(1200L, 6000L)
+            val checkJs = AutomationScripts.createCheckPageReadyScript(
+                targetSelector = targetSelector,
+                requireInteractiveElements = requireInteractiveElements
+            )
+            var domReady = false
+            var loggedDomWait = false
+            val domDeadline = System.currentTimeMillis() + remainingMs
+
+            while (System.currentTimeMillis() < domDeadline) {
+                val res = evaluateRawJs(webView, checkJs, 1200L)
+                if (res == null || res.contains("READY", ignoreCase = true)) {
+                    domReady = true
+                    break
+                }
+                if (!loggedDomWait) {
+                    loggedDomWait = true
+                    val waitLabel = if (reason.isNotBlank()) {
+                        "Waiting for website DOM to load ($reason)..."
+                    } else {
+                        "Waiting for website DOM to load..."
+                    }
+                    _executionState.value = _executionState.value.copy(
+                        isWaitingForPageLoad = true,
+                        currentStepDescription = waitLabel
+                    )
+                }
+                delay(220L)
+            }
+            if (loggedDomWait && domReady) {
+                delay(180L)
+            }
+        }
+
+        _executionState.value = _executionState.value.copy(
+            isWaitingForPageLoad = false,
+            pageLoadProgress = 100,
+            currentStepDescription = prevStepDesc
+        )
+        return true
+    }
+
+    private suspend fun navigateWebViewAndWait(targetUrl: String, timeoutMs: Long = 10000L) {
         if (targetUrl.isBlank() || targetUrl.startsWith("aura://")) return
         val waiter = CompletableDeferred<String>()
         pageLoadWaiter = waiter
         lastKnownPageUrl = targetUrl
+        isWebViewPageLoading = true
+        currentLoadProgress = 15
+        _executionState.value = _executionState.value.copy(
+            isWaitingForPageLoad = true,
+            pageLoadProgress = 15
+        )
 
         val nav = webViewNavigator
         val wv = webViewProvider?.invoke()
         if (nav != null) {
             nav.invoke(targetUrl)
         } else if (wv != null) {
-            wv.loadUrl(targetUrl)
+            wv.post { wv.loadUrl(targetUrl) }
         } else {
+            isWebViewPageLoading = false
+            currentLoadProgress = 100
             pageLoadWaiter = null
+            _executionState.value = _executionState.value.copy(
+                isWaitingForPageLoad = false,
+                pageLoadProgress = 100
+            )
             return
         }
 
         withTimeoutOrNull(timeoutMs) {
             waiter.await()
         }
+        isWebViewPageLoading = false
+        currentLoadProgress = 100
         pageLoadWaiter = null
-        delay(350L)
+
+        // Wait for DOM & SPA hydration after navigation completes
+        waitForWebsiteLoadAndDomReady(
+            requireInteractiveElements = true,
+            reason = extractDomain(targetUrl).ifBlank { targetUrl },
+            timeoutMs = 5000L
+        )
+        delay(250L)
         hideWebViewSoftKeyboard()
     }
 
-    private suspend fun waitForNaturalPageTransition(expectedPageUrl: String, maxWaitMs: Long = 1800L) {
+    private suspend fun waitForNaturalPageTransition(expectedPageUrl: String, maxWaitMs: Long = 3500L) {
         if (expectedPageUrl.isBlank() || expectedPageUrl.startsWith("aura://")) return
         var elapsed = 0L
         val stepMs = 150L
         while (elapsed < maxWaitMs) {
             if (arePageUrlsSame(getCurrentWebViewUrl(), expectedPageUrl)) {
-                delay(250L)
+                waitForWebsiteLoadAndDomReady(
+                    requireInteractiveElements = true,
+                    reason = extractDomain(expectedPageUrl).ifBlank { "Page Transition" },
+                    timeoutMs = 5000L
+                )
                 return
             }
             delay(stepMs)
@@ -978,6 +1169,7 @@ class AutomationEngine(
      * Playback Execution:
      * - STRICT GATE: Cannot start if no script or steps exist; switches HUD to Create Automation mode.
      * - ALWAYS starts from Page 1 (the URL where the first elements of the workflow were grabbed) and transitions across pages in order.
+     * - Waits for the website and DOM to finish loading before performing functions.
      * - Suppresses the Android soft keyboard throughout filling.
      * - Consumes stored values from the linked Data Sheet 1 by 1, or uses Default Generator if no Data Sheet is linked.
      */
@@ -1091,7 +1283,18 @@ class AutomationEngine(
                         )
                         addLog("[Run $iteration] Navigating to Page 1: $page1StartingUrl")
                         navigateWebViewAndWait(page1StartingUrl)
+                    } else {
+                        // Even when already on Page 1, ensure the website has finished loading before running Step 1
+                        waitForWebsiteLoadAndDomReady(
+                            requireInteractiveElements = true,
+                            reason = "Page 1"
+                        )
                     }
+                } else {
+                    waitForWebsiteLoadAndDomReady(
+                        requireInteractiveElements = true,
+                        reason = "Initial Page"
+                    )
                 }
 
                 var currentDefaultRecord = AutomationDataGenerator.generateSingleRandomRecord()
@@ -1113,12 +1316,23 @@ class AutomationEngine(
                         !arePageUrlsSame(stepPageUrl, getCurrentWebViewUrl())
                     ) {
                         if (index > 0 && !arePageUrlsSame(stepPageUrl, prevPageUrl)) {
-                            waitForNaturalPageTransition(stepPageUrl, maxWaitMs = 1800L)
+                            waitForNaturalPageTransition(stepPageUrl, maxWaitMs = 3500L)
                         }
                         if (!arePageUrlsSame(stepPageUrl, getCurrentWebViewUrl())) {
                             addLog("[Run $iteration] Transitioning to page: $stepPageUrl")
                             navigateWebViewAndWait(stepPageUrl)
                         }
+                    }
+
+                    // Wait for website and DOM to finish loading before performing this step
+                    if (step.actionType != AutomationActionType.NAVIGATE &&
+                        step.actionType != AutomationActionType.WAIT
+                    ) {
+                        waitForWebsiteLoadAndDomReady(
+                            targetSelector = step.selector,
+                            requireInteractiveElements = step.actionType != AutomationActionType.SCROLL,
+                            reason = step.elementDescription
+                        )
                     }
 
                     _executionState.value = _executionState.value.copy(
@@ -1131,6 +1345,18 @@ class AutomationEngine(
                     } else step.delayMs
 
                     delay(actualDelay)
+
+                    // Re-verify website is not in the middle of a sudden redirect/reload right after step delay
+                    if (step.actionType != AutomationActionType.NAVIGATE &&
+                        step.actionType != AutomationActionType.WAIT &&
+                        isWebsiteCurrentlyLoading()
+                    ) {
+                        waitForWebsiteLoadAndDomReady(
+                            targetSelector = step.selector,
+                            requireInteractiveElements = true,
+                            reason = step.elementDescription
+                        )
+                    }
 
                     val stepFieldKey = inferStepFieldKey(step)
                     val fallbackHint = stepFieldKey ?: step.elementDescription
@@ -1304,6 +1530,8 @@ class AutomationEngine(
 
             _executionState.value = _executionState.value.copy(
                 status = AutomationStatus.IDLE,
+                isWaitingForPageLoad = false,
+                pageLoadProgress = 100,
                 isAwaitingExhaustionChoice = false,
                 exhaustedFieldKey = null
             )
@@ -1312,26 +1540,21 @@ class AutomationEngine(
     }
 
     /**
-     * Stronger JS Execution with automatic Wait-For-Element retry for dynamic SPAs and delayed renders,
-     * while keeping the Android soft keyboard suppressed.
+     * Stronger JS Execution with automatic Wait-For-Website-Load and Wait-For-Element retry
+     * for dynamic SPAs and delayed renders, while keeping the Android soft keyboard suppressed.
      */
     private suspend fun evaluateJsWithRetry(
         js: String,
-        maxAttempts: Int = 5,
+        maxAttempts: Int = 6,
         retryDelayMs: Long = 350L
     ): Boolean {
         val webView = webViewProvider?.invoke() ?: return false
         for (attempt in 1..maxAttempts) {
-            hideWebViewSoftKeyboard()
-            val deferred = CompletableDeferred<String?>()
-            try {
-                webView.evaluateJavascript(js) { result ->
-                    deferred.complete(result)
-                }
-            } catch (e: Exception) {
-                deferred.complete(null)
+            if (isWebsiteCurrentlyLoading()) {
+                waitForWebsiteLoadAndDomReady(reason = "Step Retry $attempt")
             }
-            val res = withTimeoutOrNull(1800L) { deferred.await() }
+            hideWebViewSoftKeyboard()
+            val res = evaluateRawJs(webView, js, 1800L)
             hideWebViewSoftKeyboard()
             if (res != null && (res.contains("SUCCESS", ignoreCase = true) || res.contains("CLICKED", ignoreCase = true))) {
                 return true

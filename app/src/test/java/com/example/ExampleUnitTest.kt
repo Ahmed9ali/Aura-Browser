@@ -4,6 +4,7 @@ import com.example.data.BrowserRepository
 import com.example.data.PersonalizedSuggestionsEngine
 import com.example.model.SearchEngine
 import com.example.model.SuggestionType
+import kotlinx.coroutines.launch
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -634,8 +635,57 @@ class ExampleUnitTest {
         assertTrue(dobDayJs.contains("hwid-"))
         assertTrue(dobDayJs.contains("collectClickableOptionsFromOverlays"))
     }
+
+    @Test
+    fun testWaitForWebsiteLoadBeforePerformingFunctions() = kotlinx.coroutines.test.runTest {
+        val engine = com.example.automation.AutomationEngine(this)
+
+        // Initially not loading
+        assertFalse(engine.isWebsiteCurrentlyLoading())
+        assertFalse(engine.executionState.value.isWaitingForPageLoad)
+        assertEquals(100, engine.executionState.value.pageLoadProgress)
+
+        // Simulate website starting to load
+        val testUrl = "https://id7.cloud.huawei.com/CAS/portal/userRegister/regbyphone.html"
+        engine.onPageLoadStarted(testUrl)
+        assertTrue(engine.isWebsiteCurrentlyLoading())
+        assertTrue(engine.executionState.value.isWaitingForPageLoad)
+        assertEquals(10, engine.executionState.value.pageLoadProgress)
+
+        // Progress updates to 55% -> still loading
+        engine.onPageLoadProgress(55)
+        assertTrue(engine.isWebsiteCurrentlyLoading())
+        assertEquals(55, engine.executionState.value.pageLoadProgress)
+
+        // Schedule page load completion after 300ms while waitForWebsiteLoadAndDomReady is waiting
+        var pageFinishedBeforeAction = false
+        launch {
+            kotlinx.coroutines.delay(300L)
+            pageFinishedBeforeAction = true
+            engine.onPageLoaded(testUrl)
+        }
+
+        val ready = engine.waitForWebsiteLoadAndDomReady(
+            targetSelector = ".hwid-callingCodePhone-root input",
+            requireInteractiveElements = true,
+            reason = "Fill Phone",
+            timeoutMs = 5000L
+        )
+
+        assertTrue(ready)
+        assertTrue(pageFinishedBeforeAction)
+        assertFalse(engine.isWebsiteCurrentlyLoading())
+        assertFalse(engine.executionState.value.isWaitingForPageLoad)
+        assertEquals(100, engine.executionState.value.pageLoadProgress)
+
+        // Verify CHECK_PAGE_READY JS checks document.readyState, spinners, and target selector
+        val checkJs = com.example.automation.AutomationScripts.createCheckPageReadyScript(
+            targetSelector = ".hwid-callingCodePhone-root input",
+            requireInteractiveElements = true
+        )
+        assertTrue(checkJs.contains("document.readyState"))
+        assertTrue(checkJs.contains("LOADING:SPINNER_ACTIVE"))
+        assertTrue(checkJs.contains("READY:TARGET_MOUNTED"))
+        assertTrue(checkJs.contains("READY:COMPLETE"))
+    }
 }
-
-
-
-

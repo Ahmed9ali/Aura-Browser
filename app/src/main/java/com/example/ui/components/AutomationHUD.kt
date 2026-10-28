@@ -333,6 +333,67 @@ fun AutomationHUD(
 
                     Spacer(modifier = Modifier.height(8.dp))
 
+                    // Website Load Waiting Banner when engine is waiting for page/DOM to finish loading
+                    if (executionState.isWaitingForPageLoad &&
+                        (executionState.status == AutomationStatus.PLAYING ||
+                                executionState.status == AutomationStatus.SCANNING ||
+                                executionState.status == AutomationStatus.RECORDING)
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = Color(0xFF06B6D4).copy(alpha = 0.14f),
+                            border = BorderStroke(1.dp, Color(0xFF06B6D4).copy(alpha = 0.5f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Language,
+                                            contentDescription = null,
+                                            tint = Color(0xFF06B6D4),
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                        Text(
+                                            text = executionState.currentStepDescription.ifBlank { "Waiting for website to load..." },
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                    Text(
+                                        text = "${executionState.pageLoadProgress}%",
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color(0xFF06B6D4)
+                                    )
+                                }
+                                LinearProgressIndicator(
+                                    progress = { (executionState.pageLoadProgress / 100f).coerceIn(0.05f, 1f) },
+                                    color = Color(0xFF06B6D4),
+                                    trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(4.dp)
+                                        .clip(RoundedCornerShape(2.dp))
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(6.dp))
+                    }
+
                     // Interactive Data Exhausted Banner if stored data finished
                     if (executionState.isAwaitingExhaustionChoice) {
                         DataExhaustedHudPrompt(

@@ -55,6 +55,9 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         try {
+            if (!AuraApplication.hasHardwareRenderNode()) {
+                window?.decorView?.setLayerType(android.view.View.LAYER_TYPE_SOFTWARE, null)
+            }
             val webViewDir = java.io.File(applicationContext.dataDir, "app_webview")
             if (webViewDir.exists()) {
                 webViewDir.listFiles()?.forEach { f ->
