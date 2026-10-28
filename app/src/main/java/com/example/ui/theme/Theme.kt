@@ -1,15 +1,75 @@
 package com.example.ui.theme
 
 import android.os.Build
+import androidx.compose.foundation.IndicationNodeFactory
+import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.interaction.InteractionSource
+import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.MaterialExpressiveTheme
+import androidx.compose.material3.MotionScheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
+import androidx.compose.material3.expressiveLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.ContentDrawScope
+import androidx.compose.ui.node.DelegatableNode
+import androidx.compose.ui.node.DrawModifierNode
+import androidx.compose.ui.node.invalidateDraw
 import androidx.compose.ui.platform.LocalContext
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
+
+/**
+ * Pure-Compose press/hover indication that draws directly on the Compose Canvas
+ * and never uses `android.graphics.drawable.RippleDrawable` (`STYLE_PATTERNED`),
+ * preventing `RippleDrawable.STYLE_PATTERNED` errors on any canvas configuration.
+ */
+private object AuraComposeIndication : IndicationNodeFactory {
+    override fun create(interactionSource: InteractionSource): DelegatableNode {
+        return AuraIndicationNode(interactionSource)
+    }
+
+    override fun hashCode(): Int = -1048573
+    override fun equals(other: Any?): Boolean = other === this
+
+    private class AuraIndicationNode(
+        private val interactionSource: InteractionSource
+    ) : Modifier.Node(), DrawModifierNode {
+        private var isPressed = false
+
+        override fun onAttach() {
+            coroutineScope.launch {
+                var pressCount = 0
+                interactionSource.interactions.collectLatest { interaction ->
+                    when (interaction) {
+                        is PressInteraction.Press -> pressCount++
+                        is PressInteraction.Release -> pressCount = (pressCount - 1).coerceAtLeast(0)
+                        is PressInteraction.Cancel -> pressCount = (pressCount - 1).coerceAtLeast(0)
+                    }
+                    val nextPressed = pressCount > 0
+                    if (isPressed != nextPressed) {
+                        isPressed = nextPressed
+                        invalidateDraw()
+                    }
+                }
+            }
+        }
+
+        override fun ContentDrawScope.draw() {
+            drawContent()
+            if (isPressed) {
+                drawRect(color = Color.Gray.copy(alpha = 0.14f), size = size)
+            }
+        }
+    }
+}
 
 private val DarkColorScheme = darkColorScheme(
     primary = AuraPrimaryLight,
@@ -71,25 +131,44 @@ private val LightColorScheme = lightColorScheme(
     onError = Color.White
 )
 
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-fun AuraBrowserTheme(
+fun BrowserTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
-    dynamicColor: Boolean = false,
+    dynamicColor: Boolean = true,
     content: @Composable () -> Unit
 ) {
     val colorScheme = when {
         dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-            val context = LocalContext.current
-            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+            if (darkTheme) dynamicDarkColorScheme(LocalContext.current)
+            else dynamicLightColorScheme(LocalContext.current)
         }
         darkTheme -> DarkColorScheme
-        else -> LightColorScheme
+        else -> expressiveLightColorScheme()
     }
 
-    MaterialTheme(
+    MaterialExpressiveTheme(
         colorScheme = colorScheme,
+        motionScheme = MotionScheme.expressive(),
         typography = Typography,
         shapes = ExpressiveShapes,
+        content = {
+            CompositionLocalProvider(LocalIndication provides AuraComposeIndication) {
+                content()
+            }
+        }
+    )
+}
+
+@Composable
+fun AuraBrowserTheme(
+    darkTheme: Boolean = isSystemInDarkTheme(),
+    dynamicColor: Boolean = true,
+    content: @Composable () -> Unit
+) {
+    BrowserTheme(
+        darkTheme = darkTheme,
+        dynamicColor = dynamicColor,
         content = content
     )
 }

@@ -48,16 +48,13 @@ import com.example.ui.screens.SearchScreen
 import com.example.ui.screens.SettingsScreen
 import com.example.ui.screens.TabsScreen
 import com.example.ui.screens.WebViewScreen
-import com.example.ui.theme.AuraBrowserTheme
+import com.example.ui.theme.BrowserTheme
 import com.example.viewmodel.BrowserViewModel
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         try {
-            if (!AuraApplication.hasHardwareRenderNode()) {
-                window?.decorView?.setLayerType(android.view.View.LAYER_TYPE_SOFTWARE, null)
-            }
             val webViewDir = java.io.File(applicationContext.dataDir, "app_webview")
             if (webViewDir.exists()) {
                 webViewDir.listFiles()?.forEach { f ->
@@ -78,7 +75,7 @@ class MainActivity : ComponentActivity() {
                 ThemeMode.LIGHT -> false
             }
 
-            AuraBrowserTheme(darkTheme = isDarkTheme) {
+            BrowserTheme(darkTheme = isDarkTheme) {
                 BrowserApp(viewModel = viewModel)
             }
         }

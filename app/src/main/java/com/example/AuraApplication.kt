@@ -19,11 +19,7 @@ class AuraApplication : Application() {
         fun hasHardwareRenderNode(): Boolean {
             return try {
                 val renderNode = File("/dev/dri/renderD128")
-                if (!renderNode.exists() || !renderNode.canRead()) {
-                    false
-                } else {
-                    renderNode.inputStream().use { true }
-                }
+                renderNode.exists() && renderNode.canRead()
             } catch (_: Exception) {
                 false
             }
