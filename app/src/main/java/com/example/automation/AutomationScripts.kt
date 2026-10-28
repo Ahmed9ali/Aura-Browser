@@ -156,12 +156,34 @@ object AutomationScripts {
 
             function isCountryCodeElement(el, combined) {
                 if (!el) return false;
+                var tag = (el.tagName || '').toLowerCase();
+                // CRITICAL: An editable text/tel input is the PHONE NUMBER field, never a country code trigger!
+                if (tag === 'input' && !el.readOnly && el.type !== 'button' && el.type !== 'submit') return false;
                 var cls = (el.className && typeof el.className === 'string') ? el.className : '';
-                if (/iti__selected-flag|iti__flag-container|PhoneInputCountry|flag-dropdown|country-code|dial-code/i.test(cls)) return true;
+                if (/callingCode|calling-code|countryDropDown|country-code|countryCode|dial-code|dialCode|phone-country|phoneprefix|iti__|PhoneInputCountry|selected-flag|flag-dropdown/i.test(cls)) return true;
                 if (el.hasAttribute('data-dial-code') || el.hasAttribute('data-country-code')) return true;
-                if (/country.*code|dial.*code|calling.*code|phone.*prefix|phone.*code/i.test(combined)) return true;
+                var idAndName = ((el.id || '') + ' ' + (el.name || '')).toLowerCase();
+                if (/countrylist|country_code|country-code|countrycode|dialcode|dial_code|phone_country|calling_code|callingcode|phoneprefix/i.test(idAndName)) return true;
+                if (/country.*code|dial.*code|calling.*code|phone.*prefix|phone.*code|phone.*country/i.test(combined)) return true;
                 var txt = (el.innerText || el.textContent || el.value || '').trim();
-                if (txt.length <= 14 && /^\s*([^\w\s]{1,4}\s*)?\+\d{1,4}(\s|$)/.test(txt)) return true;
+                // Match e.g. +213(Algeria), +1 (US), +44, etc.
+                if (txt.length <= 25 && /^\s*([^\w\s]{1,4}\s*)?([a-zA-Z]{2}\s*)?\+\d{1,4}/.test(txt)) return true;
+                var tag = (el.tagName || '').toLowerCase();
+                if (tag === 'select' && el.options && el.options.length > 3) {
+                    var sampleOpts = '';
+                    for (var i = 0; i < Math.min(el.options.length, 8); i++) {
+                        sampleOpts += ' ' + (el.options[i].text || '') + ' ' + (el.options[i].value || '');
+                    }
+                    if ((sampleOpts.match(/\+\d{1,4}\b/g) || []).length >= 2) return true;
+                }
+                // Check if this trigger sits inside a callingCode / phone container next to a phone input
+                var phoneContainer = el.closest ? el.closest('.hwid-callingCodePhone-root, [class*="callingCode"], [class*="calling-code"], [class*="countryDropDown"], .iti, .PhoneInput, .react-tel-input, .phone-input, .input-group, .field, .form-group, div') : null;
+                if (phoneContainer && phoneContainer !== document.body && tag !== 'input') {
+                    var telInp = phoneContainer.querySelector('input');
+                    if (telInp && telInp !== el && phoneContainer.getBoundingClientRect().height < 120) {
+                        if (!/submit|next|continue|send|verify|code|otp/i.test(txt)) return true;
+                    }
+                }
                 return false;
             }
 
@@ -170,12 +192,12 @@ object AutomationScripts {
                 var tag = el.tagName.toLowerCase();
                 if (tag === 'select') return true;
                 var role = (el.getAttribute('role') || '').toLowerCase();
-                if (role === 'combobox' || role === 'listbox') return true;
+                if (role === 'combobox' || role === 'listbox' || role === 'spinbutton') return true;
                 var hasPopup = (el.getAttribute('aria-haspopup') || '').toLowerCase();
                 if (hasPopup === 'listbox' || hasPopup === 'dialog' || hasPopup === 'menu' || hasPopup === 'true') return true;
                 if (el.hasAttribute('aria-expanded')) return true;
                 var cls = (el.className && typeof el.className === 'string') ? el.className : '';
-                if (/MuiSelect-select|ant-select-selector|react-select__control|v-select|el-select|select-trigger|dropdown-toggle|custom-select|picker-trigger|bottom-sheet-trigger/i.test(cls)) {
+                if (/MuiSelect-select|ant-select-selector|react-select__control|v-select|el-select|select-trigger|dropdown-toggle|custom-select|picker-trigger|bottom-sheet-trigger|hwid-countryDropDown|hwid-select|hwid-drop/i.test(cls)) {
                     return true;
                 }
                 if (tag === 'input' && el.readOnly && /select|choose|pick|country|gender|state|month|day|year|category/i.test(combined)) {
@@ -212,35 +234,110 @@ object AutomationScripts {
                     (text.length < 40 ? text : '')
                 ).toLowerCase();
 
-                if (type === 'file' || /upload|resume|document|avatar|attachment|file|cv/i.test(combined)) return 'fileName';
+                // 1. Password check
                 if (type === 'password' || ac === 'new-password' || ac === 'current-password' || /pass|pwd|secret/i.test(combined)) {
                     if (/confirm|repeat|retype|verify|match|again|pass.*2/i.test(combined)) return 'confirmPassword';
                     return 'password';
                 }
+
+                // 2. Phone input check: If editable input with phone placeholder or inside callingCodePhone container
+                if (tag === 'input' && !el.readOnly && el.type !== 'button' && el.type !== 'submit') {
+                    var parentPhoneCont = el.closest ? el.closest('.hwid-callingCodePhone-root, [class*="callingCode"], .iti, .PhoneInput, .react-tel-input, .phone-input') : null;
+                    if (type === 'tel' || /phone|mobile|cell|telephone|whatsapp|contact.*num/i.test(placeholder + ' ' + name + ' ' + id) || parentPhoneCont) {
+                        return 'phoneNumber';
+                    }
+                }
+
+                // 3. Country code trigger
                 if (isCountryCodeElement(el, combined)) return 'countryCode';
+
+                // 4. File upload
+                if (type === 'file' || /upload|resume|document|avatar|attachment|file|cv/i.test(combined)) return 'fileName';
+
+                // 5. Email & Username
                 if (type === 'email' || ac === 'email' || /email|e-mail|mail/i.test(combined)) return 'email';
                 if (ac === 'username' || /user|username|login|handle|nick|account/i.test(combined)) return 'username';
-                if (type === 'tel' || ac.indexOf('tel') === 0 || /phone|mobile|cell|telephone|whatsapp|contact.*num/i.test(combined)) return 'phoneNumber';
 
-                // Split DOB vs full DOB detection
-                if (ac === 'bday-day' || /^(day|dd|birth_day|dob_day|bday_day|birthday_day)$/i.test(name) || /^(day|dd|birth_day|dob_day)$/i.test(id) || /\b(birth.*day|dob.*day|select.*day|^day$|^dd$)\b/i.test(placeholder + ' ' + ariaLabel + ' ' + labelTxt)) {
+                // 6. Comprehensive Date of Birth detection (Day, Month, Year, and full DOB)
+                // Covers native inputs/selects, Google split inputs, and custom segmented pickers like Huawei ID (28 ▼, 10 ▼, 2006 ▼)
+                var fieldSpecificHint = (name + ' ' + id + ' ' + placeholder + ' ' + ariaLabel + ' ' + (text.length < 25 ? text : '') + ' ' + (el.className || '')).toLowerCase();
+                var dobContainer = el.closest ? el.closest('[class*="birth"], [class*="dob"], [class*="bday"], [class*="date-root"], [class*="date-wrapper"], .hwid-register-inputsContainer, .form-group, .field, .input-group, div') : null;
+                var dobContextText = '';
+                if (dobContainer) {
+                    var rawCTxt = (dobContainer.innerText || dobContainer.textContent || '').trim();
+                    if (rawCTxt.length < 250) dobContextText = rawCTxt.toLowerCase();
+                }
+                var isDobContext = /date\s*of\s*birth|birth\s*date|birthday|\bdob\b|hwid.*birth|hwid.*date/i.test(dobContextText + ' ' + combined);
+
+                if (ac === 'bday-day' || /^(day|dd|birth_day|dob_day|bday_day|birthday_day|date_day)$/i.test(name) || /^(day|dd|birth_day|dob_day|bday-day)$/i.test(id) || /\b(birth.*day|dob.*day|select.*day|^day$|^dd$)\b/i.test(fieldSpecificHint) || (isDobContext && /\b(day|dd)\b/i.test(fieldSpecificHint) && !/today|everyday/i.test(fieldSpecificHint))) {
                     return 'dobDay';
                 }
-                if (ac === 'bday-month' || /^(month|mm|birth_month|dob_month|bday_month|birthday_month)$/i.test(name) || /^(month|mm|birth_month|dob_month)$/i.test(id) || /\b(birth.*month|dob.*month|select.*month|^month$|^mm$)\b/i.test(placeholder + ' ' + ariaLabel + ' ' + labelTxt)) {
+                if (ac === 'bday-month' || /^(month|mm|birth_month|dob_month|bday_month|birthday_month|date_month)$/i.test(name) || /^(month|mm|birth_month|dob_month|bday-month)$/i.test(id) || /\b(birth.*month|dob.*month|select.*month|^month$|^mm$)\b/i.test(fieldSpecificHint) || (isDobContext && /\b(month|mm)\b/i.test(fieldSpecificHint))) {
                     return 'dobMonth';
                 }
-                if (ac === 'bday-year' || /^(year|yyyy|yy|birth_year|dob_year|bday_year|birthday_year)$/i.test(name) || /^(year|yyyy|birth_year|dob_year)$/i.test(id) || /\b(birth.*year|dob.*year|select.*year|^year$|^yyyy$)\b/i.test(placeholder + ' ' + ariaLabel + ' ' + labelTxt)) {
+                if (ac === 'bday-year' || /^(year|yyyy|yy|birth_year|dob_year|bday_year|birthday_year|date_year)$/i.test(name) || /^(year|yyyy|birth_year|dob_year|bday-year)$/i.test(id) || /\b(birth.*year|dob.*year|select.*year|^year$|^yyyy$)\b/i.test(fieldSpecificHint) || (isDobContext && /\b(year|yyyy|yr)\b/i.test(fieldSpecificHint))) {
                     return 'dobYear';
                 }
-                if (tag === 'select') {
+
+                if (isDobContext) {
+                    var cleanNumericText = text.replace(/[^0-9]/g, '').trim();
+                    if (/^(19\d\d|20\d\d)$/.test(cleanNumericText)) return 'dobYear';
+                    if (/^(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)$/i.test(text)) return 'dobMonth';
+
+                    // Check segmented position among sibling triggers in the DOB container
+                    if (dobContainer) {
+                        var allTriggers = dobContainer.querySelectorAll('[class*="select"], [class*="drop"], [class*="picker"], [class*="item"], [class*="box"], button, [role="combobox"], [role="button"], [role="spinbutton"], input, select');
+                        var leafTriggers = [];
+                        for (var lt = 0; lt < allTriggers.length; lt++) {
+                            var sibT = allTriggers[lt];
+                            if (sibT.querySelector && sibT.querySelector('button, [class*="select"], [class*="drop"], input, select')) continue;
+                            if (leafTriggers.indexOf(sibT) < 0 && (sibT === el || sibT.getBoundingClientRect().width > 10)) {
+                                leafTriggers.push(sibT);
+                            }
+                        }
+                        if (leafTriggers.length >= 3) {
+                            var myIndex = leafTriggers.indexOf(el);
+                            if (myIndex < 0) {
+                                for (var k = 0; k < leafTriggers.length; k++) {
+                                    if (leafTriggers[k].contains(el)) { myIndex = k; break; }
+                                }
+                            }
+                            if (myIndex >= 0) {
+                                var lastIsYear = leafTriggers.some(function(t, idx) { return idx === 2 && /19\d\d|20\d\d|year/i.test(t.innerText || ''); });
+                                var firstIsYear = leafTriggers.some(function(t, idx) { return idx === 0 && /19\d\d|20\d\d|year/i.test(t.innerText || ''); });
+                                if (lastIsYear || (!firstIsYear && (myIndex === 0 || myIndex === 1 || myIndex === 2))) {
+                                    if (myIndex === 0) return 'dobDay';
+                                    if (myIndex === 1) return 'dobMonth';
+                                    if (myIndex === 2) return 'dobYear';
+                                } else if (firstIsYear) {
+                                    if (myIndex === 0) return 'dobYear';
+                                    if (myIndex === 1) return 'dobMonth';
+                                    if (myIndex === 2) return 'dobDay';
+                                }
+                            }
+                        }
+                    }
+
+                    var asNum = parseInt(cleanNumericText, 10);
+                    if (!isNaN(asNum)) {
+                        if (asNum > 31 && asNum >= 1900 && asNum <= 2099) return 'dobYear';
+                        if (asNum > 12 && asNum <= 31) return 'dobDay';
+                    }
+                    if (tag === 'input' && (type === 'date' || type === 'text')) return 'dob';
+                    return 'dob';
+                }
+
+                if (tag === 'select' || el.getAttribute('role') === 'combobox' || el.getAttribute('role') === 'listbox') {
                     var optsTxt = (el.innerText || '').toLowerCase();
                     if (/january|february|march|april|\bjan\b|\bfeb\b|\bmar\b|\bapr\b/i.test(optsTxt)) return 'dobMonth';
                     if (/\b1990\b|\b1995\b|\b2000\b|\b2005\b/.test(optsTxt)) return 'dobYear';
-                    if (/\b1\b[\s\S]*\b15\b[\s\S]*\b28\b/.test(optsTxt) && el.options && el.options.length >= 28 && el.options.length <= 33) return 'dobDay';
+                    if (/\b1\b[\s\S]*\b15\b[\s\S]*\b28\b/.test(optsTxt) && (!el.options || (el.options.length >= 28 && el.options.length <= 33))) return 'dobDay';
                 }
                 if (type === 'date' || type === 'datetime-local' || type === 'month' || ac.indexOf('bday') === 0 || el.hasAttribute('data-datepicker') || /birth|dob|bday|date.*of.*birth|mm\/dd\/yyyy|dd\/mm\/yyyy|yyyy-mm-dd/i.test(combined)) {
                     return 'dob';
                 }
+
+                if (type === 'tel' || ac.indexOf('tel') === 0 || /phone|mobile|cell|telephone|whatsapp|contact.*num/i.test(combined)) return 'phoneNumber';
 
                 if (ac === 'sex' || /gender|sex/i.test(combined)) return 'gender';
                 if (ac === 'given-name' || /first.*name|fname|given.*name|forename/i.test(combined)) return 'firstName';
@@ -319,7 +416,7 @@ object AutomationScripts {
                 }
 
                 return linkedInput ||
-                    (rawTarget.closest ? rawTarget.closest('input, textarea, select, button, a, .iti__selected-flag, .PhoneInputCountry, [data-dial-code], [data-country-code], [data-datepicker], .MuiSelect-select, .ant-select-selector, .react-select__control, [role="button"], [role="checkbox"], [role="switch"], [role="radio"], [role="combobox"], [role="listbox"], [aria-haspopup], [contenteditable="true"], label') : null) ||
+                    (rawTarget.closest ? rawTarget.closest('input, textarea, select, button, a, [class*="callingCode"], [class*="calling-code"], [class*="countryDropDown"], [class*="country-code"], [class*="countryCode"], [class*="dial-code"], [class*="dialCode"], [class*="birth"], [class*="dob"], [class*="birthday"], [class*="bday"], [class*="date-root"], [class*="date-picker"], [class*="datepicker"], [class*="hwid-"], .iti__selected-flag, .iti__selected-country, .iti__flag-container, .PhoneInputCountry, .selected-flag, .flag-dropdown, #countryList, [data-dial-code], [data-country-code], [data-datepicker], .MuiSelect-select, .ant-select-selector, .react-select__control, [role="button"], [role="checkbox"], [role="switch"], [role="radio"], [role="combobox"], [role="listbox"], [role="spinbutton"], [aria-haspopup], [contenteditable="true"], label') : null) ||
                     rawTarget;
             }
 
@@ -624,31 +721,55 @@ object AutomationScripts {
 
             function isCountryCodeTrigger(el, combined) {
                 if (!el) return false;
+                var tag = (el.tagName || '').toLowerCase();
+                // CRITICAL: An editable text/tel input is the PHONE NUMBER field, never a country code trigger!
+                if (tag === 'input' && !el.readOnly && el.type !== 'button' && el.type !== 'submit') return false;
                 var cls = (el.className && typeof el.className === 'string') ? el.className : '';
-                if (/iti__selected-flag|iti__flag-container|PhoneInputCountry|flag-dropdown|country-code|dial-code/i.test(cls)) return true;
+                if (/callingCode|calling-code|countryDropDown|country-code|countryCode|dial-code|dialCode|phone-country|phoneprefix|iti__|PhoneInputCountry|selected-flag|flag-dropdown/i.test(cls)) return true;
                 if (el.hasAttribute('data-dial-code') || el.hasAttribute('data-country-code')) return true;
-                if (/country.*code|dial.*code|calling.*code|phone.*prefix|phone.*code|iti__selected-flag/i.test(combined)) return true;
+                var idAndName = ((el.id || '') + ' ' + (el.name || '')).toLowerCase();
+                if (/countrylist|country_code|country-code|countrycode|dialcode|dial_code|phone_country|calling_code|callingcode|phoneprefix/i.test(idAndName)) return true;
+                if (/country.*code|dial.*code|calling.*code|phone.*prefix|phone.*code|phone.*country|iti__selected-flag/i.test(combined)) return true;
                 var txt = (el.innerText || el.textContent || el.value || '').trim();
-                if (txt.length <= 14 && /^\s*([^\w\s]{1,4}\s*)?\+\d{1,4}(\s|$)/.test(txt)) return true;
+                // Match e.g. +213(Algeria), +1, +44, etc.
+                if (txt.length <= 25 && /^\s*([^\w\s]{1,4}\s*)?([a-zA-Z]{2}\s*)?\+\d{1,4}/.test(txt)) return true;
+                var tag = (el.tagName || '').toLowerCase();
+                if (tag === 'select' && el.options && el.options.length > 3) {
+                    var sampleOpts = '';
+                    for (var i = 0; i < Math.min(el.options.length, 8); i++) {
+                        sampleOpts += ' ' + (el.options[i].text || '') + ' ' + (el.options[i].value || '');
+                    }
+                    if ((sampleOpts.match(/\+\d{1,4}\b/g) || []).length >= 2) return true;
+                }
+                var role = (el.getAttribute('role') || '').toLowerCase();
+                if ((tag === 'select' || tag === 'button' || role === 'combobox' || role === 'button' || tag === 'div' || tag === 'span') && tag !== 'input') {
+                    var phoneGroup = el.closest ? el.closest('.hwid-callingCodePhone-root, [class*="callingCode"], .iti, .PhoneInput, .react-tel-input, .phone-input, .input-group, .field, .form-group, div') : null;
+                    if (phoneGroup && phoneGroup !== document.body) {
+                        var telInp = phoneGroup.querySelector('input');
+                        if (telInp && telInp !== el && phoneGroup.getBoundingClientRect().height < 120) {
+                            if (!/submit|next|continue|send|verify|code|otp/i.test(txt)) return true;
+                        }
+                    }
+                }
                 return false;
             }
 
             function isCustomDropdownTrigger(el, tag, combined) {
                 if (tag === 'select') return true;
                 var role = (el.getAttribute('role') || '').toLowerCase();
-                if (role === 'combobox' || role === 'listbox') return true;
+                if (role === 'combobox' || role === 'listbox' || role === 'spinbutton') return true;
                 var hasPopup = (el.getAttribute('aria-haspopup') || '').toLowerCase();
                 if (hasPopup === 'listbox' || hasPopup === 'dialog' || hasPopup === 'menu' || hasPopup === 'true') return true;
                 if (el.hasAttribute('aria-expanded')) return true;
                 var cls = (el.className && typeof el.className === 'string') ? el.className : '';
-                if (/MuiSelect-select|ant-select-selector|react-select__control|v-select|el-select|select-trigger|dropdown-toggle|custom-select|picker-trigger|bottom-sheet-trigger/i.test(cls)) {
+                if (/MuiSelect-select|ant-select-selector|react-select__control|v-select|el-select|select-trigger|dropdown-toggle|custom-select|picker-trigger|bottom-sheet-trigger|hwid-countryDropDown|hwid-select|hwid-drop/i.test(cls)) {
                     return true;
                 }
                 if (tag === 'input' && el.readOnly && /select|choose|pick|country|gender|state|month|day|year|category/i.test(combined)) {
                     return true;
                 }
                 var txt = (el.innerText || el.textContent || el.placeholder || '').trim();
-                if ((tag === 'button' || role === 'button' || tag === 'div') &&
+                if ((tag === 'button' || role === 'button' || tag === 'div' || tag === 'span') &&
                     (/^(select|choose|pick)\b/i.test(txt) || /\b(gender|sex|country|state|province|month|day|year)\b/i.test(combined)) &&
                     !/submit|sign.*up|register|login|log.*in|continue|next/i.test(txt)) {
                     return true;
@@ -679,6 +800,7 @@ object AutomationScripts {
                 var ac = (el.autocomplete || '').toLowerCase();
                 var inputMode = (el.getAttribute('inputmode') || '').toLowerCase();
                 var combined = (name + ' ' + id + ' ' + placeholder + ' ' + text + ' ' + ariaLabel + ' ' + labelText + ' ' + ac).toLowerCase();
+                var fieldHint = (name + ' ' + id + ' ' + placeholder + ' ' + ariaLabel + ' ' + (text.length < 25 ? text : '') + ' ' + (el.className || '')).toLowerCase();
                 var isDropTrigger = isCustomDropdownTrigger(el, tag, combined);
 
                 if (type === 'file' || (tag === 'input' && /upload|resume|document|avatar|attachment|file|cv/i.test(combined))) {
@@ -690,6 +812,15 @@ object AutomationScripts {
                     }
                     return 'PASSWORD';
                 }
+
+                // 2. Phone input check: If editable input with phone placeholder or inside callingCodePhone container
+                if (tag === 'input' && !el.readOnly && el.type !== 'button' && el.type !== 'submit') {
+                    var parentPhoneCont = el.closest ? el.closest('.hwid-callingCodePhone-root, [class*="callingCode"], .iti, .PhoneInput, .react-tel-input, .phone-input') : null;
+                    if (type === 'tel' || /phone|mobile|cell|telephone|whatsapp|contact.*num/i.test(placeholder + ' ' + name + ' ' + id) || parentPhoneCont) {
+                        return 'PHONE';
+                    }
+                }
+
                 if (isCountryCodeTrigger(el, combined)) {
                     return 'COUNTRY_CODE';
                 }
@@ -699,32 +830,89 @@ object AutomationScripts {
                 if (ac === 'username' || ((tag === 'input' || tag === 'textarea') && /user|username|login|handle|nick|account|identifier/i.test(combined))) {
                     return 'USERNAME';
                 }
-                if (type === 'tel' || ac.indexOf('tel') === 0 || inputMode === 'tel' || ((tag === 'input') && /phone|mobile|cell|telephone|contact.*num|whatsapp/i.test(combined))) {
-                    return 'PHONE';
+
+                // IMPORTANT: Classify Split DOB (Day, Month, Year) and Full DOB BEFORE PHONE (type="tel"),
+                // because Google, Yahoo, and mobile forms use <input type="tel" id="day"|"year"> for birthday parts!
+                var dobContainer = el.closest ? el.closest('[class*="birth"], [class*="dob"], [class*="bday"], [class*="date-root"], [class*="date-wrapper"], .hwid-register-inputsContainer, .form-group, .field, .input-group, div') : null;
+                var dobContextText = '';
+                if (dobContainer) {
+                    var rawCTxt = (dobContainer.innerText || dobContainer.textContent || '').trim();
+                    if (rawCTxt.length < 250) dobContextText = rawCTxt.toLowerCase();
+                }
+                var isDobContext = /date\s*of\s*birth|birth\s*date|birthday|\bdob\b|hwid.*birth|hwid.*date/i.test(dobContextText + ' ' + combined);
+
+                if (ac === 'bday-day' || /^(day|dd|birth_day|dob_day|bday_day|birthday_day|date_day)$/i.test(name) || /^(day|dd|birth_day|dob_day|bday-day)$/i.test(id) || /\b(birth.*day|dob.*day|select.*day|^day$|^dd$)\b/i.test(fieldHint) || (isDobContext && /\b(day|dd)\b/i.test(fieldHint) && !/today|everyday/i.test(fieldHint))) return 'DOB_DAY';
+                if (ac === 'bday-month' || /^(month|mm|birth_month|dob_month|bday_month|birthday_month|date_month)$/i.test(name) || /^(month|mm|birth_month|dob_month|bday-month)$/i.test(id) || /\b(birth.*month|dob.*month|select.*month|^month$|^mm$)\b/i.test(fieldHint) || (isDobContext && /\b(month|mm)\b/i.test(fieldHint))) return 'DOB_MONTH';
+                if (ac === 'bday-year' || /^(year|yyyy|yy|birth_year|dob_year|bday_year|birthday_year|date_year)$/i.test(name) || /^(year|yyyy|birth_year|dob_year|bday-year)$/i.test(id) || /\b(birth.*year|dob.*year|select.*year|^year$|^yyyy$)\b/i.test(fieldHint) || (isDobContext && /\b(year|yyyy|yr)\b/i.test(fieldHint))) return 'DOB_YEAR';
+
+                if (isDobContext) {
+                    var cleanNumericText = text.replace(/[^0-9]/g, '').trim();
+                    if (/^(19\d\d|20\d\d)$/.test(cleanNumericText)) return 'DOB_YEAR';
+                    if (/^(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)$/i.test(text)) return 'DOB_MONTH';
+
+                    if (dobContainer) {
+                        var allTriggers = dobContainer.querySelectorAll('[class*="select"], [class*="drop"], [class*="picker"], [class*="item"], [class*="box"], button, [role="combobox"], [role="button"], [role="spinbutton"], input, select');
+                        var leafTriggers = [];
+                        for (var lt = 0; lt < allTriggers.length; lt++) {
+                            var sibT = allTriggers[lt];
+                            if (sibT.querySelector && sibT.querySelector('button, [class*="select"], [class*="drop"], input, select')) continue;
+                            if (leafTriggers.indexOf(sibT) < 0 && (sibT === el || sibT.getBoundingClientRect().width > 10)) {
+                                leafTriggers.push(sibT);
+                            }
+                        }
+                        if (leafTriggers.length >= 3) {
+                            var myIndex = leafTriggers.indexOf(el);
+                            if (myIndex < 0) {
+                                for (var k = 0; k < leafTriggers.length; k++) {
+                                    if (leafTriggers[k].contains(el)) { myIndex = k; break; }
+                                }
+                            }
+                            if (myIndex >= 0) {
+                                var lastIsYear = leafTriggers.some(function(t, idx) { return idx === 2 && /19\d\d|20\d\d|year/i.test(t.innerText || ''); });
+                                var firstIsYear = leafTriggers.some(function(t, idx) { return idx === 0 && /19\d\d|20\d\d|year/i.test(t.innerText || ''); });
+                                if (lastIsYear || (!firstIsYear && (myIndex === 0 || myIndex === 1 || myIndex === 2))) {
+                                    if (myIndex === 0) return 'DOB_DAY';
+                                    if (myIndex === 1) return 'DOB_MONTH';
+                                    if (myIndex === 2) return 'DOB_YEAR';
+                                } else if (firstIsYear) {
+                                    if (myIndex === 0) return 'DOB_YEAR';
+                                    if (myIndex === 1) return 'DOB_MONTH';
+                                    if (myIndex === 2) return 'DOB_DAY';
+                                }
+                            }
+                        }
+                    }
+
+                    var asNum = parseInt(cleanNumericText, 10);
+                    if (!isNaN(asNum)) {
+                        if (asNum > 31 && asNum >= 1900 && asNum <= 2099) return 'DOB_YEAR';
+                        if (asNum > 12 && asNum <= 31) return 'DOB_DAY';
+                    }
+                    if (tag === 'input' && (type === 'date' || type === 'text')) return 'DOB';
+                    return 'DOB';
                 }
 
-                // Split DOB fields (Day, Month, Year) & Full DOB
-                if (ac === 'bday-day' || /^(day|dd|birth_day|dob_day|bday_day|birthday_day)$/i.test(name) || /^(day|dd|birth_day|dob_day)$/i.test(id)) return 'DOB_DAY';
-                if (ac === 'bday-month' || /^(month|mm|birth_month|dob_month|bday_month|birthday_month)$/i.test(name) || /^(month|mm|birth_month|dob_month)$/i.test(id)) return 'DOB_MONTH';
-                if (ac === 'bday-year' || /^(year|yyyy|yy|birth_year|dob_year|bday_year|birthday_year)$/i.test(name) || /^(year|yyyy|birth_year|dob_year)$/i.test(id)) return 'DOB_YEAR';
-
-                if (tag === 'select') {
+                if (tag === 'select' || isDropTrigger) {
                     var optsBlob = (el.innerText || '').toLowerCase();
                     if (/january|february|march|april|\bjan\b|\bfeb\b|\bmar\b|\bapr\b/i.test(optsBlob)) return 'DOB_MONTH';
                     if (/\b1990\b|\b1995\b|\b2000\b|\b2005\b/.test(optsBlob)) return 'DOB_YEAR';
-                    if (/\b1\b[\s\S]*\b15\b[\s\S]*\b28\b/.test(optsBlob) && el.options && el.options.length >= 28 && el.options.length <= 33) return 'DOB_DAY';
+                    if (/\b1\b[\s\S]*\b15\b[\s\S]*\b28\b/.test(optsBlob) && (!el.options || (el.options.length >= 28 && el.options.length <= 33))) return 'DOB_DAY';
                 }
 
                 if (type === 'date' || type === 'datetime-local' || type === 'month' || ac.indexOf('bday') === 0 || /birth|dob|bday|date.*of.*birth|mm\/dd\/yyyy|dd\/mm\/yyyy|yyyy-mm-dd/i.test(combined) || el.hasAttribute('data-datepicker')) {
-                    if (ac === 'bday-day' || /\b(day|dd)\b/i.test(name + ' ' + id + ' ' + placeholder + ' ' + ariaLabel)) return 'DOB_DAY';
-                    if (ac === 'bday-month' || /\b(month|mm)\b/i.test(name + ' ' + id + ' ' + placeholder + ' ' + ariaLabel)) return 'DOB_MONTH';
-                    if (ac === 'bday-year' || /\b(year|yyyy)\b/i.test(name + ' ' + id + ' ' + placeholder + ' ' + ariaLabel)) return 'DOB_YEAR';
+                    if (ac === 'bday-day' || /\b(day|dd)\b/i.test(fieldHint)) return 'DOB_DAY';
+                    if (ac === 'bday-month' || /\b(month|mm)\b/i.test(fieldHint)) return 'DOB_MONTH';
+                    if (ac === 'bday-year' || /\b(year|yyyy|yr)\b/i.test(fieldHint)) return 'DOB_YEAR';
                     return 'DOB';
                 }
                 if (isDropTrigger) {
-                    if (/\b(day|dd)\b/i.test(name + ' ' + id + ' ' + placeholder + ' ' + text + ' ' + ariaLabel)) return 'DOB_DAY';
-                    if (/\b(month|mm)\b/i.test(name + ' ' + id + ' ' + placeholder + ' ' + text + ' ' + ariaLabel)) return 'DOB_MONTH';
-                    if (/\b(year|yyyy)\b/i.test(name + ' ' + id + ' ' + placeholder + ' ' + text + ' ' + ariaLabel)) return 'DOB_YEAR';
+                    if (/\b(day|dd)\b/i.test(fieldHint)) return 'DOB_DAY';
+                    if (/\b(month|mm)\b/i.test(fieldHint)) return 'DOB_MONTH';
+                    if (/\b(year|yyyy|yr)\b/i.test(fieldHint)) return 'DOB_YEAR';
+                }
+
+                if (type === 'tel' || ac.indexOf('tel') === 0 || inputMode === 'tel' || ((tag === 'input') && /phone|mobile|cell|telephone|contact.*num|whatsapp/i.test(combined))) {
+                    return 'PHONE';
                 }
 
                 if (ac === 'sex' || /gender|sex/i.test(combined) ||
@@ -769,7 +957,7 @@ object AutomationScripts {
             }
 
             // Deep collector across main document, open Shadow DOMs, and accessible same-origin iframes
-            var candidateQuery = 'input, textarea, select, button, [role="button"], [role="combobox"], [role="listbox"], [role="checkbox"], [role="switch"], [role="radio"], [aria-haspopup="listbox"], [aria-haspopup="dialog"], [aria-haspopup="menu"], [aria-expanded], [contenteditable="true"], .iti__selected-flag, .iti__flag-container, .PhoneInputCountry, .flag-dropdown, [data-dial-code], [data-country-code], [data-datepicker], .MuiSelect-select, .ant-select-selector, .react-select__control, .dropzone';
+            var candidateQuery = 'input, textarea, select, button, [role="button"], [role="combobox"], [role="listbox"], [role="spinbutton"], [role="checkbox"], [role="switch"], [role="radio"], [aria-haspopup="listbox"], [aria-haspopup="dialog"], [aria-haspopup="menu"], [aria-expanded], [contenteditable="true"], [class*="callingCode"], [class*="calling-code"], [class*="countryDropDown"], [class*="countryCode"], [class*="country-code"], [class*="dialCode"], [class*="dial-code"], [class*="birth"], [class*="dob"], [class*="birthday"], [class*="date-root"], [class*="date-picker"], [class*="datepicker"], [class*="hwid-"], [class*="select-trigger"], [class*="dropdown-trigger"], [class*="picker-trigger"], .iti__selected-flag, .iti__selected-country, .iti__flag-container, .PhoneInputCountry, .PhoneInputCountrySelect, .selected-flag, .flag-dropdown, #countryList, [data-dial-code], [data-country-code], [data-datepicker], .MuiSelect-select, .ant-select-selector, .react-select__control, .dropzone';
 
             function collectDeepElements(root, outList) {
                 if (!root) return;
@@ -815,13 +1003,14 @@ object AutomationScripts {
 
                 var style = window.getComputedStyle(el);
                 var rect = el.getBoundingClientRect();
-                var isCustomCheckOrFile = (type === 'checkbox' || type === 'radio' || type === 'file' || el.classList.contains('PhoneInputCountrySelect'));
+                var isCustomCheckOrFileOrSelect = (type === 'checkbox' || type === 'radio' || type === 'file' || tag === 'select' || el.classList.contains('PhoneInputCountrySelect'));
 
                 if (!allowHiddenStepFields) {
-                    if (!isCustomCheckOrFile) {
+                    if (!isCustomCheckOrFileOrSelect) {
                         if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return;
                         if (rect.width < 4 || rect.height < 4) return;
                     } else {
+                        if (style.display === 'none' || style.visibility === 'hidden') return;
                         var parentRect = el.parentElement ? el.parentElement.getBoundingClientRect() : rect;
                         if (rect.width < 1 && parentRect.width < 4) return;
                     }
@@ -940,6 +1129,41 @@ object AutomationScripts {
             elements.forEach(function(el) {
                 processCandidate(el, false);
             });
+
+            // Dedicated pass for custom segmented Date of Birth containers (e.g. Huawei ID 28 ▼, 10 ▼, 2006 ▼)
+            var dobRoots = document.querySelectorAll('[class*="birth"], [class*="dob"], [class*="bday"], [class*="date-root"], [class*="date-wrapper"], .hwid-register-inputsContainer, .form-group, .field, .input-group, div');
+            for (var dr = 0; dr < dobRoots.length; dr++) {
+                var dobRoot = dobRoots[dr];
+                var rootTxt = (dobRoot.innerText || dobRoot.textContent || '').trim();
+                if (!/date\s*of\s*birth|birth\s*date|birthday|\bdob\b/i.test(rootTxt)) continue;
+                if (rootTxt.length > 250) continue;
+                var dobTriggers = dobRoot.querySelectorAll('[class*="select"], [class*="drop"], [class*="picker"], [class*="item"], [class*="box"], button, [role="combobox"], [role="button"], [role="spinbutton"], div, span');
+                var leafDob = [];
+                for (var dt = 0; dt < dobTriggers.length; dt++) {
+                    var candTr = dobTriggers[dt];
+                    if (candTr.querySelector && candTr.querySelector('button, [class*="select"], [class*="drop"], [class*="picker"]')) continue;
+                    var r = candTr.getBoundingClientRect();
+                    if (r.width < 10 || r.height < 10) continue;
+                    var tTxt = (candTr.innerText || candTr.textContent || '').trim();
+                    if (/date\s*of\s*birth|birthday/i.test(tTxt)) continue;
+                    leafDob.push(candTr);
+                }
+                if (leafDob.length >= 3) {
+                    for (var ld = 0; ld < leafDob.length; ld++) {
+                        processCandidate(leafDob[ld], false);
+                    }
+                }
+            }
+
+            // Dedicated pass for Phone / Calling Code containers (e.g. .hwid-callingCodePhone-root, .iti)
+            var phoneContainers = document.querySelectorAll('.hwid-callingCodePhone-root, [class*="callingCode"], [class*="calling-code"], .iti, .PhoneInput, .react-tel-input, .phone-input');
+            for (var pc = 0; pc < phoneContainers.length; pc++) {
+                var pCont = phoneContainers[pc];
+                var phoneInp = pCont.querySelector('input');
+                if (phoneInp) processCandidate(phoneInp, false);
+                var codeTrig = pCont.querySelector('[class*="callingCode"], [class*="selected-flag"], [class*="flag"], [class*="country"], button, [role="button"], [role="combobox"], div, span');
+                if (codeTrig && codeTrig !== phoneInp) processCandidate(codeTrig, false);
+            }
 
             // Pass 2: Multi-step wizard / delayed reveal fallback if fewer than 2 inputs were visible
             var foundInputCount = rawItems.filter(function(item) { return item.isInput; }).length;
@@ -1242,12 +1466,15 @@ object AutomationScripts {
                 // 3. Local dropdown menu inside trigger's parent/container
                 if (triggerEl) {
                     var localContainer = triggerEl.closest
-                        ? triggerEl.closest('.dropdown, .select, .custom-select, .iti, .phone-input, .form-group, .field, .input-group, .MuiFormControl-root, .ant-select')
+                        ? triggerEl.closest('#month, #countryList, .dropdown, .select, .custom-select, .iti, .react-tel-input, .PhoneInput, .phone-input, .form-group, .field, .input-group, .MuiFormControl-root, .ant-select, [role="combobox"], [role="listbox"]')
                         : triggerEl.parentElement;
                     if (localContainer) {
-                        var localMenus = localContainer.querySelectorAll('ul, [role="listbox"], .dropdown-menu, .dropdown-content, .options, .select-options, .select-items, .menu, .country-list');
+                        var localMenus = localContainer.querySelectorAll('ul, [role="listbox"], [role="menu"], .dropdown-menu, .dropdown-content, .options, .select-options, .select-items, .menu, .country-list, .iti__country-list');
                         for (var lm = 0; lm < localMenus.length; lm++) {
                             addOverlay(localMenus[lm]);
+                        }
+                        if (localContainer.querySelectorAll('[role="option"], [data-value], [data-dial-code], .iti__country, .country').length > 0) {
+                            addOverlay(localContainer);
                         }
                     }
                 }
@@ -1276,7 +1503,7 @@ object AutomationScripts {
             function isPlaceholderOrCloseText(txt) {
                 var clean = (txt || '').trim().toLowerCase();
                 if (!clean) return true;
-                if (/^(select|choose|pick|--|---|none|null|cancel|close|dismiss|back|clear|reset|×|✕)$/i.test(clean)) return true;
+                if (/^(select|choose|pick|--|---|none|null|cancel|close|dismiss|back|clear|reset|month|day|year|dd|mm|yyyy|×|✕)$/i.test(clean)) return true;
                 if (/^(select|choose|pick)\s+(a|an|your|the|option|country|gender|date|month|day|year|state|city)/i.test(clean)) return true;
                 return false;
             }
@@ -1292,7 +1519,7 @@ object AutomationScripts {
                     optionList.push(node);
                 }
 
-                var itemQuery = '[role="option"], [role="menuitem"], [role="menuitemradio"], [data-value], [data-val], [data-option], [data-code], [data-dial-code], [data-country-code], li, .dropdown-item, .select-option, .option, .item, .list-item, .menu-item, .sheet-item, .picker-item, .wheel-item, .MuiMenuItem-root, .MuiAutocomplete-option, .ant-select-item-option, .adm-picker-column-item, .el-select-dropdown__item, .iti__country, .country-item, .react-select__option';
+                var itemQuery = '[role="option"], [role="menuitem"], [role="menuitemradio"], [data-value], [data-val], [data-option], [data-code], [data-dial-code], [data-country-code], li, .dropdown-item, .select-option, .option, .item, .list-item, .menu-item, .sheet-item, .picker-item, .wheel-item, .MuiMenuItem-root, .MuiAutocomplete-option, .ant-select-item-option, .adm-picker-column-item, .el-select-dropdown__item, .iti__country, .country, .country-item, .react-select__option';
 
                 for (var i = 0; i < overlays.length; i++) {
                     var ov = overlays[i];
@@ -1353,19 +1580,42 @@ object AutomationScripts {
             }
 
             var MONTH_TABLE = [
-                { num: 1, pad: '01', str: '1', full: 'january', short: 'jan' },
-                { num: 2, pad: '02', str: '2', full: 'february', short: 'feb' },
-                { num: 3, pad: '03', str: '3', full: 'march', short: 'mar' },
-                { num: 4, pad: '04', str: '4', full: 'april', short: 'apr' },
-                { num: 5, pad: '05', str: '5', full: 'may', short: 'may' },
-                { num: 6, pad: '06', str: '6', full: 'june', short: 'jun' },
-                { num: 7, pad: '07', str: '7', full: 'july', short: 'jul' },
-                { num: 8, pad: '08', str: '8', full: 'august', short: 'aug' },
-                { num: 9, pad: '09', str: '9', full: 'september', short: 'sep' },
-                { num: 10, pad: '10', str: '10', full: 'october', short: 'oct' },
-                { num: 11, pad: '11', str: '11', full: 'november', short: 'nov' },
-                { num: 12, pad: '12', str: '12', full: 'december', short: 'dec' }
+                { num: 1, zeroIdx: '0', pad: '01', str: '1', full: 'january', short: 'jan' },
+                { num: 2, zeroIdx: '1', pad: '02', str: '2', full: 'february', short: 'feb' },
+                { num: 3, zeroIdx: '2', pad: '03', str: '3', full: 'march', short: 'mar' },
+                { num: 4, zeroIdx: '3', pad: '04', str: '4', full: 'april', short: 'apr' },
+                { num: 5, zeroIdx: '4', pad: '05', str: '5', full: 'may', short: 'may' },
+                { num: 6, zeroIdx: '5', pad: '06', str: '6', full: 'june', short: 'jun' },
+                { num: 7, zeroIdx: '6', pad: '07', str: '7', full: 'july', short: 'jul' },
+                { num: 8, zeroIdx: '7', pad: '08', str: '8', full: 'august', short: 'aug' },
+                { num: 9, zeroIdx: '8', pad: '09', str: '9', full: 'september', short: 'sep' },
+                { num: 10, zeroIdx: '9', pad: '10', str: '10', full: 'october', short: 'oct' },
+                { num: 11, zeroIdx: '10', pad: '11', str: '11', full: 'november', short: 'nov' },
+                { num: 12, zeroIdx: '11', pad: '12', str: '12', full: 'december', short: 'dec' }
             ];
+
+            function detectMonthNumFromText(str) {
+                var s = (str || '').toLowerCase().trim();
+                if (!s) return -1;
+                for (var i = 0; i < MONTH_TABLE.length; i++) {
+                    var m = MONTH_TABLE[i];
+                    var re = new RegExp('(^|\\\\b)(' + m.full + '|' + m.short + ')(\\\\b|${'$'})', 'i');
+                    if (re.test(s)) return m.num;
+                }
+                return -1;
+            }
+
+            function resolveTargetMonthObject(rawTarget, hintStr) {
+                var t = (rawTarget || '').toLowerCase().trim();
+                var h = (hintStr || '').toLowerCase();
+                var isMonthField = /month|bday-month|dobmonth|mm/i.test(h);
+                for (var i = 0; i < MONTH_TABLE.length; i++) {
+                    var mo = MONTH_TABLE[i];
+                    if (t === mo.full || t === mo.short) return mo;
+                    if (isMonthField && (t === mo.pad || t === mo.str)) return mo;
+                }
+                return null;
+            }
 
             function buildTargetSynonyms(rawTarget, hintStr) {
                 var t = (rawTarget || '').toLowerCase().trim();
@@ -1410,11 +1660,31 @@ object AutomationScripts {
                 return list;
             }
 
-            function scoreOptionCandidate(optTextRaw, optValRaw, target, synonyms) {
+            function scoreOptionCandidate(optTextRaw, optValRaw, target, synonyms, hintStr) {
                 var optText = (optTextRaw || '').toLowerCase().trim();
                 var optVal = (optValRaw || '').toLowerCase().trim();
                 if (!optText && !optVal) return -1;
                 if (isPlaceholderOrCloseText(optText) && (!optVal || isPlaceholderOrCloseText(optVal))) return -1;
+
+                // 0-Indexed vs 1-Indexed Month Protection:
+                // If the option text contains an explicit month name (e.g., "January".."December")
+                // and our target resolves to a month (e.g., "05" / "May"), match strictly by month identity
+                // so `<option value="5">June</option>` on a 0-indexed select never matches target "05" (May).
+                var targetMonthObj = resolveTargetMonthObject(target, hintStr || '');
+                if (!targetMonthObj) {
+                    for (var sm = 0; sm < synonyms.length; sm++) {
+                        var mNum = detectMonthNumFromText(synonyms[sm]);
+                        if (mNum > 0) {
+                            targetMonthObj = MONTH_TABLE[mNum - 1];
+                            break;
+                        }
+                    }
+                }
+                var optTextMonthNum = detectMonthNumFromText(optText);
+                if (targetMonthObj && optTextMonthNum > 0) {
+                    if (optTextMonthNum === targetMonthObj.num) return 100;
+                    return -1;
+                }
 
                 if (target && (optText === target || optVal === target)) return 100;
 
@@ -1453,13 +1723,34 @@ object AutomationScripts {
                 var bestIdx = -1;
                 var bestScore = -1;
 
+                // Detect if this select is a 0-indexed numeric month select (options 0..11 with no month names)
+                var isZeroIndexedMonthSelect = false;
+                var targetMonth = resolveTargetMonthObject(target, hintStr);
+                if (targetMonth) {
+                    var hasZeroVal = false;
+                    var hasTwelveVal = false;
+                    var hasMonthNames = false;
+                    for (var c = 0; c < selectEl.options.length; c++) {
+                        var cv = (selectEl.options[c].value || '').trim();
+                        var ct = (selectEl.options[c].text || '').trim();
+                        if (cv === '0') hasZeroVal = true;
+                        if (cv === '12') hasTwelveVal = true;
+                        if (detectMonthNumFromText(ct) > 0) hasMonthNames = true;
+                    }
+                    if (hasZeroVal && !hasTwelveVal && !hasMonthNames) {
+                        isZeroIndexedMonthSelect = true;
+                    }
+                }
+
                 for (var i = 0; i < selectEl.options.length; i++) {
                     var opt = selectEl.options[i];
                     if (opt.disabled) continue;
                     var oText = (opt.text || opt.innerText || '').trim();
                     var oVal = (opt.value || '').trim();
                     if (i === 0 && (oVal === '' || isPlaceholderOrCloseText(oText))) continue;
-                    var sc = scoreOptionCandidate(oText, oVal, target, synonyms);
+                    var sc = isZeroIndexedMonthSelect && targetMonth && oVal === targetMonth.zeroIdx
+                        ? 100
+                        : scoreOptionCandidate(oText, oVal, target, synonyms, hintStr);
                     if (sc > bestScore) {
                         bestScore = sc;
                         bestIdx = i;
@@ -1691,8 +1982,9 @@ object AutomationScripts {
 
     /**
      * Multi-Phase Dropdown & Bottom-Sheet Picker Handler:
-     * - Supports native <select> (with smart synonyms for Months, Days, Years, Gender, States, Countries).
-     * - Supports custom ARIA/React/MUI/AntD/Radix/HeadlessUI dropdown menus.
+     * - Supports native <select> (with smart synonyms for Months, Days, Years, Gender, States, Countries, and 0-indexed vs 1-indexed month protection).
+     * - Supports numeric/tel <input> or [role="spinbutton"] for split Day/Month/Year birthday fields.
+     * - Supports custom ARIA/React/MUI/AntD/Radix/HeadlessUI/Google (#month) dropdown menus.
      * - Supports mobile slide-up Bottom Sheet pickers (Phase 1 opens the trigger and returns PENDING;
      *   Phase 2 searches/filters if needed, taps the matching option inside the sheet, and taps Confirm/Done if present).
      */
@@ -1707,7 +1999,7 @@ object AutomationScripts {
                 if (!el) return 'NOT_FOUND';
 
                 var target = '$escapedTarget'.toLowerCase().trim();
-                var hint = ('$escapedHint' + ' ' + (el.name || '') + ' ' + (el.id || '') + ' ' + (el.getAttribute('aria-label') || '')).toLowerCase();
+                var hint = ('$escapedHint' + ' ' + (el.name || '') + ' ' + (el.id || '') + ' ' + (el.getAttribute('aria-label') || '') + ' ' + (el.placeholder || '')).toLowerCase();
                 var synonyms = buildTargetSynonyms(target, hint);
                 var tag = el.tagName.toLowerCase();
 
@@ -1718,11 +2010,30 @@ object AutomationScripts {
                     return 'SUCCESS:NATIVE_SELECT';
                 }
 
-                // 2. Plain text/number <input> that is NOT a custom dropdown/bottom-sheet trigger (e.g. numeric Day/Month/Year input)
+                // 2. Plain text/number/tel <input> or [role="spinbutton"] that is NOT a custom dropdown/bottom-sheet trigger (e.g. Google/Yahoo split Day/Month/Year input)
                 var hasPopupAttr = (el.getAttribute('aria-haspopup') || '').toLowerCase();
                 var roleAttr = (el.getAttribute('role') || '').toLowerCase();
-                if (tag === 'input' && !el.readOnly && roleAttr !== 'combobox' && !hasPopupAttr) {
-                    setNativeInputValueNoKeyboard(el, '$escapedTarget');
+                if ((tag === 'input' && !el.readOnly && roleAttr !== 'combobox' && !hasPopupAttr) || roleAttr === 'spinbutton') {
+                    var valueToEnter = '$escapedTarget';
+                    var targetMonth = resolveTargetMonthObject(target, hint);
+                    var isNumericInput = (el.type === 'number' || el.type === 'tel' || el.getAttribute('inputmode') === 'numeric' || roleAttr === 'spinbutton');
+                    if (targetMonth && isNumericInput) {
+                        var maxLen = parseInt(el.getAttribute('maxlength') || '2', 10);
+                        valueToEnter = (maxLen === 1) ? targetMonth.str : targetMonth.pad;
+                    } else if (/dobday|bday-day|\bday\b/i.test(hint) && /^\d{1,2}$/.test(target)) {
+                        var dayInt = parseInt(target, 10);
+                        var ph = (el.placeholder || '').toLowerCase();
+                        valueToEnter = (ph === 'dd' && dayInt < 10) ? ('0' + dayInt) : String(dayInt);
+                    }
+                    if (tag === 'input') {
+                        setNativeInputValueNoKeyboard(el, valueToEnter);
+                    } else {
+                        el.focus();
+                        el.innerText = valueToEnter;
+                        el.setAttribute('aria-valuenow', String(parseInt(valueToEnter, 10) || valueToEnter));
+                        el.dispatchEvent(new Event('input', { bubbles: true }));
+                        el.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
                     return 'SUCCESS:INPUT_FALLBACK';
                 }
 
@@ -1762,7 +2073,7 @@ object AutomationScripts {
                         var cand = options[j];
                         var itemText = (cand.innerText || cand.textContent || '').replace(/\s+/g, ' ').trim();
                         var itemVal = (cand.getAttribute('data-value') || cand.getAttribute('data-val') || cand.getAttribute('value') || cand.getAttribute('aria-label') || '').trim();
-                        var sc = scoreOptionCandidate(itemText, itemVal, target, synonyms);
+                        var sc = scoreOptionCandidate(itemText, itemVal, target, synonyms, hint);
                         if (sc > bestScore) {
                             bestScore = sc;
                             bestOpt = cand;
@@ -1774,7 +2085,21 @@ object AutomationScripts {
                     }
 
                     if (bestOpt) {
+                        try { bestOpt.scrollIntoView({ block: 'nearest' }); } catch (e) {}
                         dispatchHumanTap(bestOpt);
+                        try {
+                            bestOpt.setAttribute('aria-selected', 'true');
+                            var chosenVal = bestOpt.getAttribute('data-value') || bestOpt.getAttribute('value') || (bestOpt.innerText || '').trim();
+                            var wrapper = el.closest ? (el.closest('#month, #countryList, [role="combobox"], .dropdown, .select, .form-group, div') || el.parentElement) : el.parentElement;
+                            if (wrapper) {
+                                var hiddenInp = wrapper.querySelector('input[type="hidden"]');
+                                if (hiddenInp && chosenVal) {
+                                    hiddenInp.value = chosenVal;
+                                    hiddenInp.dispatchEvent(new Event('input', { bubbles: true }));
+                                    hiddenInp.dispatchEvent(new Event('change', { bubbles: true }));
+                                }
+                            }
+                        } catch (e) {}
                         clickBottomSheetConfirmIfPresent(overlays, bestOpt);
                         window._auraActiveDropdownKey = '';
                         window._auraActiveDropdownAttempts = 0;
@@ -1785,7 +2110,7 @@ object AutomationScripts {
                     }
                 }
 
-                // If overlay still hasn't rendered options on attempt 2, tap trigger again and wait
+                // If overlay still hasn't rendered options on attempt 2-3, tap trigger again and wait
                 if (window._auraActiveDropdownAttempts <= 3) {
                     openDropdownOrSheetTrigger(el);
                     return 'PENDING:WAITING_FOR_DROPDOWN_OPTIONS';
@@ -1811,8 +2136,8 @@ object AutomationScripts {
 
     /**
      * Multi-Phase Country Code & Phone Prefix Selector:
-     * - Supports native <select> and hidden .PhoneInputCountrySelect overlays.
-     * - Supports intl-tel-input (.iti__selected-flag -> .iti__country-list), react-phone-input-2, and custom flag triggers.
+     * - Supports native <select> and hidden/opacity-0 .PhoneInputCountrySelect overlays.
+     * - Supports intl-tel-input (.iti__selected-flag / .iti__selected-country -> .iti__country-list), react-phone-input-2 (.selected-flag -> .country-list), Google #countryList, and sibling comboboxes next to input[type="tel"].
      * - Supports Mobile Bottom-Sheet Country Pickers with search inputs (types country name or +code into the sheet's search bar,
      *   selects the matching country row with strict token matching so +1 matches United States instead of +1242, and confirms the sheet).
      */
@@ -1826,21 +2151,21 @@ object AutomationScripts {
                 ${jsOverlayAndPickerHelpers()}
 
                 if (!el) {
-                    el = document.querySelector('.iti__selected-flag, .iti__flag-container, .PhoneInputCountrySelect, .PhoneInputCountry, .react-tel-input .selected-flag, .flag-dropdown, [data-dial-code], [data-country-code], select[name*="country" i], select[name*="code" i], select[name*="prefix" i], select[id*="country" i], [aria-label*="country code" i], [aria-label*="calling code" i]');
+                    el = document.querySelector('#countryList, .iti__selected-country, .iti__selected-flag, .iti__flag-container, .PhoneInputCountrySelect, .PhoneInputCountry, .react-tel-input .selected-flag, .flag-dropdown, [data-dial-code], [data-country-code], select[name*="country" i], select[name*="code" i], select[name*="prefix" i], select[id*="country" i], [aria-label*="country code" i], [aria-label*="calling code" i], [aria-label*="phone country" i]');
                 }
                 if (!el) {
-                    var phoneInp = document.querySelector('input[type="tel"], input[name*="phone" i], input[name*="mobile" i]');
+                    var phoneInp = document.querySelector('input[type="tel"], input[autocomplete*="tel"], input[name*="phone" i], input[name*="mobile" i]');
                     if (phoneInp && phoneInp.parentElement) {
-                        var container = phoneInp.closest('.input-group, .phone-input, .iti, .PhoneInput, .field, .form-group') || phoneInp.parentElement;
-                        el = container.querySelector('select, .iti__selected-flag, button, [role="button"], [role="combobox"], [data-dial-code]');
+                        var container = phoneInp.closest('.input-group, .phone-input, .iti, .react-tel-input, .PhoneInput, .field, .form-group, div') || phoneInp.parentElement;
+                        el = container.querySelector('select, .iti__selected-country, .iti__selected-flag, .selected-flag, button, [role="button"], [role="combobox"], [data-dial-code]');
                     }
                 }
                 if (!el) return 'NOT_FOUND';
 
                 var COUNTRY_MAP = {
-                    '1': { iso: 'us', names: ['united states', 'usa', 'us', 'canada'] },
+                    '1': { iso: 'us', names: ['united states', 'usa', 'us', 'america', 'canada'] },
                     '44': { iso: 'gb', names: ['united kingdom', 'uk', 'great britain', 'england', 'gb'] },
-                    '91': { iso: 'in', names: ['india', 'in'] },
+                    '91': { iso: 'in', names: ['india', 'bharat', 'in'] },
                     '92': { iso: 'pk', names: ['pakistan', 'pk'] },
                     '971': { iso: 'ae', names: ['united arab emirates', 'uae', 'dubai', 'ae'] },
                     '966': { iso: 'sa', names: ['saudi arabia', 'saudi', 'ksa', 'sa'] },
@@ -1863,15 +2188,73 @@ object AutomationScripts {
                     '65': { iso: 'sg', names: ['singapore', 'sg'] },
                     '82': { iso: 'kr', names: ['south korea', 'korea', 'kr'] },
                     '52': { iso: 'mx', names: ['mexico', 'mx'] },
-                    '880': { iso: 'bd', names: ['bangladesh', 'bd'] }
+                    '880': { iso: 'bd', names: ['bangladesh', 'bd'] },
+                    '31': { iso: 'nl', names: ['netherlands', 'holland', 'nl'] },
+                    '41': { iso: 'ch', names: ['switzerland', 'ch'] },
+                    '46': { iso: 'se', names: ['sweden', 'se'] },
+                    '47': { iso: 'no', names: ['norway', 'no'] },
+                    '45': { iso: 'dk', names: ['denmark', 'dk'] },
+                    '358': { iso: 'fi', names: ['finland', 'fi'] },
+                    '48': { iso: 'pl', names: ['poland', 'polska', 'pl'] },
+                    '32': { iso: 'be', names: ['belgium', 'be'] },
+                    '43': { iso: 'at', names: ['austria', 'at'] },
+                    '353': { iso: 'ie', names: ['ireland', 'ie'] },
+                    '351': { iso: 'pt', names: ['portugal', 'pt'] },
+                    '30': { iso: 'gr', names: ['greece', 'gr'] },
+                    '420': { iso: 'cz', names: ['czech republic', 'czechia', 'cz'] },
+                    '36': { iso: 'hu', names: ['hungary', 'hu'] },
+                    '40': { iso: 'ro', names: ['romania', 'ro'] },
+                    '380': { iso: 'ua', names: ['ukraine', 'ua'] },
+                    '972': { iso: 'il', names: ['israel', 'il'] },
+                    '66': { iso: 'th', names: ['thailand', 'th'] },
+                    '84': { iso: 'vn', names: ['vietnam', 'viet nam', 'vn'] },
+                    '64': { iso: 'nz', names: ['new zealand', 'nz'] },
+                    '54': { iso: 'ar', names: ['argentina', 'ar'] },
+                    '57': { iso: 'co', names: ['colombia', 'co'] },
+                    '56': { iso: 'cl', names: ['chile', 'cl'] },
+                    '51': { iso: 'pe', names: ['peru', 'pe'] },
+                    '58': { iso: 've', names: ['venezuela', 've'] },
+                    '212': { iso: 'ma', names: ['morocco', 'ma'] },
+                    '254': { iso: 'ke', names: ['kenya', 'ke'] },
+                    '233': { iso: 'gh', names: ['ghana', 'gh'] },
+                    '251': { iso: 'et', names: ['ethiopia', 'et'] },
+                    '255': { iso: 'tz', names: ['tanzania', 'tz'] },
+                    '256': { iso: 'ug', names: ['uganda', 'ug'] },
+                    '213': { iso: 'dz', names: ['algeria', 'dz'] },
+                    '974': { iso: 'qa', names: ['qatar', 'qa'] },
+                    '965': { iso: 'kw', names: ['kuwait', 'kw'] },
+                    '968': { iso: 'om', names: ['oman', 'om'] },
+                    '973': { iso: 'bh', names: ['bahrain', 'bh'] },
+                    '962': { iso: 'jo', names: ['jordan', 'jo'] },
+                    '961': { iso: 'lb', names: ['lebanon', 'lb'] },
+                    '94': { iso: 'lk', names: ['sri lanka', 'lk'] },
+                    '977': { iso: 'np', names: ['nepal', 'np'] },
+                    '852': { iso: 'hk', names: ['hong kong', 'hk'] },
+                    '886': { iso: 'tw', names: ['taiwan', 'tw'] }
                 };
 
-                var cleanCode = '$cleanDigits' || '1';
+                var rawLower = '$rawInput'.toLowerCase().trim();
+                var cleanCode = '$cleanDigits';
+                var countryInfo = null;
+                if (cleanCode && COUNTRY_MAP[cleanCode]) {
+                    countryInfo = COUNTRY_MAP[cleanCode];
+                } else {
+                    for (var codeKey in COUNTRY_MAP) {
+                        var entry = COUNTRY_MAP[codeKey];
+                        if (entry.iso === rawLower || entry.names.indexOf(rawLower) >= 0) {
+                            cleanCode = codeKey;
+                            countryInfo = entry;
+                            break;
+                        }
+                    }
+                }
+                if (!cleanCode) cleanCode = '1';
+                if (!countryInfo) countryInfo = COUNTRY_MAP[cleanCode] || { iso: '', names: [ rawLower ] };
+
                 var plusCode = '+' + cleanCode;
-                var countryInfo = COUNTRY_MAP[cleanCode] || { iso: '', names: [ '$rawInput'.toLowerCase() ] };
                 var primaryName = countryInfo.names[0] || plusCode;
                 var primaryIso = countryInfo.iso || '';
-                var dialRegex = new RegExp('\\\\+' + cleanCode + '(?!\\\\d)');
+                var dialRegex = new RegExp('(\\\\+|\\\\b)' + cleanCode + '(?!\\\\d)');
 
                 function scoreCountryOption(textStr, valStr, dialAttr, isoAttr) {
                     var txt = (textStr || '').toLowerCase().trim();
@@ -1883,7 +2266,7 @@ object AutomationScripts {
                         if (primaryIso && cAttr === primaryIso) return 100;
                         return 96;
                     }
-                    if (primaryIso && (cAttr === primaryIso || val === primaryIso)) return 95;
+                    if (primaryIso && (cAttr === primaryIso || val === primaryIso || val === primaryIso.toUpperCase())) return 95;
                     if (val === plusCode || val === cleanCode) return 94;
 
                     var hasExactDial = dialRegex.test(txt) || dialRegex.test(val);
@@ -1898,15 +2281,17 @@ object AutomationScripts {
 
                     if (hasExactDial && hasNameMatch) return 98;
                     if (hasExactDial) return 90;
-                    if (hasNameMatch) return 84;
+                    if (hasNameMatch) return 86;
                     if (!isPlaceholderOrCloseText(txt)) return 10;
                     return -1;
                 }
 
-                // 1. Check if target is a native <select> or contains an embedded <select> (e.g. .PhoneInputCountrySelect)
+                // 1. Check if target is a native <select> or contains/is adjacent to an embedded <select> (e.g. .PhoneInputCountrySelect)
+                var wrapperGroup = el.closest ? (el.closest('.PhoneInput, .iti, .react-tel-input, .phone-input, .input-group, .form-group') || el.parentElement) : el.parentElement;
                 var selectEl = (el.tagName.toLowerCase() === 'select')
                     ? el
-                    : ((el.querySelector && el.querySelector('select')) || (el.parentElement && el.parentElement.querySelector('select.PhoneInputCountrySelect, select[name*="country" i], select[name*="code" i]')));
+                    : ((el.querySelector && el.querySelector('select')) ||
+                       (wrapperGroup && wrapperGroup.querySelector('select.PhoneInputCountrySelect, select[name*="country" i], select[name*="code" i], select[name*="prefix" i], select')));
 
                 if (selectEl && selectEl.options && selectEl.options.length > 0) {
                     var bestIdx = -1;
@@ -1944,7 +2329,16 @@ object AutomationScripts {
                     return 'SUCCESS:NATIVE_COUNTRY_SELECT';
                 }
 
-                // 2. Custom Country Dropdown or Mobile Bottom-Sheet Country Picker
+                // 2. If el is a direct text/tel <input> dedicated to country code (e.g. input[name="countryCode"])
+                var elTag = el.tagName.toLowerCase();
+                var elRole = (el.getAttribute('role') || '').toLowerCase();
+                var elHasPopup = (el.getAttribute('aria-haspopup') || '').toLowerCase();
+                if (elTag === 'input' && !el.readOnly && elRole !== 'combobox' && !elHasPopup && /code|prefix/i.test((el.name || '') + ' ' + (el.id || '') + ' ' + (el.placeholder || ''))) {
+                    setNativeInputValueNoKeyboard(el, plusCode);
+                    return 'SUCCESS:COUNTRY_INPUT_DIRECT';
+                }
+
+                // 3. Custom Country Dropdown or Mobile Bottom-Sheet Country Picker
                 var stepKey = 'country_' + cleanCode;
                 var overlays = findActiveOverlays(el);
                 var countryItems = collectClickableOptionsFromOverlays(overlays, el);
@@ -1961,7 +2355,7 @@ object AutomationScripts {
 
                 // Check for a search bar inside the open bottom sheet / country dropdown
                 for (var v = 0; v < overlays.length; v++) {
-                    var searchInp = overlays[v].querySelector('.iti__search-input, input[type="search"], input[placeholder*="search" i], input[placeholder*="country" i], input[placeholder*="code" i], input[type="text"]');
+                    var searchInp = overlays[v].querySelector('.iti__search-input, .search-box, input[type="search"], input[placeholder*="search" i], input[placeholder*="country" i], input[placeholder*="code" i], input[type="text"]');
                     if (searchInp && searchInp !== el && searchInp.type !== 'tel' && isNodeVisible(searchInp)) {
                         if (searchInp.getAttribute('data-aura-searched') !== cleanCode) {
                             searchInp.setAttribute('data-aura-searched', cleanCode);
@@ -1975,7 +2369,7 @@ object AutomationScripts {
                 }
 
                 if (countryItems.length === 0) {
-                    var directItems = document.querySelectorAll('.iti__country, [data-dial-code], [data-country-code]');
+                    var directItems = document.querySelectorAll('.iti__country, .country[data-dial-code], .country[data-country-code], [data-dial-code], [data-country-code], #countryList [role="option"]');
                     for (var d = 0; d < directItems.length; d++) {
                         if (isNodeVisible(directItems[d])) countryItems.push(directItems[d]);
                     }
@@ -2000,7 +2394,9 @@ object AutomationScripts {
 
                     if (!bestItem) bestItem = countryItems[0];
                     if (bestItem) {
+                        try { bestItem.scrollIntoView({ block: 'nearest' }); } catch (e) {}
                         dispatchHumanTap(bestItem);
+                        try { bestItem.setAttribute('aria-selected', 'true'); } catch (e) {}
                         clickBottomSheetConfirmIfPresent(overlays, bestItem);
                         window._auraActiveCountryKey = '';
                         window._auraActiveCountryAttempts = 0;
@@ -2025,9 +2421,9 @@ object AutomationScripts {
 
     /**
      * Multi-Phase Date of Birth (DOB) Selection Handler:
-     * - Handles 3-part split DOB fields (Day, Month, Year selects or custom dropdowns, matching "05", "5", "May", etc.).
+     * - Handles 3-part split DOB fields across <select>, <input type="tel"|"number"|"text">, and [role="spinbutton"] (matching "05", "5", "May", etc.).
      * - Handles native <input type="date">, <input type="month">, and <input type="datetime-local">.
-     * - Handles formatted/masked text DOB inputs (MM/DD/YYYY, DD/MM/YYYY, YYYY-MM-DD, DD.MM.YYYY).
+     * - Handles formatted/masked text DOB inputs (MM/DD/YYYY, DD/MM/YYYY, YYYY-MM-DD, DD.MM.YYYY), including sequential keystroke fallback for input-mask libraries.
      * - Handles Custom Calendar Popups & Mobile Bottom-Sheet Wheel/Grid Date Pickers (opens picker in Phase 1,
      *   selects Year/Month/Day columns or calendar day cell in Phase 2, and clicks Confirm/Done/OK/Set).
      */
@@ -2055,13 +2451,15 @@ object AutomationScripts {
                     el = document.querySelector('input[type="date"], [data-datepicker], input[name*="dob" i], input[name*="birth" i], input[id*="dob" i], input[id*="birth" i]');
                 }
 
-                // Helper to populate any 3-part split DOB <select>s on the page or inside a container
+                // Helper to populate any 3-part split DOB fields (<select>, <input>, or [role="spinbutton"]) inside a container
                 function fillSplitDobSelects(rootNode) {
                     var root = rootNode || document;
+                    var filledAny = false;
+
                     var daySel = root.querySelector('select[name*="day" i], select[id*="day" i], select[autocomplete="bday-day"], select[aria-label*="day" i]');
                     var monthSel = root.querySelector('select[name*="month" i], select[id*="month" i], select[autocomplete="bday-month"], select[aria-label*="month" i]');
                     var yearSel = root.querySelector('select[name*="year" i], select[id*="year" i], select[autocomplete="bday-year"], select[aria-label*="year" i]');
-                    var filledAny = false;
+
                     if (daySel) {
                         selectBestOptionOnNativeSelect(daySel, dayPad, 'dobDay');
                         filledAny = true;
@@ -2074,10 +2472,69 @@ object AutomationScripts {
                         selectBestOptionOnNativeSelect(yearSel, yearStr, 'dobYear');
                         filledAny = true;
                     }
+
+                    var dayInp = root.querySelector('input[name="day" i], input#day, input[name*="birth_day" i], input[name*="dob_day" i], input[name*="bday_day" i], input[autocomplete="bday-day"], input[aria-label="Day" i], input[placeholder="DD" i]');
+                    var monthInp = root.querySelector('input[name="month" i], input#month, input[name*="birth_month" i], input[name*="dob_month" i], input[name*="bday_month" i], input[autocomplete="bday-month"], input[aria-label="Month" i], input[placeholder="MM" i]');
+                    var yearInp = root.querySelector('input[name="year" i], input#year, input[name*="birth_year" i], input[name*="dob_year" i], input[name*="bday_year" i], input[autocomplete="bday-year"], input[aria-label="Year" i], input[placeholder="YYYY" i]');
+
+                    if (dayInp && !dayInp.readOnly) {
+                        setNativeInputValueNoKeyboard(dayInp, dayNumStr);
+                        filledAny = true;
+                    }
+                    if (monthInp && !monthInp.readOnly && monthInp.getAttribute('role') !== 'combobox') {
+                        setNativeInputValueNoKeyboard(monthInp, monthPad);
+                        filledAny = true;
+                    }
+                    if (yearInp && !yearInp.readOnly) {
+                        setNativeInputValueNoKeyboard(yearInp, yearStr);
+                        filledAny = true;
+                    }
+
+                    // Also support ARIA [role="spinbutton"] segmented date fields (React Aria / MUI X DateField)
+                    var spinButtons = root.querySelectorAll('[role="spinbutton"]');
+                    for (var s = 0; s < spinButtons.length; s++) {
+                        var sb = spinButtons[s];
+                        var sbHint = ((sb.getAttribute('aria-label') || '') + ' ' + (sb.getAttribute('data-type') || '') + ' ' + (sb.innerText || '')).toLowerCase();
+                        if (/month|\bmm\b/.test(sbHint)) {
+                            sb.innerText = monthPad;
+                            sb.setAttribute('aria-valuenow', monthNumStr);
+                            sb.dispatchEvent(new Event('input', { bubbles: true }));
+                            filledAny = true;
+                        } else if (/day|\bdd\b/.test(sbHint)) {
+                            sb.innerText = dayPad;
+                            sb.setAttribute('aria-valuenow', dayNumStr);
+                            sb.dispatchEvent(new Event('input', { bubbles: true }));
+                            filledAny = true;
+                        } else if (/year|\byyyy\b/.test(sbHint)) {
+                            sb.innerText = yearStr;
+                            sb.setAttribute('aria-valuenow', yearStr);
+                            sb.dispatchEvent(new Event('input', { bubbles: true }));
+                            filledAny = true;
+                        }
+                    }
+
                     return filledAny;
                 }
 
-                // 1. If target is a <select>, fill it (and any sibling split DOB selects)
+                function typeMaskedDigitsIfNeeded(inputEl, formattedVal) {
+                    setNativeInputValueNoKeyboard(inputEl, formattedVal);
+                    var afterVal = (inputEl.value || '').trim();
+                    if (!afterVal || /[_MDYmdy]{2,}/.test(afterVal)) {
+                        var digitsOnly = formattedVal.replace(/[^0-9]/g, '');
+                        for (var d = 0; d < digitsOnly.length; d++) {
+                            var ch = digitsOnly.charAt(d);
+                            inputEl.dispatchEvent(new KeyboardEvent('keydown', { key: ch, code: 'Digit' + ch, bubbles: true, cancelable: true }));
+                            try {
+                                inputEl.dispatchEvent(new InputEvent('beforeinput', { data: ch, inputType: 'insertText', bubbles: true, cancelable: true }));
+                                inputEl.dispatchEvent(new InputEvent('input', { data: ch, inputType: 'insertText', bubbles: true, cancelable: true }));
+                            } catch (e) {}
+                            inputEl.dispatchEvent(new KeyboardEvent('keyup', { key: ch, code: 'Digit' + ch, bubbles: true }));
+                        }
+                        inputEl.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
+                }
+
+                // 1. If target is a <select>, fill it (and any sibling split DOB fields)
                 if (el && el.tagName.toLowerCase() === 'select') {
                     var scope = el.closest ? (el.closest('form, fieldset, .form-group, .field, div') || document) : document;
                     if (!fillSplitDobSelects(scope)) {
@@ -2136,8 +2593,21 @@ object AutomationScripts {
 
                 // 3. Standard editable text/masked DOB input (not a readonly bottom-sheet/calendar trigger)
                 if (tag === 'input' && !isCustomPickerTrigger) {
-                    setNativeInputValueNoKeyboard(el, formattedDate);
-                    fillSplitDobSelects(document);
+                    var elScope = el.closest ? (el.closest('form, fieldset, .form-group, .field, div') || document) : document;
+                    var elHint = ((el.name || '') + ' ' + (el.id || '') + ' ' + (el.placeholder || '') + ' ' + (el.getAttribute('aria-label') || '')).toLowerCase();
+                    if (/\bday\b|bday-day|dob_day|^dd$/i.test(elHint)) {
+                        setNativeInputValueNoKeyboard(el, dayNumStr);
+                        fillSplitDobSelects(elScope);
+                    } else if (/\byear\b|bday-year|dob_year|^yyyy$/i.test(elHint)) {
+                        setNativeInputValueNoKeyboard(el, yearStr);
+                        fillSplitDobSelects(elScope);
+                    } else if (/\bmonth\b|bday-month|dob_month|^mm$/i.test(elHint)) {
+                        setNativeInputValueNoKeyboard(el, monthPad);
+                        fillSplitDobSelects(elScope);
+                    } else {
+                        typeMaskedDigitsIfNeeded(el, formattedDate);
+                        fillSplitDobSelects(document);
+                    }
                     return 'SUCCESS:FORMATTED_DATE_INPUT';
                 }
 
@@ -2181,7 +2651,7 @@ object AutomationScripts {
                             var bestColOpt = null;
                             var bestColSc = -1;
                             for (var co = 0; co < colOpts.length; co++) {
-                                var sc = scoreOptionCandidate(colOpts[co].innerText || '', colOpts[co].getAttribute('data-value') || '', colTarget, colSyns);
+                                var sc = scoreOptionCandidate(colOpts[co].innerText || '', colOpts[co].getAttribute('data-value') || '', colTarget, colSyns, colHint);
                                 if (sc > bestColSc) {
                                     bestColSc = sc;
                                     bestColOpt = colOpts[co];

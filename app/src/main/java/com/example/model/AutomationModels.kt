@@ -101,30 +101,79 @@ data class DataSheet(
             val dobList = fields["dob"]?.map { it.trim() }?.filter { it.isNotBlank() } ?: emptyList()
             if (dobList.isNotEmpty()) {
                 return dobList.mapNotNull { rawDob ->
-                    val parts = rawDob.split(Regex("[-/.\\s]+")).filter { it.isNotBlank() }
-                    if (parts.size >= 3) {
-                        val (y, m, d) = when {
-                            parts[0].length == 4 -> Triple(parts[0], parts[1].padStart(2, '0'), parts[2].padStart(2, '0'))
-                            parts[2].length == 4 -> {
-                                val firstNum = parts[0].toIntOrNull() ?: 1
-                                if (firstNum > 12) {
-                                    Triple(parts[2], parts[1].padStart(2, '0'), parts[0].padStart(2, '0'))
-                                } else {
-                                    Triple(parts[2], parts[0].padStart(2, '0'), parts[1].padStart(2, '0'))
-                                }
-                            }
-                            else -> Triple(parts[0], parts[1].padStart(2, '0'), parts[2].padStart(2, '0'))
-                        }
-                        when {
-                            key.equals("dobYear", ignoreCase = true) -> y
-                            key.equals("dobMonth", ignoreCase = true) -> m
-                            else -> d
-                        }
-                    } else null
+                    val parsed = parseFlexibleDobString(rawDob)
+                    when {
+                        key.equals("dobYear", ignoreCase = true) -> parsed.first
+                        key.equals("dobMonth", ignoreCase = true) -> parsed.second
+                        else -> parsed.third
+                    }
                 }
             }
         }
+
+        // Automatically derive countryCode from phoneNumber column if phoneNumber entries include a leading +code
+        if (key.equals("countryCode", ignoreCase = true)) {
+            val phoneList = (fields["phoneNumber"] ?: fields["phone"])
+                ?.map { it.trim() }
+                ?.filter { it.isNotBlank() }
+                .orEmpty()
+            val extractedCodes = phoneList.mapNotNull { rawPhone ->
+                val match = Regex("^\\+(\\d{1,4})\\b").find(rawPhone)
+                match?.value
+            }
+            if (extractedCodes.isNotEmpty()) return extractedCodes
+        }
+
         return emptyList()
+    }
+
+    private fun parseFlexibleDobString(rawDob: String): Triple<String, String, String> {
+        val monthNames = mapOf(
+            "jan" to "01", "january" to "01",
+            "feb" to "02", "february" to "02",
+            "mar" to "03", "march" to "03",
+            "apr" to "04", "april" to "04",
+            "may" to "05",
+            "jun" to "06", "june" to "06",
+            "jul" to "07", "july" to "07",
+            "aug" to "08", "august" to "08",
+            "sep" to "09", "sept" to "09", "september" to "09",
+            "oct" to "10", "october" to "10",
+            "nov" to "11", "november" to "11",
+            "dec" to "12", "december" to "12"
+        )
+        val tokens = rawDob.trim().split(Regex("[-/.,\\s]+")).filter { it.isNotBlank() }
+        if (tokens.size >= 3) {
+            val namedMonthIdx = tokens.indexOfFirst { monthNames.containsKey(it.lowercase()) }
+            if (namedMonthIdx >= 0) {
+                val m = monthNames[tokens[namedMonthIdx].lowercase()] ?: "05"
+                val remaining = tokens.filterIndexed { idx, _ -> idx != namedMonthIdx }
+                val yToken = remaining.firstOrNull { it.length == 4 } ?: remaining.last()
+                val dToken = remaining.firstOrNull { it != yToken } ?: "14"
+                return Triple(yToken, m, dToken.padStart(2, '0'))
+            }
+            return when {
+                tokens[0].length == 4 -> Triple(
+                    tokens[0],
+                    tokens[1].padStart(2, '0'),
+                    tokens[2].padStart(2, '0')
+                )
+                tokens[2].length == 4 -> {
+                    val firstNum = tokens[0].toIntOrNull() ?: 1
+                    if (firstNum > 12) {
+                        Triple(tokens[2], tokens[1].padStart(2, '0'), tokens[0].padStart(2, '0'))
+                    } else {
+                        Triple(tokens[2], tokens[0].padStart(2, '0'), tokens[1].padStart(2, '0'))
+                    }
+                }
+                else -> Triple(
+                    tokens[0],
+                    tokens[1].padStart(2, '0'),
+                    tokens[2].padStart(2, '0')
+                )
+            }
+        }
+        return Triple("1998", "05", "14")
     }
 
     fun totalRows(): Int {

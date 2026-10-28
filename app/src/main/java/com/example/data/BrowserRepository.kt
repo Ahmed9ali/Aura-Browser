@@ -380,114 +380,254 @@ class BrowserRepository(
         return sb.toString()
     }
 
-    fun importBookmarksFromText(rawContent: String, defaultFolder: String = "Favorites"): Int {
-        val trimmed = rawContent.trim()
-        if (trimmed.isBlank()) return 0
-        var importedCount = 0
+    /**
+     * Extracts flat JSON object blocks `{ ... }` safely without regex `{` / `}` character classes
+     * (which throw PatternSyntaxException on Android's ICU regex engine).
+     */
+    private fun extractFlatJsonObjectBlocks(text: String): List<String> {
+        val blocks = mutableListOf<String>()
+        var inString = false
+        var escaped = false
+        var currentStart = -1
 
-        // 1. Try JSON array parsing (pure Kotlin, works in Android runtime and JVM unit tests)
-        if (trimmed.startsWith("[")) {
-            val objectBlockRegex = Regex("""\{[^{}]*\}""", RegexOption.DOT_MATCHES_ALL)
-            val stringFieldRegex = { key: String ->
-                Regex(""""$key"\s*:\s*"((?:\\.|[^"\\])*)"""", RegexOption.IGNORE_CASE)
-            }
-            val boolFieldRegex = { key: String ->
-                Regex(""""$key"\s*:\s*(true|false)""", RegexOption.IGNORE_CASE)
-            }
-
-            objectBlockRegex.findAll(trimmed).forEach { blockMatch ->
-                val block = blockMatch.value
-                val rawUrl = stringFieldRegex("url").find(block)?.groupValues?.get(1)?.let { unescapeJsonString(it).trim() }.orEmpty()
-                if (rawUrl.isNotBlank()) {
-                    val normalizedUrl = normalizeBookmarkUrl(rawUrl)
-                    val title = stringFieldRegex("title").find(block)?.groupValues?.get(1)
-                        ?.let { unescapeJsonString(it).trim() }
-                        .orEmpty()
-                        .ifBlank { normalizedUrl }
-                    val folder = stringFieldRegex("folder").find(block)?.groupValues?.get(1)
-                        ?.let { unescapeJsonString(it).trim() }
-                        .orEmpty()
-                        .ifBlank { defaultFolder }
-                    val isPinned = boolFieldRegex("isPinned").find(block)?.groupValues?.get(1)
-                        ?.equals("true", ignoreCase = true) == true
-                    addBookmark(title = title, url = normalizedUrl, folder = folder, isPinned = isPinned)
-                    importedCount++
-                }
-            }
-            if (importedCount > 0) return importedCount
-        }
-
-        // 2. Try HTML (<A HREF="...">Title</A>) parsing
-        val htmlAnchorRegex = Regex("""<a\s+[^>]*href\s*=\s*["']([^"']+)["'][^>]*>(.*?)</a>""", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
-        val htmlMatches = htmlAnchorRegex.findAll(trimmed).toList()
-        if (htmlMatches.isNotEmpty()) {
-            htmlMatches.forEach { match ->
-                val rawUrl = match.groupValues[1].trim()
-                val rawTitle = match.groupValues[2].replace(Regex("<[^>]*>"), "").trim()
-                val isPinned = match.value.contains("PINNED=\"1\"", ignoreCase = true)
-                if (rawUrl.isNotBlank() && !rawUrl.startsWith("javascript:", ignoreCase = true)) {
-                    val normalizedUrl = normalizeBookmarkUrl(rawUrl)
-                    addBookmark(
-                        title = rawTitle.ifBlank { normalizedUrl },
-                        url = normalizedUrl,
-                        folder = defaultFolder,
-                        isPinned = isPinned
-                    )
-                    importedCount++
-                }
-            }
-            if (importedCount > 0) return importedCount
-        }
-
-        // 3. Fallback: Line-by-line parsing ("Title | URL | Folder" or "Title - URL" or plain URL)
-        trimmed.lines().forEach { line ->
-            val cleanLine = line.trim()
-            if (cleanLine.isBlank() || cleanLine.startsWith("#") || cleanLine.startsWith("//")) return@forEach
-
-            if (cleanLine.contains("|")) {
-                val parts = cleanLine.split("|").map { it.trim() }
-                if (parts.size >= 2) {
-                    val title = parts[0]
-                    val urlPart = parts[1]
-                    val folderPart = parts.getOrNull(2)?.ifBlank { defaultFolder } ?: defaultFolder
-                    val pinnedPart = parts.getOrNull(3)?.equals("pinned", ignoreCase = true) == true ||
-                            parts.getOrNull(3)?.equals("true", ignoreCase = true) == true
-                    if (urlPart.isNotBlank()) {
-                        val normalizedUrl = normalizeBookmarkUrl(urlPart)
-                        addBookmark(
-                            title = title.ifBlank { normalizedUrl },
-                            url = normalizedUrl,
-                            folder = folderPart,
-                            isPinned = pinnedPart
-                        )
-                        importedCount++
-                    }
+        for (i in text.indices) {
+            val ch = text[i]
+            if (inString) {
+                if (escaped) {
+                    escaped = false
+                } else if (ch == '\\') {
+                    escaped = true
+                } else if (ch == '"') {
+                    inString = false
                 }
             } else {
-                val urlRegex = Regex("""(https?://[^\s,;"']+|[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(?:/[^\s,;"']*)?)""")
-                val match = urlRegex.find(cleanLine)
-                if (match != null) {
-                    val rawUrl = match.value
-                    val normalizedUrl = normalizeBookmarkUrl(rawUrl)
-                    val remainingTitle = cleanLine.replace(rawUrl, "")
-                        .trim(' ', '-', ':', ',', '|', '•', '\t')
-                        .ifBlank {
-                            normalizedUrl.removePrefix("https://")
-                                .removePrefix("http://")
-                                .removePrefix("www.")
-                                .substringBefore("/")
+                when (ch) {
+                    '"' -> inString = true
+                    '{' -> currentStart = i
+                    '}' -> {
+                        if (currentStart >= 0 && i > currentStart) {
+                            blocks.add(text.substring(currentStart, i + 1))
+                            currentStart = -1
                         }
-                    addBookmark(
-                        title = remainingTitle,
-                        url = normalizedUrl,
-                        folder = defaultFolder
-                    )
-                    importedCount++
+                    }
                 }
             }
         }
+        return blocks
+    }
 
-        return importedCount
+    /**
+     * Deterministic, zero-regex string value extractor for a JSON key inside a flat `{ ... }` block.
+     */
+    private fun extractJsonStringField(block: String, key: String): String? {
+        val targetKey = "\"$key\""
+        var searchIdx = 0
+        while (searchIdx < block.length) {
+            val keyIdx = block.indexOf(targetKey, searchIdx, ignoreCase = true)
+            if (keyIdx < 0) return null
+            var cursor = keyIdx + targetKey.length
+            while (cursor < block.length && block[cursor].isWhitespace()) cursor++
+            if (cursor < block.length && block[cursor] == ':') {
+                cursor++
+                while (cursor < block.length && block[cursor].isWhitespace()) cursor++
+                if (cursor < block.length && block[cursor] == '"') {
+                    cursor++
+                    val sb = StringBuilder()
+                    var esc = false
+                    while (cursor < block.length) {
+                        val c = block[cursor]
+                        if (esc) {
+                            when (c) {
+                                '"', '\\', '/' -> sb.append(c)
+                                'n' -> sb.append('\n')
+                                'r' -> sb.append('\r')
+                                't' -> sb.append('\t')
+                                else -> sb.append(c)
+                            }
+                            esc = false
+                        } else if (c == '\\') {
+                            esc = true
+                        } else if (c == '"') {
+                            return sb.toString()
+                        } else {
+                            sb.append(c)
+                        }
+                        cursor++
+                    }
+                }
+            }
+            searchIdx = keyIdx + targetKey.length
+        }
+        return null
+    }
+
+    private fun extractJsonBooleanField(block: String, key: String): Boolean {
+        val targetKey = "\"$key\""
+        val keyIdx = block.indexOf(targetKey, ignoreCase = true)
+        if (keyIdx < 0) return false
+        var cursor = keyIdx + targetKey.length
+        while (cursor < block.length && block[cursor].isWhitespace()) cursor++
+        if (cursor >= block.length || block[cursor] != ':') return false
+        cursor++
+        while (cursor < block.length && block[cursor].isWhitespace()) cursor++
+        return block.regionMatches(cursor, "true", 0, 4, ignoreCase = true)
+    }
+
+    fun importBookmarksFromText(rawContent: String, defaultFolder: String = "Favorites"): Int {
+        return runCatching {
+            val trimmed = rawContent.trim()
+            if (trimmed.isBlank()) return 0
+            var importedCount = 0
+            val seenUrlsInBatch = mutableSetOf<String>()
+            val fallbackFolder = defaultFolder.trim().ifBlank { "Favorites" }
+
+            // 1. Try JSON parsing (supports [...] arrays, nested {...} Chrome/Brave/Aura JSON exports, and embedded JSON blocks)
+            if (trimmed.contains("{") && trimmed.contains("}")) {
+                val blocks = extractFlatJsonObjectBlocks(trimmed)
+                blocks.forEach { block ->
+                    val rawUrl = (extractJsonStringField(block, "url")
+                        ?: extractJsonStringField(block, "href")
+                        ?: extractJsonStringField(block, "uri"))
+                        ?.trim()
+                        .orEmpty()
+                    if (rawUrl.isNotBlank() && !rawUrl.startsWith("javascript:", ignoreCase = true)) {
+                        val normalizedUrl = normalizeBookmarkUrl(rawUrl)
+                        if (seenUrlsInBatch.add(normalizedUrl)) {
+                            val title = (extractJsonStringField(block, "title")
+                                ?: extractJsonStringField(block, "name"))
+                                ?.trim()
+                                .orEmpty()
+                                .ifBlank { normalizedUrl }
+                            val folder = (extractJsonStringField(block, "folder")
+                                ?: extractJsonStringField(block, "group")
+                                ?: extractJsonStringField(block, "category"))
+                                ?.trim()
+                                .orEmpty()
+                                .ifBlank { fallbackFolder }
+                            val isPinned = extractJsonBooleanField(block, "isPinned") ||
+                                    extractJsonBooleanField(block, "pinned")
+                            addBookmark(title = title, url = normalizedUrl, folder = folder, isPinned = isPinned)
+                            importedCount++
+                        }
+                    }
+                }
+            }
+
+            // 2. Try HTML (<A HREF="...">Title</A> and optional <H3>Folder</H3>) parsing without multi-line regex backtracking
+            if (trimmed.contains("<a", ignoreCase = true) && trimmed.contains("href", ignoreCase = true)) {
+                var currentHtmlFolder = fallbackFolder
+                val h3Regex = Regex("<h3[^>]*>(.*?)</h3>", RegexOption.IGNORE_CASE)
+                val hrefAttrRegex = Regex("""href\s*=\s*["']([^"']+)["']""", RegexOption.IGNORE_CASE)
+
+                trimmed.lines().forEach { rawLine ->
+                    val line = rawLine.trim()
+                    val h3Match = h3Regex.find(line)
+                    if (h3Match != null) {
+                        val folderTitle = h3Match.groupValues[1].replace(Regex("<[^>]*>"), "").trim()
+                        if (folderTitle.isNotBlank() && !folderTitle.equals("Bookmarks", ignoreCase = true)) {
+                            currentHtmlFolder = folderTitle
+                        }
+                    }
+
+                    var searchPos = 0
+                    while (searchPos < line.length) {
+                        val aStart = line.indexOf("<a", searchPos, ignoreCase = true)
+                        if (aStart < 0) break
+                        val tagClose = line.indexOf('>', aStart)
+                        if (tagClose < 0) break
+                        val aEnd = line.indexOf("</a>", tagClose, ignoreCase = true)
+                        val openTag = line.substring(aStart, tagClose + 1)
+                        val hrefMatch = hrefAttrRegex.find(openTag)
+                        if (hrefMatch != null) {
+                            val rawUrl = hrefMatch.groupValues[1].trim()
+                            val rawTitle = if (aEnd > tagClose) {
+                                line.substring(tagClose + 1, aEnd).replace(Regex("<[^>]*>"), "").trim()
+                            } else {
+                                line.substring(tagClose + 1).replace(Regex("<[^>]*>"), "").trim()
+                            }
+                            val isPinned = openTag.contains("PINNED=\"1\"", ignoreCase = true) ||
+                                    openTag.contains("PINNED='1'", ignoreCase = true)
+                            if (rawUrl.isNotBlank() &&
+                                !rawUrl.startsWith("javascript:", ignoreCase = true) &&
+                                !rawUrl.startsWith("place:", ignoreCase = true)
+                            ) {
+                                val normalizedUrl = normalizeBookmarkUrl(rawUrl)
+                                if (seenUrlsInBatch.add(normalizedUrl)) {
+                                    addBookmark(
+                                        title = rawTitle.ifBlank { normalizedUrl },
+                                        url = normalizedUrl,
+                                        folder = currentHtmlFolder,
+                                        isPinned = isPinned
+                                    )
+                                    importedCount++
+                                }
+                            }
+                        }
+                        searchPos = if (aEnd > tagClose) aEnd + 4 else tagClose + 1
+                    }
+                }
+                if (importedCount > 0) return importedCount
+            }
+
+            // 3. Fallback: Line-by-line parsing ("Title | URL | Folder" or "Title - URL" or plain URL)
+            val urlRegex = Regex("""(https?://[^\s,;"'\}\]]+|[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(?:/[^\s,;"'\}\]]*)?)""")
+            trimmed.lines().forEach { line ->
+                val cleanLine = line.trim()
+                if (cleanLine.isBlank() ||
+                    cleanLine.startsWith("#") ||
+                    cleanLine.startsWith("//") ||
+                    cleanLine.contains("\"url\"", ignoreCase = true) ||
+                    cleanLine.contains("\"title\"", ignoreCase = true) ||
+                    cleanLine.contains("<a ", ignoreCase = true)
+                ) return@forEach
+
+                if (cleanLine.contains("|")) {
+                    val parts = cleanLine.split("|").map { it.trim() }
+                    if (parts.size >= 2) {
+                        val title = parts[0]
+                        val urlPart = parts[1]
+                        val folderPart = parts.getOrNull(2)?.ifBlank { fallbackFolder } ?: fallbackFolder
+                        val pinnedPart = parts.getOrNull(3)?.equals("pinned", ignoreCase = true) == true ||
+                                parts.getOrNull(3)?.equals("true", ignoreCase = true) == true
+                        if (urlPart.isNotBlank()) {
+                            val normalizedUrl = normalizeBookmarkUrl(urlPart)
+                            if (seenUrlsInBatch.add(normalizedUrl)) {
+                                addBookmark(
+                                    title = title.ifBlank { normalizedUrl },
+                                    url = normalizedUrl,
+                                    folder = folderPart,
+                                    isPinned = pinnedPart
+                                )
+                                importedCount++
+                            }
+                        }
+                    }
+                } else {
+                    val match = urlRegex.find(cleanLine)
+                    if (match != null) {
+                        val rawUrl = match.value
+                        val normalizedUrl = normalizeBookmarkUrl(rawUrl)
+                        if (seenUrlsInBatch.add(normalizedUrl)) {
+                            val remainingTitle = cleanLine.replace(rawUrl, "")
+                                .trim(' ', '-', ':', ',', '|', '•', '\t', '{', '}', '[', ']')
+                                .ifBlank {
+                                    normalizedUrl.removePrefix("https://")
+                                        .removePrefix("http://")
+                                        .removePrefix("www.")
+                                        .substringBefore("/")
+                                }
+                            addBookmark(
+                                title = remainingTitle,
+                                url = normalizedUrl,
+                                folder = fallbackFolder
+                            )
+                            importedCount++
+                        }
+                    }
+                }
+            }
+            importedCount
+        }.getOrDefault(0)
     }
 
     private fun normalizeBookmarkUrl(rawUrl: String): String {

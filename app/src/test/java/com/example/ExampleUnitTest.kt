@@ -423,7 +423,219 @@ class ExampleUnitTest {
         assertTrue(dateJs.contains("fillSplitDobSelects"))
         assertTrue(dateJs.contains("clickBottomSheetConfirmIfPresent"))
     }
+
+    @Test
+    fun testBookmarkImportResilienceAndComplexDobPhoneAutomation() {
+        // 1. Test crash-free Bookmark Import across JSON, Netscape HTML with folders, plain URLs, and malformed text
+        val htmlExport = """
+            <!DOCTYPE NETSCAPE-Bookmark-file-1>
+            <DL><p>
+                <DT><H3>Dev Tools</H3>
+                <DL><p>
+                    <DT><A HREF="https://kotlinlang.org">Kotlin Language</A>
+                    <DT><A HREF="https://developer.android.com">Android Developers</A>
+                </DL><p>
+            </DL><p>
+        """.trimIndent()
+        val importedHtmlCount = repository.importBookmarksFromText(htmlExport)
+        assertEquals(2, importedHtmlCount)
+        assertTrue(repository.bookmarkFolders.value.contains("Dev Tools"))
+        assertEquals("Dev Tools", repository.bookmarks.value.first { it.url == "https://kotlinlang.org" }.folder)
+
+        val malformedAndPlainInput = """
+            {{{unclosed json { "url": "https://openai.com", "title": "OpenAI", "folder": "AI", "isPinned": true } }}}
+            https://news.ycombinator.com
+        """.trimIndent()
+        val importedMixedCount = repository.importBookmarksFromText(malformedAndPlainInput)
+        assertEquals(2, importedMixedCount)
+        assertTrue(repository.isBookmarked("https://openai.com"))
+        assertTrue(repository.isBookmarked("https://news.ycombinator.com"))
+
+        // 2. Test DataSheet flexible DOB parsing ("May 14, 1998", "05/14/1998") and countryCode derivation from phoneNumber
+        val sheet = com.example.model.DataSheet(
+            name = "Complex Profiles",
+            fields = mapOf(
+                "dob" to listOf("May 14, 1998", "08/09/2000"),
+                "phoneNumber" to listOf("+91 9876543210", "+44 7911123456")
+            )
+        )
+        assertEquals(listOf("14", "09"), sheet.getFieldValues("dobDay"))
+        assertEquals(listOf("05", "08"), sheet.getFieldValues("dobMonth"))
+        assertEquals(listOf("1998", "2000"), sheet.getFieldValues("dobYear"))
+        assertEquals(listOf("+91", "+44"), sheet.getFieldValues("countryCode"))
+
+        // 3. Verify Google-style split birthday (<input type="tel" id="day">, <input type="tel" id="year">, #month) and #countryList
+        val testScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Unconfined)
+        val engine = com.example.automation.AutomationEngine(testScope)
+        engine.startRecording()
+        engine.jsInterface.onUserAction("INPUT", "#day", "Fill DOB_DAY (#day)", "")
+        engine.jsInterface.onUserAction("SELECT_DROPDOWN", "#month", "Select DOB_MONTH (#month)", "")
+        engine.jsInterface.onUserAction("INPUT", "#year", "Fill DOB_YEAR (#year)", "")
+        engine.jsInterface.onUserAction("SELECT_COUNTRY_CODE", "#countryList", "Select Country Code (#countryList)", "")
+
+        val recordedSteps = engine.currentScript.value.steps
+        assertEquals(4, recordedSteps.size)
+        assertEquals("dobDay", recordedSteps[0].variableKey)
+        assertEquals("dobMonth", recordedSteps[1].variableKey)
+        assertEquals("dobYear", recordedSteps[2].variableKey)
+        assertEquals("countryCode", recordedSteps[3].variableKey)
+
+        // Verify 0-indexed month protection and masked date fallback in generated JS
+        val dropdownMonthJs = com.example.automation.AutomationScripts.createSelectDropdownScript("#month", "05", "dobMonth")
+        assertTrue(dropdownMonthJs.contains("isZeroIndexedMonthSelect"))
+        assertTrue(dropdownMonthJs.contains("resolveTargetMonthObject"))
+    }
+
+    @Test
+    fun testHuaweiIdDobAndPhoneAutomation() {
+        val testScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Unconfined)
+        val engine = com.example.automation.AutomationEngine(testScope)
+
+        // 1. Test DOM Scanner JSON scan results from Huawei ID registration page
+        val huaweiScannedJson = """
+            [
+                {
+                    "tagName": "div",
+                    "type": "",
+                    "nameAttr": "",
+                    "idAttr": "",
+                    "placeholder": "Country/Region",
+                    "text": "Algeria",
+                    "selector": ".hwid-countryDropDown-root",
+                    "pageUrl": "https://id7.cloud.huawei.com/CAS/portal/userRegister/regbyphone.html",
+                    "isInput": true,
+                    "isButton": false,
+                    "semanticType": "COUNTRY_CODE"
+                },
+                {
+                    "tagName": "div",
+                    "type": "",
+                    "nameAttr": "",
+                    "idAttr": "",
+                    "placeholder": "Calling Code",
+                    "text": "+213(Algeria)",
+                    "selector": ".hwid-callingCodePhone-root > div.hwid-callingCode",
+                    "pageUrl": "https://id7.cloud.huawei.com/CAS/portal/userRegister/regbyphone.html",
+                    "isInput": true,
+                    "isButton": false,
+                    "semanticType": "COUNTRY_CODE"
+                },
+                {
+                    "tagName": "input",
+                    "type": "text",
+                    "nameAttr": "phone",
+                    "idAttr": "phoneInput",
+                    "placeholder": "Phone",
+                    "text": "",
+                    "selector": ".hwid-callingCodePhone-root input",
+                    "pageUrl": "https://id7.cloud.huawei.com/CAS/portal/userRegister/regbyphone.html",
+                    "isInput": true,
+                    "isButton": false,
+                    "semanticType": "PHONE"
+                },
+                {
+                    "tagName": "div",
+                    "type": "",
+                    "nameAttr": "",
+                    "idAttr": "",
+                    "placeholder": "Date of birth (Day)",
+                    "text": "28",
+                    "selector": ".hwid-register-inputsContainer .hwid-birth-day",
+                    "pageUrl": "https://id7.cloud.huawei.com/CAS/portal/userRegister/regbyphone.html",
+                    "isInput": true,
+                    "isButton": false,
+                    "semanticType": "DOB_DAY"
+                },
+                {
+                    "tagName": "div",
+                    "type": "",
+                    "nameAttr": "",
+                    "idAttr": "",
+                    "placeholder": "Date of birth (Month)",
+                    "text": "10",
+                    "selector": ".hwid-register-inputsContainer .hwid-birth-month",
+                    "pageUrl": "https://id7.cloud.huawei.com/CAS/portal/userRegister/regbyphone.html",
+                    "isInput": true,
+                    "isButton": false,
+                    "semanticType": "DOB_MONTH"
+                },
+                {
+                    "tagName": "div",
+                    "type": "",
+                    "nameAttr": "",
+                    "idAttr": "",
+                    "placeholder": "Date of birth (Year)",
+                    "text": "2006",
+                    "selector": ".hwid-register-inputsContainer .hwid-birth-year",
+                    "pageUrl": "https://id7.cloud.huawei.com/CAS/portal/userRegister/regbyphone.html",
+                    "isInput": true,
+                    "isButton": false,
+                    "semanticType": "DOB_YEAR"
+                }
+            ]
+        """.trimIndent()
+
+        // Trigger scan and verify ready steps were built
+        engine.triggerScan(autoReadySteps = true)
+        engine.jsInterface.onScanResults(huaweiScannedJson)
+
+        val scannedSteps = engine.currentScript.value.steps
+        assertEquals(6, scannedSteps.size)
+
+        // Calling code
+        assertEquals(com.example.model.AutomationActionType.SELECT_COUNTRY_CODE, scannedSteps[1].actionType)
+        assertEquals("countryCode", scannedSteps[1].variableKey)
+        assertEquals("{{countryCode}}", scannedSteps[1].value)
+
+        // Phone number input
+        assertEquals(com.example.model.AutomationActionType.INPUT, scannedSteps[2].actionType)
+        assertEquals("phoneNumber", scannedSteps[2].variableKey)
+        assertEquals("{{phoneNumber}}", scannedSteps[2].value)
+
+        // Date of birth Day
+        assertEquals(com.example.model.AutomationActionType.SELECT_DROPDOWN, scannedSteps[3].actionType)
+        assertEquals("dobDay", scannedSteps[3].variableKey)
+        assertEquals("{{dobDay}}", scannedSteps[3].value)
+
+        // Date of birth Month
+        assertEquals(com.example.model.AutomationActionType.SELECT_DROPDOWN, scannedSteps[4].actionType)
+        assertEquals("dobMonth", scannedSteps[4].variableKey)
+        assertEquals("{{dobMonth}}", scannedSteps[4].value)
+
+        // Date of birth Year
+        assertEquals(com.example.model.AutomationActionType.SELECT_DROPDOWN, scannedSteps[5].actionType)
+        assertEquals("dobYear", scannedSteps[5].variableKey)
+        assertEquals("{{dobYear}}", scannedSteps[5].value)
+
+        // 2. Test direct tap-to-record on Huawei ID DOB and Phone fields
+        engine.startFreshRecordingScript("https://id7.cloud.huawei.com/CAS/portal/userRegister/regbyphone.html")
+        engine.jsInterface.onUserAction("INPUT", ".hwid-callingCodePhone-root input", "Fill Phone", "phoneNumber")
+        engine.jsInterface.onUserAction("SELECT_DROPDOWN", ".hwid-birth-day", "Select Date of birth (Day)", "dobDay")
+        engine.jsInterface.onUserAction("SELECT_DROPDOWN", ".hwid-birth-month", "Select Date of birth (Month)", "dobMonth")
+        engine.jsInterface.onUserAction("SELECT_DROPDOWN", ".hwid-birth-year", "Select Date of birth (Year)", "dobYear")
+
+        val userTappedSteps = engine.currentScript.value.steps
+        assertEquals(4, userTappedSteps.size)
+        assertEquals("phoneNumber", userTappedSteps[0].variableKey)
+        assertEquals("dobDay", userTappedSteps[1].variableKey)
+        assertEquals("dobMonth", userTappedSteps[2].variableKey)
+        assertEquals("dobYear", userTappedSteps[3].variableKey)
+
+        // 3. Verify JavaScript script generation for Phone and DOB selectors
+        val phoneJs = com.example.automation.AutomationScripts.createInputScript(".hwid-callingCodePhone-root input", "5551234567", true, "phoneNumber")
+        assertTrue(phoneJs.contains("inputmode"))
+        assertTrue(phoneJs.contains("5551234567"))
+
+        val countryCodeJs = com.example.automation.AutomationScripts.createSelectCountryCodeScript(".hwid-callingCodePhone-root > div.hwid-callingCode", "+213", "countryCode")
+        assertTrue(countryCodeJs.contains("algeria"))
+        assertTrue(countryCodeJs.contains("hwid-callingCodePhone-root"))
+
+        val dobDayJs = com.example.automation.AutomationScripts.createSelectDropdownScript(".hwid-birth-day", "28", "dobDay")
+        assertTrue(dobDayJs.contains("hwid-"))
+        assertTrue(dobDayJs.contains("collectClickableOptionsFromOverlays"))
+    }
 }
+
 
 
 

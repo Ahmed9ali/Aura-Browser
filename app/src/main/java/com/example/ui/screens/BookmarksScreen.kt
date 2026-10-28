@@ -137,14 +137,29 @@ fun BookmarksScreen(
     ) { uri ->
         if (uri != null) {
             runCatching {
-                val content = context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
-                if (!content.isNullOrBlank()) {
-                    importTextContent = content
-                    val targetFolder = if (selectedFolder == "All") "Favorites" else selectedFolder
-                    val count = onImportBookmarks(content, targetFolder)
-                    if (count > 0) {
-                        showImportDialog = false
+                val content = context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { reader ->
+                    val buffer = CharArray(8192)
+                    val sb = StringBuilder()
+                    val maxChars = 512 * 1024 // Cap at 512 KB to prevent OOM on large/binary files
+                    var read: Int
+                    while (reader.read(buffer).also { read = it } != -1 && sb.length < maxChars) {
+                        val toAppend = read.coerceAtMost(maxChars - sb.length)
+                        sb.append(buffer, 0, toAppend)
                     }
+                    sb.toString()
+                }
+                if (!content.isNullOrBlank()) {
+                    val targetFolder = if (selectedFolder == "All") "Favorites" else selectedFolder
+                    val count = runCatching { onImportBookmarks(content, targetFolder) }.getOrDefault(0)
+                    if (count > 0) {
+                        importTextContent = ""
+                        showImportDialog = false
+                    } else {
+                        importTextContent = content.take(8000)
+                        onShowMessage?.invoke("No valid bookmarks found in selected file")
+                    }
+                } else {
+                    onShowMessage?.invoke("Selected file is empty")
                 }
             }.onFailure {
                 onShowMessage?.invoke("Could not read selected file")
@@ -220,7 +235,7 @@ fun BookmarksScreen(
             }
         }
 
-        base.sortedWith(comparator)
+        base.distinctBy { it.id }.sortedWith(comparator)
     }
 
     Column(
@@ -229,24 +244,27 @@ fun BookmarksScreen(
             .testTag("bookmarks_screen")
     ) {
         // Bookmarks App Bar:
-        // Left side: ONLY "Bookmarks" text (no bookmark icon, no subtitle).
+        // Left side: ONLY "Bookmarks" text (no bookmark icon, no subtitle) with compact margins.
         // Right side: Action icons for Add Bookmark, Add Group, Sort Menu, and 3-Dots Menu (Import/Export).
         AuraSubScreenTopBar(
             title = stringResource(R.string.bookmarks_title),
             subtitle = null,
             icon = null,
+            contentPadding = PaddingValues(start = 12.dp, end = 6.dp, top = 2.dp, bottom = 2.dp),
+            actionSpacing = 0.dp,
             actions = {
                 // 1. Add Bookmark Icon
                 IconButton(
                     onClick = { showAddDialog = true },
                     modifier = Modifier
-                        .size(48.dp)
+                        .size(40.dp)
                         .testTag("btn_add_bookmark")
                 ) {
                     Icon(
                         imageVector = Icons.Default.Add,
                         contentDescription = stringResource(R.string.bookmarks_add),
-                        tint = MaterialTheme.colorScheme.onSurface
+                        tint = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.size(20.dp)
                     )
                 }
 
@@ -254,13 +272,14 @@ fun BookmarksScreen(
                 IconButton(
                     onClick = { showAddGroupDialog = true },
                     modifier = Modifier
-                        .size(48.dp)
+                        .size(40.dp)
                         .testTag("btn_add_bookmark_group")
                 ) {
                     Icon(
                         imageVector = Icons.Default.CreateNewFolder,
                         contentDescription = stringResource(R.string.bookmarks_add_group),
-                        tint = MaterialTheme.colorScheme.onSurface
+                        tint = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.size(20.dp)
                     )
                 }
 
@@ -269,13 +288,14 @@ fun BookmarksScreen(
                     IconButton(
                         onClick = { showSortMenu = true },
                         modifier = Modifier
-                            .size(48.dp)
+                            .size(40.dp)
                             .testTag("btn_sort_bookmarks")
                     ) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.Sort,
                             contentDescription = stringResource(R.string.bookmarks_sort),
-                            tint = MaterialTheme.colorScheme.onSurface
+                            tint = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.size(20.dp)
                         )
                     }
 
@@ -519,13 +539,14 @@ fun BookmarksScreen(
                     IconButton(
                         onClick = { showMoreMenu = true },
                         modifier = Modifier
-                            .size(48.dp)
+                            .size(40.dp)
                             .testTag("btn_bookmarks_more")
                     ) {
                         Icon(
                             imageVector = Icons.Default.MoreVert,
                             contentDescription = stringResource(R.string.bookmarks_more_options),
-                            tint = MaterialTheme.colorScheme.onSurface
+                            tint = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.size(20.dp)
                         )
                     }
 
@@ -596,17 +617,17 @@ fun BookmarksScreen(
             ),
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp)
+                .padding(horizontal = 12.dp, vertical = 5.dp)
                 .testTag("search_bookmarks_input")
         )
 
         // Folders / Groups Filter Chips + Active Sort Badge
         LazyRow(
-            contentPadding = PaddingValues(horizontal = 16.dp),
+            contentPadding = PaddingValues(horizontal = 12.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(bottom = 10.dp)
+                .padding(bottom = 6.dp)
         ) {
             items(allFolders) { folder ->
                 val isSelected = folder.equals(selectedFolder, ignoreCase = true)
@@ -1059,7 +1080,13 @@ fun BookmarksScreen(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         OutlinedButton(
-                            onClick = { importFileLauncher.launch("*/*") },
+                            onClick = {
+                                runCatching {
+                                    importFileLauncher.launch("*/*")
+                                }.onFailure {
+                                    onShowMessage?.invoke("File picker is not available on this device")
+                                }
+                            },
                             shape = ExpressivePillShape,
                             modifier = Modifier
                                 .weight(1f)
@@ -1080,10 +1107,12 @@ fun BookmarksScreen(
                                     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                                     val clipText = clipboard.primaryClip?.getItemAt(0)?.coerceToText(context)?.toString()
                                     if (!clipText.isNullOrBlank()) {
-                                        importTextContent = clipText
+                                        importTextContent = clipText.take(100_000)
                                     } else {
                                         onShowMessage?.invoke("Clipboard is empty")
                                     }
+                                }.onFailure {
+                                    onShowMessage?.invoke("Could not paste from clipboard")
                                 }
                             },
                             shape = ExpressivePillShape,
@@ -1103,7 +1132,7 @@ fun BookmarksScreen(
 
                     OutlinedTextField(
                         value = importTextContent,
-                        onValueChange = { importTextContent = it },
+                        onValueChange = { importTextContent = it.take(100_000) },
                         label = { Text("Bookmarks Data (JSON / HTML / URLs)") },
                         placeholder = {
                             Text("GitHub | https://github.com | Work\nKotlin Docs | https://kotlinlang.org | Favorites")
@@ -1121,7 +1150,11 @@ fun BookmarksScreen(
                 Button(
                     onClick = {
                         if (importTextContent.isNotBlank()) {
-                            onImportBookmarks(importTextContent, targetFolder)
+                            runCatching {
+                                onImportBookmarks(importTextContent, targetFolder)
+                            }.onFailure {
+                                onShowMessage?.invoke("Failed to import bookmarks")
+                            }
                             importTextContent = ""
                             showImportDialog = false
                         }
@@ -1216,8 +1249,12 @@ fun BookmarksScreen(
 
                         Button(
                             onClick = {
-                                val fileName = if (exportFormatJson) "aura_bookmarks.json" else "aura_bookmarks.html"
-                                exportFileLauncher.launch(fileName)
+                                runCatching {
+                                    val fileName = if (exportFormatJson) "aura_bookmarks.json" else "aura_bookmarks.html"
+                                    exportFileLauncher.launch(fileName)
+                                }.onFailure {
+                                    onShowMessage?.invoke("File saver is not available on this device")
+                                }
                             },
                             shape = ExpressivePillShape,
                             modifier = Modifier

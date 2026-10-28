@@ -11,6 +11,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
@@ -47,6 +48,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.model.AutomationStatus
@@ -429,6 +431,8 @@ fun AuraSubScreenTopBar(
     accentColor: Color = MaterialTheme.colorScheme.primary,
     onNavigateBack: (() -> Unit)? = null,
     backButtonTestTag: String? = null,
+    contentPadding: PaddingValues = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+    actionSpacing: Dp = 4.dp,
     actions: @Composable RowScope.() -> Unit = {},
     bottomContent: (@Composable () -> Unit)? = null,
     modifier: Modifier = Modifier
@@ -449,7 +453,7 @@ fun AuraSubScreenTopBar(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 10.dp)
+                    .padding(contentPadding)
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -521,11 +525,11 @@ fun AuraSubScreenTopBar(
                     }
                 }
 
-                Spacer(modifier = Modifier.width(8.dp))
+                Spacer(modifier = Modifier.width(6.dp))
 
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(actionSpacing),
                     content = actions
                 )
             }

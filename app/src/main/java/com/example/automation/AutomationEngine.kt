@@ -288,10 +288,29 @@ class AutomationEngine(
                 }
                 elements
             } catch (_: Throwable) {
-                // Fallback parser for local JVM unit tests where android.jar JSONArray is stubbed
-                val objRegex = Regex("\\{[^{}]*\\}")
-                objRegex.findAll(jsonString).mapNotNull { match ->
-                    val raw = match.value
+                // Safe character-based fallback parser for local JVM unit tests (avoids [^{}] regex on Android ICU)
+                val blocks = mutableListOf<String>()
+                var inStr = false
+                var esc = false
+                var startIdx = -1
+                for (i in jsonString.indices) {
+                    val ch = jsonString[i]
+                    if (inStr) {
+                        if (esc) esc = false
+                        else if (ch == '\\') esc = true
+                        else if (ch == '"') inStr = false
+                    } else {
+                        when (ch) {
+                            '"' -> inStr = true
+                            '{' -> startIdx = i
+                            '}' -> if (startIdx >= 0 && i > startIdx) {
+                                blocks.add(jsonString.substring(startIdx, i + 1))
+                                startIdx = -1
+                            }
+                        }
+                    }
+                }
+                blocks.mapNotNull { raw ->
                     fun strVal(key: String): String =
                         Regex("\"$key\"\\s*:\\s*\"([^\"]*)\"").find(raw)?.groupValues?.get(1) ?: ""
                     fun boolVal(key: String): Boolean =
@@ -315,7 +334,7 @@ class AutomationEngine(
                             semanticType = sem
                         )
                     }
-                }.toList()
+                }
             }
         }
     }
@@ -438,7 +457,18 @@ class AutomationEngine(
     }
 
     private fun detectVariableKeyFromSelector(selector: String, description: String): String? {
+        val selLower = selector.lowercase()
+        val descLower = description.lowercase()
         val combined = "$selector $description".lowercase()
+
+        // 1. Phone input check: If selector has input or description has phone, prioritize phoneNumber over countryCode
+        if ((selLower.contains("input") || descLower.contains("phone") || descLower.contains("mobile")) &&
+            (combined.contains("phone") || combined.contains("mobile") || combined.contains("tel") || combined.contains("callingcodephone")) &&
+            !combined.contains("countrycode") && !combined.contains("dialcode") && !combined.contains("calling-code")
+        ) {
+            return "phoneNumber"
+        }
+
         return when {
             combined.contains("email") || combined.contains("mail") -> "email"
             combined.contains("confirm") && combined.contains("pass") -> "confirmPassword"
@@ -447,16 +477,25 @@ class AutomationEngine(
             combined.contains("first") && combined.contains("name") -> "firstName"
             combined.contains("last") && combined.contains("name") -> "lastName"
             combined.contains("full") && combined.contains("name") -> "fullName"
-            combined.contains("countrycode") || combined.contains("dial-code") || combined.contains("iti__selected-flag") ||
-                    (combined.contains("country") && (combined.contains("code") || combined.contains("dial") || combined.contains("prefix"))) -> "countryCode"
-            combined.contains("phone") || combined.contains("mobile") || combined.contains("tel") -> "phoneNumber"
-            combined.contains("dobday") || combined.contains("birth_day") || combined.contains("bday-day") ||
-                    (Regex("\\b(day|dd)\\b").containsMatchIn(combined) && (combined.contains("dob") || combined.contains("birth") || combined.contains("select"))) -> "dobDay"
-            combined.contains("dobmonth") || combined.contains("birth_month") || combined.contains("bday-month") ||
-                    (Regex("\\b(month|mm)\\b").containsMatchIn(combined) && (combined.contains("dob") || combined.contains("birth") || combined.contains("select"))) -> "dobMonth"
-            combined.contains("dobyear") || combined.contains("birth_year") || combined.contains("bday-year") ||
-                    (Regex("\\b(year|yyyy)\\b").containsMatchIn(combined) && (combined.contains("dob") || combined.contains("birth") || combined.contains("select"))) -> "dobYear"
+            combined.contains("countrycode") || combined.contains("dial-code") || combined.contains("dialcode") ||
+                    combined.contains("countrydropdown") || combined.contains("country_dropdown") ||
+                    combined.contains("iti__") || combined.contains("phoneinputcountry") ||
+                    combined.contains("selected-flag") || combined.contains("flag-dropdown") ||
+                    combined.contains("countrylist") || combined.contains("calling-code") ||
+                    (combined.contains("country") && (combined.contains("code") || combined.contains("dial") || combined.contains("prefix") || combined.contains("phone") || combined.contains("region"))) ||
+                    (combined.contains("callingcode") && !selLower.contains("input")) -> "countryCode"
+            // Check split & full DOB BEFORE phoneNumber so <input type="tel" id="day"|"year"> is never misclassified as phone
+            combined.contains("dobday") || combined.contains("birth_day") || combined.contains("bday-day") || combined.contains("birthday_day") ||
+                    selector.equals("#day", ignoreCase = true) || selLower.contains("day") ||
+                    (Regex("\\b(day|dd)\\b").containsMatchIn(combined) && !combined.contains("today") && !combined.contains("everyday")) -> "dobDay"
+            combined.contains("dobmonth") || combined.contains("birth_month") || combined.contains("bday-month") || combined.contains("birthday_month") ||
+                    selector.equals("#month", ignoreCase = true) || selLower.contains("month") ||
+                    Regex("\\b(month|mm|january|february)\\b").containsMatchIn(combined) -> "dobMonth"
+            combined.contains("dobyear") || combined.contains("birth_year") || combined.contains("bday-year") || combined.contains("birthday_year") ||
+                    selector.equals("#year", ignoreCase = true) || selLower.contains("year") ||
+                    Regex("\\b(year|yyyy|yr)\\b").containsMatchIn(combined) -> "dobYear"
             combined.contains("birth") || combined.contains("dob") || combined.contains("bday") || combined.contains("datepicker") -> "dob"
+            combined.contains("phone") || combined.contains("mobile") || combined.contains("tel") || combined.contains("whatsapp") || combined.contains("callingcodephone") -> "phoneNumber"
             combined.contains("gender") || combined.contains("sex") -> "gender"
             combined.contains("zip") || combined.contains("postal") || combined.contains("pin") -> "zipCode"
             combined.contains("city") -> "city"
@@ -1153,42 +1192,75 @@ class AutomationEngine(
                             addLog("[Run $iteration] ${if (ok) "Selected radio" else "Attempted radio"}: ${step.elementDescription}")
                         }
                         AutomationActionType.INPUT -> {
-                            val js = AutomationScripts.createInputScript(step.selector, resolvedValue, step.clearBeforeInput, fallbackHint)
-                            val ok = evaluateJsWithRetry(js)
+                            // If this step was recorded as INPUT but targets a split DOB or full DOB or Country Code element,
+                            // route to the smart multi-mode handler so both <input> and custom dropdowns/pickers work seamlessly
+                            val ok = when (stepFieldKey) {
+                                "dobDay", "dobMonth", "dobYear" -> {
+                                    val js = AutomationScripts.createSelectDropdownScript(step.selector, resolvedValue, stepFieldKey)
+                                    evaluateJsWithRetry(js, maxAttempts = 10, retryDelayMs = 350L)
+                                }
+                                "dob" -> {
+                                    val (y, m, d) = parseDobTriplet(resolvedValue, currentDefaultRecord)
+                                    val js = AutomationScripts.createSelectDateScript(step.selector, "$y-$m-$d", d, m, y, fallbackHint)
+                                    evaluateJsWithRetry(js, maxAttempts = 10, retryDelayMs = 350L)
+                                }
+                                "countryCode" -> {
+                                    val code = resolvedValue.ifBlank { currentDefaultRecord.countryCode }
+                                    val js = AutomationScripts.createSelectCountryCodeScript(step.selector, code, fallbackHint)
+                                    evaluateJsWithRetry(js, maxAttempts = 10, retryDelayMs = 350L)
+                                }
+                                else -> {
+                                    val js = AutomationScripts.createInputScript(step.selector, resolvedValue, step.clearBeforeInput, fallbackHint)
+                                    evaluateJsWithRetry(js)
+                                }
+                            }
                             addLog("[Run $iteration] ${if (ok) "Filled" else "Attempted fill"} ${step.elementDescription} -> '$resolvedValue'")
                         }
                         AutomationActionType.SELECT_DROPDOWN -> {
-                            val js = AutomationScripts.createSelectDropdownScript(step.selector, resolvedValue, fallbackHint)
-                            val ok = evaluateJsWithRetry(js, maxAttempts = 8, retryDelayMs = 380L)
+                            val ok = when (stepFieldKey) {
+                                "countryCode" -> {
+                                    val code = resolvedValue.ifBlank { currentDefaultRecord.countryCode }
+                                    val js = AutomationScripts.createSelectCountryCodeScript(step.selector, code, fallbackHint)
+                                    evaluateJsWithRetry(js, maxAttempts = 10, retryDelayMs = 350L)
+                                }
+                                "dob" -> {
+                                    val (y, m, d) = parseDobTriplet(resolvedValue, currentDefaultRecord)
+                                    val js = AutomationScripts.createSelectDateScript(step.selector, "$y-$m-$d", d, m, y, fallbackHint)
+                                    evaluateJsWithRetry(js, maxAttempts = 10, retryDelayMs = 350L)
+                                }
+                                "dobDay" -> {
+                                    val d = resolvedValue.ifBlank { currentDefaultRecord.dobDay }
+                                    val js = AutomationScripts.createSelectDropdownScript(step.selector, d, "day")
+                                    evaluateJsWithRetry(js, maxAttempts = 10, retryDelayMs = 350L)
+                                }
+                                "dobMonth" -> {
+                                    val m = resolvedValue.ifBlank { currentDefaultRecord.dobMonth }
+                                    val js = AutomationScripts.createSelectDropdownScript(step.selector, m, "month")
+                                    evaluateJsWithRetry(js, maxAttempts = 10, retryDelayMs = 350L)
+                                }
+                                "dobYear" -> {
+                                    val y = resolvedValue.ifBlank { currentDefaultRecord.dobYear }
+                                    val js = AutomationScripts.createSelectDropdownScript(step.selector, y, "year")
+                                    evaluateJsWithRetry(js, maxAttempts = 10, retryDelayMs = 350L)
+                                }
+                                else -> {
+                                    val js = AutomationScripts.createSelectDropdownScript(step.selector, resolvedValue, fallbackHint)
+                                    evaluateJsWithRetry(js, maxAttempts = 10, retryDelayMs = 350L)
+                                }
+                            }
                             addLog("[Run $iteration] ${if (ok) "Selected" else "Attempted select"} '$resolvedValue' in ${step.elementDescription}")
                         }
                         AutomationActionType.SELECT_COUNTRY_CODE -> {
                             val code = resolvedValue.ifBlank { currentDefaultRecord.countryCode }
                             val js = AutomationScripts.createSelectCountryCodeScript(step.selector, code, fallbackHint)
-                            val ok = evaluateJsWithRetry(js, maxAttempts = 8, retryDelayMs = 380L)
+                            val ok = evaluateJsWithRetry(js, maxAttempts = 10, retryDelayMs = 350L)
                             addLog("[Run $iteration] ${if (ok) "Selected" else "Attempted"} Country Code '$code'")
                         }
                         AutomationActionType.SELECT_DATE -> {
                             val dob = resolvedValue.ifBlank { currentDefaultRecord.dob }
-                            val parts = dob.split(Regex("[-/.\\s]+")).filter { it.isNotBlank() }
-                            val (y, m, d) = if (parts.size >= 3) {
-                                when {
-                                    parts[0].length == 4 -> Triple(parts[0], parts[1].padStart(2, '0'), parts[2].padStart(2, '0'))
-                                    parts[2].length == 4 -> {
-                                        val firstNum = parts[0].toIntOrNull() ?: 1
-                                        if (firstNum > 12) {
-                                            Triple(parts[2], parts[1].padStart(2, '0'), parts[0].padStart(2, '0'))
-                                        } else {
-                                            Triple(parts[2], parts[0].padStart(2, '0'), parts[1].padStart(2, '0'))
-                                        }
-                                    }
-                                    else -> Triple(parts[0], parts[1].padStart(2, '0'), parts[2].padStart(2, '0'))
-                                }
-                            } else {
-                                Triple(currentDefaultRecord.dobYear, currentDefaultRecord.dobMonth, currentDefaultRecord.dobDay)
-                            }
+                            val (y, m, d) = parseDobTriplet(dob, currentDefaultRecord)
                             val js = AutomationScripts.createSelectDateScript(step.selector, "$y-$m-$d", d, m, y, fallbackHint)
-                            val ok = evaluateJsWithRetry(js, maxAttempts = 8, retryDelayMs = 380L)
+                            val ok = evaluateJsWithRetry(js, maxAttempts = 10, retryDelayMs = 350L)
                             addLog("[Run $iteration] ${if (ok) "Selected" else "Attempted"} Date: '$y-$m-$d'")
                         }
                         AutomationActionType.UPLOAD_FILE -> {
@@ -1269,6 +1341,58 @@ class AutomationEngine(
             }
         }
         return false
+    }
+
+    private fun parseDobTriplet(
+        rawDob: String,
+        fallbackRecord: AutomationDataRecord
+    ): Triple<String, String, String> {
+        val monthMap = mapOf(
+            "jan" to "01", "january" to "01",
+            "feb" to "02", "february" to "02",
+            "mar" to "03", "march" to "03",
+            "apr" to "04", "april" to "04",
+            "may" to "05",
+            "jun" to "06", "june" to "06",
+            "jul" to "07", "july" to "07",
+            "aug" to "08", "august" to "08",
+            "sep" to "09", "sept" to "09", "september" to "09",
+            "oct" to "10", "october" to "10",
+            "nov" to "11", "november" to "11",
+            "dec" to "12", "december" to "12"
+        )
+        val parts = rawDob.trim().split(Regex("[-/.,\\s]+")).filter { it.isNotBlank() }
+        if (parts.size >= 3) {
+            val namedMonthIdx = parts.indexOfFirst { monthMap.containsKey(it.lowercase()) }
+            if (namedMonthIdx >= 0) {
+                val m = monthMap[parts[namedMonthIdx].lowercase()] ?: fallbackRecord.dobMonth
+                val rest = parts.filterIndexed { i, _ -> i != namedMonthIdx }
+                val y = rest.firstOrNull { it.length == 4 } ?: rest.last()
+                val d = (rest.firstOrNull { it != y } ?: fallbackRecord.dobDay).padStart(2, '0')
+                return Triple(y, m, d)
+            }
+            return when {
+                parts[0].length == 4 -> Triple(
+                    parts[0],
+                    parts[1].padStart(2, '0'),
+                    parts[2].padStart(2, '0')
+                )
+                parts[2].length == 4 -> {
+                    val firstNum = parts[0].toIntOrNull() ?: 1
+                    if (firstNum > 12) {
+                        Triple(parts[2], parts[1].padStart(2, '0'), parts[0].padStart(2, '0'))
+                    } else {
+                        Triple(parts[2], parts[0].padStart(2, '0'), parts[1].padStart(2, '0'))
+                    }
+                }
+                else -> Triple(
+                    parts[0],
+                    parts[1].padStart(2, '0'),
+                    parts[2].padStart(2, '0')
+                )
+            }
+        }
+        return Triple(fallbackRecord.dobYear, fallbackRecord.dobMonth, fallbackRecord.dobDay)
     }
 
     private fun inferStepFieldKey(step: AutomationStep): String? {
