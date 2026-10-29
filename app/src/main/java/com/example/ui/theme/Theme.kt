@@ -6,7 +6,9 @@ import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.interaction.InteractionSource
 import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.LocalRippleConfiguration
 import androidx.compose.material3.MaterialExpressiveTheme
 import androidx.compose.material3.MotionScheme
 import androidx.compose.material3.darkColorScheme
@@ -131,7 +133,7 @@ private val LightColorScheme = lightColorScheme(
     onError = Color.White
 )
 
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@OptIn(ExperimentalMaterial3ExpressiveApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun BrowserTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
@@ -153,7 +155,10 @@ fun BrowserTheme(
         typography = Typography,
         shapes = ExpressiveShapes,
         content = {
-            CompositionLocalProvider(LocalIndication provides AuraComposeIndication) {
+            CompositionLocalProvider(
+                LocalIndication provides AuraComposeIndication,
+                LocalRippleConfiguration provides null
+            ) {
                 content()
             }
         }

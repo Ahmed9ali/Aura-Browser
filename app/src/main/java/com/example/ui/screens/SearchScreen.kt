@@ -508,13 +508,16 @@ private fun ClipboardGroupedCardItem(
                 copiedText.startsWith("www.", ignoreCase = true) ||
                 (copiedText.contains(".") && !copiedText.contains(" "))
     }
+    val cleanCopiedSubtitle = remember(copiedText) {
+        copiedText.removePrefix("https://").removePrefix("http://").removePrefix("www.")
+    }
 
     Card(
         shape = shape,
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
         ),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.38f)),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)),
         modifier = Modifier
             .fillMaxWidth()
             .clip(shape)
@@ -525,59 +528,61 @@ private fun ClipboardGroupedCardItem(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 13.dp)
+                .padding(horizontal = 14.dp, vertical = 10.dp)
         ) {
+            // Compact Leading Squircle Icon matching Recent History cards
             Surface(
                 shape = ExpressiveSquircleShape,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(40.dp)
+                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f),
+                modifier = Modifier.size(36.dp)
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Icon(
                         imageVector = Icons.Default.ContentPaste,
                         contentDescription = "Paste Link",
-                        tint = MaterialTheme.colorScheme.onPrimary,
-                        modifier = Modifier.size(20.dp)
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(18.dp)
                     )
                 }
             }
 
             Spacer(modifier = Modifier.width(12.dp))
 
+            // Compact 2-Line Title + Copied Link/Text matching Recent History cards
             Column(modifier = Modifier.weight(1f)) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Text(
-                        text = if (isUrl) "Paste & open copied link" else "Paste copied search text",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary,
+                        text = if (isUrl) "Link you copied" else "Text you copied",
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
                         maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
                     )
                     Surface(
                         shape = ExpressiveChipShape,
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
                     ) {
                         Text(
                             text = "Clipboard",
                             fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
+                            fontWeight = FontWeight.Medium,
                             color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp)
                         )
                     }
                 }
 
-                Spacer(modifier = Modifier.height(3.dp))
+                Spacer(modifier = Modifier.height(2.dp))
 
                 Text(
-                    text = copiedText,
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface,
+                    text = cleanCopiedSubtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -585,56 +590,27 @@ private fun ClipboardGroupedCardItem(
 
             Spacer(modifier = Modifier.width(10.dp))
 
+            // Compact Action Pills (Paste & Dismiss — redirect removed since tapping card opens link)
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                // Insert into search bar without navigating immediately
                 Surface(
                     shape = CircleShape,
-                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)),
+                    color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.85f),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
                     modifier = Modifier
-                        .size(32.dp)
+                        .size(30.dp)
                         .clip(CircleShape)
-                        .clickable(onClick = onInsertToBar)
-                        .testTag("btn_insert_clipboard_query")
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = Icons.Default.NorthWest,
-                            contentDescription = "Insert clipboard into search bar",
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(15.dp)
-                        )
-                    }
-                }
-
-                // Explicit Paste & Go Pill Button
-                Surface(
-                    shape = ExpressivePillShape,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier
-                        .clip(ExpressivePillShape)
                         .clickable(onClick = onPasteAndGo)
                         .testTag("btn_paste_link")
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
-                    ) {
+                    Box(contentAlignment = Alignment.Center) {
                         Icon(
-                            imageVector = Icons.Default.ArrowOutward,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onPrimary,
+                            imageVector = Icons.Default.ContentPaste,
+                            contentDescription = "Paste",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(14.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = "Paste",
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onPrimary
                         )
                     }
                 }
@@ -642,10 +618,10 @@ private fun ClipboardGroupedCardItem(
                 // Dismiss Clipboard Item Button
                 Surface(
                     shape = CircleShape,
-                    color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.45f),
+                    color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f),
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.22f)),
                     modifier = Modifier
-                        .size(32.dp)
+                        .size(30.dp)
                         .clip(CircleShape)
                         .clickable(onClick = onDismiss)
                         .testTag("btn_dismiss_paste_link")
@@ -655,7 +631,7 @@ private fun ClipboardGroupedCardItem(
                             imageVector = Icons.Default.Clear,
                             contentDescription = "Dismiss copied link",
                             tint = MaterialTheme.colorScheme.error,
-                            modifier = Modifier.size(15.dp)
+                            modifier = Modifier.size(14.dp)
                         )
                     }
                 }
@@ -666,7 +642,7 @@ private fun ClipboardGroupedCardItem(
 
 /**
  * Real History Card Item inside the Material 3 Grouped List.
- * Includes Copy to Clipboard action, Insert into Search Bar action, and Delete action.
+ * Includes Copy to Clipboard action and Delete action (redirect removed as clicking card redirects).
  */
 @Composable
 private fun RealHistoryGroupedCardItem(
@@ -703,13 +679,13 @@ private fun RealHistoryGroupedCardItem(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 12.dp)
+                .padding(horizontal = 14.dp, vertical = 10.dp)
         ) {
             // Leading Squircle Icon
             Surface(
                 shape = ExpressiveSquircleShape,
                 color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f),
-                modifier = Modifier.size(38.dp)
+                modifier = Modifier.size(36.dp)
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Icon(
@@ -746,10 +722,10 @@ private fun RealHistoryGroupedCardItem(
 
             Spacer(modifier = Modifier.width(10.dp))
 
-            // Separated Action Pill Buttons (Copy, Redirect/Insert, Dismiss/Delete)
+            // Separated Action Pill Buttons (Copy & Dismiss/Delete — redirect removed as clicking card redirects)
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 // Copy to Clipboard Button
                 Surface(
@@ -757,7 +733,7 @@ private fun RealHistoryGroupedCardItem(
                     color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.85f),
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
                     modifier = Modifier
-                        .size(32.dp)
+                        .size(30.dp)
                         .clip(CircleShape)
                         .clickable(onClick = onCopy)
                         .testTag("btn_copy_search_history_${item.id}")
@@ -767,28 +743,7 @@ private fun RealHistoryGroupedCardItem(
                             imageVector = Icons.Default.ContentCopy,
                             contentDescription = "Copy to clipboard",
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(15.dp)
-                        )
-                    }
-                }
-
-                // Populate Search Bar (Redirect) Button
-                Surface(
-                    shape = CircleShape,
-                    color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.85f),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
-                    modifier = Modifier
-                        .size(32.dp)
-                        .clip(CircleShape)
-                        .clickable(onClick = onInsert)
-                        .testTag("btn_insert_query")
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = Icons.Default.NorthWest,
-                            contentDescription = "Insert into search",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(15.dp)
+                            modifier = Modifier.size(14.dp)
                         )
                     }
                 }
@@ -800,7 +755,7 @@ private fun RealHistoryGroupedCardItem(
                         color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f),
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.22f)),
                         modifier = Modifier
-                            .size(32.dp)
+                            .size(30.dp)
                             .clip(CircleShape)
                             .clickable(onClick = onDelete)
                             .testTag("btn_delete_search_history_${item.id}")
@@ -810,7 +765,7 @@ private fun RealHistoryGroupedCardItem(
                                 imageVector = Icons.Default.Clear,
                                 contentDescription = "Remove from history",
                                 tint = MaterialTheme.colorScheme.error,
-                                modifier = Modifier.size(15.dp)
+                                modifier = Modifier.size(14.dp)
                             )
                         }
                     }

@@ -108,6 +108,8 @@ class BrowserViewModel(
         }
     }
 
+    val devToolsEngine = com.example.devtools.DevToolsEngine(viewModelScope)
+
     val uiState: StateFlow<BrowserUiState> = combine(
         listOf(
             _currentScreen,
@@ -233,6 +235,20 @@ class BrowserViewModel(
 
     fun openAutomationManager() {
         _currentScreen.value = NavScreen.AUTOMATION
+    }
+
+    fun openDevTool(tool: com.example.devtools.DevToolTab) {
+        val activeTab = uiState.value.activeTab
+        val currentUrl = activeTab?.url ?: ""
+        val targetUrl = if (currentUrl.isBlank() || currentUrl.startsWith("aura://") || currentUrl == "about:blank") {
+            val engineHome = repository.settings.value.searchEngine.homeUrl
+            loadUrl(engineHome, initialTitle = repository.settings.value.searchEngine.displayName)
+            engineHome
+        } else {
+            _currentScreen.value = NavScreen.WEB_PAGE
+            currentUrl
+        }
+        devToolsEngine.openTool(tool, targetUrl)
     }
 
     fun setShowMoreSheet(show: Boolean) {

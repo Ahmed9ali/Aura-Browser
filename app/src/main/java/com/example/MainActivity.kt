@@ -393,10 +393,13 @@ fun BrowserApp(
                                 isDesktopMode = activeTab.isDesktopMode || uiState.settings.desktopModeDefault,
                                 adShieldEnabled = uiState.settings.adShieldEnabled,
                                 automationEngine = viewModel.automationEngine,
+                                devToolsEngine = viewModel.devToolsEngine,
                                 reloadTrigger = viewModel.reloadTrigger,
                                 stopLoadingTrigger = viewModel.stopLoadingTrigger,
                                 translateTrigger = viewModel.translateTrigger,
                                 onOpenScriptManager = { viewModel.openAutomationManager() },
+                                onCopyText = { text, label -> viewModel.copyToClipboard(context, text, label) },
+                                onShowMessage = { msg -> viewModel.showMessage(msg) },
                                 onWebStateChanged = { title, url, progress, loading, canBack, canForward ->
                                     viewModel.updateWebState(
                                         title = title,
@@ -486,12 +489,15 @@ fun BrowserApp(
 
     // 3-Dots More Menu Bottom Sheet
     if (uiState.showMoreSheet) {
+        val networkLogs by viewModel.devToolsEngine.networkLogs.collectAsStateWithLifecycle()
         BrowserMoreMenuSheet(
             activeTab = activeTab,
             isDesktopMode = activeTab?.isDesktopMode == true || uiState.settings.desktopModeDefault,
             isProxyEnabled = uiState.isProxyEnabled,
             proxyNode = uiState.proxyNode,
             adShieldEnabled = uiState.settings.adShieldEnabled,
+            networkRequestCount = networkLogs.size,
+            defaultFallbackUrl = uiState.settings.searchEngine.homeUrl,
             onDismiss = { viewModel.setShowMoreSheet(false) },
             onOpenBookmarks = { viewModel.navigateTo(NavScreen.BOOKMARK) },
             onOpenHistory = { viewModel.navigateTo(NavScreen.HISTORY) },
@@ -505,6 +511,15 @@ fun BrowserApp(
                 activeTab?.let { viewModel.toggleDesktopMode(it.id) }
             },
             onToggleAdShield = { viewModel.toggleAdShield() },
+            onOpenSourceView = {
+                viewModel.openDevTool(com.example.devtools.DevToolTab.SOURCE_VIEW)
+            },
+            onOpenInspector = {
+                viewModel.openDevTool(com.example.devtools.DevToolTab.INSPECT_DOM)
+            },
+            onOpenNetworkSniffer = {
+                viewModel.openDevTool(com.example.devtools.DevToolTab.NETWORK_SNIFFER)
+            },
             onOpenAutomation = { viewModel.openAutomationManager() },
             onOpenSettings = { viewModel.navigateTo(NavScreen.SETTINGS) },
             onShowMessage = { msg -> viewModel.showMessage(msg) }
