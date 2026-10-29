@@ -24,6 +24,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Sort
@@ -90,6 +92,7 @@ import com.example.ui.theme.ExpressiveChipShape
 import com.example.ui.theme.ExpressiveDialogShape
 import com.example.ui.theme.ExpressivePillShape
 import com.example.ui.theme.ExpressiveSquircleShape
+import com.example.ui.theme.groupedListCardShape
 
 /**
  * Material 3 Expressive Bookmarks Screen
@@ -666,10 +669,10 @@ fun BookmarksScreen(
             }
         }
 
-        // Bookmarks List
+        // Material 3 Grouped List Cards for Bookmarks
         LazyColumn(
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 96.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 96.dp),
+            verticalArrangement = Arrangement.spacedBy(3.dp),
             modifier = Modifier.fillMaxSize()
         ) {
             if (filteredBookmarks.isEmpty()) {
@@ -708,33 +711,43 @@ fun BookmarksScreen(
                     }
                 }
             } else {
-                items(filteredBookmarks, key = { it.id }) { bookmark ->
+                itemsIndexed(filteredBookmarks, key = { _, it -> it.id }) { index, bookmark ->
+                    val cardShape = groupedListCardShape(
+                        index = index,
+                        count = filteredBookmarks.size
+                    )
+                    val cleanUrl = remember(bookmark.url) {
+                        bookmark.url.removePrefix("https://").removePrefix("http://").removePrefix("www.")
+                    }
+
                     Card(
-                        shape = ExpressiveCardShape,
+                        shape = cardShape,
                         colors = CardDefaults.cardColors(
                             containerColor = if (bookmark.isPinned) {
-                                MaterialTheme.colorScheme.surfaceContainer
+                                MaterialTheme.colorScheme.surfaceContainerHighest
                             } else {
-                                MaterialTheme.colorScheme.surfaceContainerLow
+                                MaterialTheme.colorScheme.surfaceContainerHigh
                             }
                         ),
                         border = BorderStroke(
                             width = 1.dp,
                             color = if (bookmark.isPinned) {
-                                Color(0xFFF59E0B).copy(alpha = 0.45f)
+                                Color(0xFFF59E0B).copy(alpha = 0.4f)
                             } else {
-                                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
                             }
                         ),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(ExpressiveCardShape)
+                            .clip(cardShape)
                             .clickable { onOpenBookmark(bookmark.url) }
                             .testTag("bookmark_item_${bookmark.id}")
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(14.dp)
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 10.dp)
                         ) {
                             Surface(
                                 shape = ExpressiveSquircleShape,
@@ -743,14 +756,14 @@ fun BookmarksScreen(
                                 } else {
                                     MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
                                 },
-                                modifier = Modifier.size(40.dp)
+                                modifier = Modifier.size(36.dp)
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
                                     Icon(
                                         imageVector = if (bookmark.isPinned) Icons.Default.PushPin else Icons.Default.Public,
                                         contentDescription = null,
                                         tint = if (bookmark.isPinned) Color(0xFFF59E0B) else MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(20.dp)
+                                        modifier = Modifier.size(18.dp)
                                     )
                                 }
                             }
@@ -764,114 +777,124 @@ fun BookmarksScreen(
                                 ) {
                                     Text(
                                         text = bookmark.title,
-                                        style = MaterialTheme.typography.titleSmall,
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        fontWeight = FontWeight.SemiBold,
                                         color = MaterialTheme.colorScheme.onSurface,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
                                         modifier = Modifier.weight(1f, fill = false)
                                     )
-                                    if (bookmark.isPinned) {
+                                    if (selectedFolder == "All" && bookmark.folder.isNotBlank()) {
                                         Surface(
                                             shape = ExpressiveChipShape,
-                                            color = Color(0xFFF59E0B).copy(alpha = 0.18f)
+                                            color = MaterialTheme.colorScheme.surfaceContainerHighest
                                         ) {
                                             Text(
-                                                text = "Pinned",
+                                                text = bookmark.folder,
                                                 fontSize = 10.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                color = Color(0xFFF59E0B),
+                                                fontWeight = FontWeight.Medium,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp)
                                             )
                                         }
                                     }
                                 }
+
+                                Spacer(modifier = Modifier.height(2.dp))
+
                                 Text(
-                                    text = bookmark.url,
+                                    text = cleanUrl,
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Surface(
-                                    shape = ExpressiveChipShape,
-                                    color = MaterialTheme.colorScheme.surfaceContainerHigh
-                                ) {
-                                    Text(
-                                        text = bookmark.folder,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-                                    )
-                                }
                             }
 
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                // Pin / Unpin Bookmark Icon Button
-                                IconButton(
-                                    onClick = { onTogglePinBookmark(bookmark.id) },
+                            Spacer(modifier = Modifier.width(10.dp))
+
+                            // Compact Action Pills (Pin, Copy, Delete — redirect removed since tapping card opens bookmark)
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                // Pin / Unpin Bookmark Pill
+                                Surface(
+                                    shape = CircleShape,
+                                    color = if (bookmark.isPinned) {
+                                        Color(0xFFF59E0B).copy(alpha = 0.2f)
+                                    } else {
+                                        MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.85f)
+                                    },
+                                    border = BorderStroke(
+                                        1.dp,
+                                        if (bookmark.isPinned) Color(0xFFF59E0B).copy(alpha = 0.4f)
+                                        else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                                    ),
                                     modifier = Modifier
-                                        .size(36.dp)
+                                        .size(30.dp)
+                                        .clip(CircleShape)
+                                        .clickable { onTogglePinBookmark(bookmark.id) }
                                         .testTag("btn_pin_bookmark_${bookmark.id}")
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.Default.PushPin,
-                                        contentDescription = if (bookmark.isPinned) {
-                                            stringResource(R.string.bookmarks_unpin)
-                                        } else {
-                                            stringResource(R.string.bookmarks_pin)
-                                        },
-                                        tint = if (bookmark.isPinned) {
-                                            Color(0xFFF59E0B)
-                                        } else {
-                                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f)
-                                        },
-                                        modifier = Modifier.size(17.dp)
-                                    )
-                                }
-
-                                if (onCopyUrl != null) {
-                                    IconButton(
-                                        onClick = { onCopyUrl(bookmark.url) },
-                                        modifier = Modifier
-                                            .size(36.dp)
-                                            .testTag("btn_copy_bookmark_${bookmark.id}")
-                                    ) {
+                                    Box(contentAlignment = Alignment.Center) {
                                         Icon(
-                                            imageVector = Icons.Default.ContentCopy,
-                                            contentDescription = "Copy Bookmark Link",
-                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            modifier = Modifier.size(17.dp)
+                                            imageVector = Icons.Default.PushPin,
+                                            contentDescription = if (bookmark.isPinned) {
+                                                stringResource(R.string.bookmarks_unpin)
+                                            } else {
+                                                stringResource(R.string.bookmarks_pin)
+                                            },
+                                            tint = if (bookmark.isPinned) {
+                                                Color(0xFFF59E0B)
+                                            } else {
+                                                MaterialTheme.colorScheme.onSurfaceVariant
+                                            },
+                                            modifier = Modifier.size(14.dp)
                                         )
                                     }
                                 }
 
-                                IconButton(
-                                    onClick = { onOpenInNewTab(bookmark.url, bookmark.title) },
-                                    modifier = Modifier
-                                        .size(36.dp)
-                                        .testTag("btn_open_new_tab_${bookmark.id}")
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.OpenInNew,
-                                        contentDescription = "Open in New Tab",
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(17.dp)
-                                    )
+                                if (onCopyUrl != null) {
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.85f),
+                                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
+                                        modifier = Modifier
+                                            .size(30.dp)
+                                            .clip(CircleShape)
+                                            .clickable { onCopyUrl(bookmark.url) }
+                                            .testTag("btn_copy_bookmark_${bookmark.id}")
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(
+                                                imageVector = Icons.Default.ContentCopy,
+                                                contentDescription = "Copy Bookmark Link",
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.size(14.dp)
+                                            )
+                                        }
+                                    }
                                 }
 
-                                IconButton(
-                                    onClick = { onDeleteBookmark(bookmark.id) },
+                                Surface(
+                                    shape = CircleShape,
+                                    color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f),
+                                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.22f)),
                                     modifier = Modifier
-                                        .size(36.dp)
+                                        .size(30.dp)
+                                        .clip(CircleShape)
+                                        .clickable { onDeleteBookmark(bookmark.id) }
                                         .testTag("btn_delete_bookmark_${bookmark.id}")
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Delete,
-                                        contentDescription = "Delete Bookmark",
-                                        tint = MaterialTheme.colorScheme.error.copy(alpha = 0.85f),
-                                        modifier = Modifier.size(17.dp)
-                                    )
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            imageVector = Icons.Default.Delete,
+                                            contentDescription = "Delete Bookmark",
+                                            tint = MaterialTheme.colorScheme.error,
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                    }
                                 }
                             }
                         }

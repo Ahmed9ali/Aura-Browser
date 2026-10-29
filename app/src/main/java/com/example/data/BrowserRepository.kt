@@ -60,7 +60,7 @@ class BrowserRepository(
     private val _activeTabId = MutableStateFlow("tab_1")
     val activeTabId: StateFlow<String> = _activeTabId.asStateFlow()
 
-    private val _tabGroups = MutableStateFlow<List<TabGroup>>(defaultGroups)
+    private val _tabGroups = MutableStateFlow<List<TabGroup>>(loadSavedTabGroups())
     val tabGroups: StateFlow<List<TabGroup>> = _tabGroups.asStateFlow()
 
     private val _bookmarks = MutableStateFlow<List<BookmarkItem>>(emptyList())
@@ -69,11 +69,92 @@ class BrowserRepository(
     private val _bookmarkFolders = MutableStateFlow<List<String>>(listOf("Favorites", "Work", "Reading List"))
     val bookmarkFolders: StateFlow<List<String>> = _bookmarkFolders.asStateFlow()
 
-    private val _history = MutableStateFlow<List<HistoryItem>>(emptyList())
+    private val _history = MutableStateFlow<List<HistoryItem>>(loadSavedHistory())
     val history: StateFlow<List<HistoryItem>> = _history.asStateFlow()
 
     private val _settings = MutableStateFlow(loadSavedSettings())
     val settings: StateFlow<BrowserSettings> = _settings.asStateFlow()
+
+    // History Persistence (Real user searches and visited URLs only)
+    private fun loadSavedHistory(): List<HistoryItem> {
+        val sp = prefs ?: return emptyList()
+        val raw = sp.getString(KEY_HISTORY_RECORDS, null) ?: return emptyList()
+        if (raw.isBlank()) return emptyList()
+        return runCatching {
+            raw.lines()
+                .filter { it.isNotBlank() }
+                .mapNotNull { line ->
+                    val parts = line.split("\t")
+                    if (parts.size >= 5) {
+                        val id = parts[0]
+                        val timestamp = parts[1].toLongOrNull() ?: System.currentTimeMillis()
+                        val visitCount = parts[2].toIntOrNull() ?: 1
+                        val url = parts[3]
+                        val title = parts.subList(4, parts.size).joinToString("\t")
+                        if (url.isNotBlank() && !url.startsWith("aura://")) {
+                            HistoryItem(
+                                id = id,
+                                title = title.ifBlank { url },
+                                url = url,
+                                timestamp = timestamp,
+                                visitCount = visitCount
+                            )
+                        } else null
+                    } else null
+                }
+        }.getOrDefault(emptyList())
+    }
+
+    private fun persistHistory(items: List<HistoryItem>) {
+        prefs?.edit()?.apply {
+            val serialized = items.take(100).joinToString("\n") { item ->
+                val cleanTitle = item.title.replace("\n", " ").replace("\r", " ").replace("\t", " ")
+                val cleanUrl = item.url.replace("\n", "").replace("\r", "").replace("\t", "")
+                "${item.id}\t${item.timestamp}\t${item.visitCount}\t$cleanUrl\t$cleanTitle"
+            }
+            putString(KEY_HISTORY_RECORDS, serialized)
+            apply()
+        }
+    }
+
+    // Tab Groups Persistence
+    private fun loadSavedTabGroups(): List<TabGroup> {
+        val sp = prefs ?: return defaultGroups
+        val raw = sp.getString(KEY_TAB_GROUPS, null) ?: return defaultGroups
+        if (raw.isBlank()) return defaultGroups
+        return runCatching {
+            raw.lines()
+                .filter { it.isNotBlank() }
+                .mapNotNull { line ->
+                    val parts = line.split("\t")
+                    if (parts.size >= 4) {
+                        val id = parts[0]
+                        val colorHex = parts[1]
+                        val isCollapsed = parts[2].toBooleanStrictOrNull() ?: false
+                        val name = parts.subList(3, parts.size).joinToString("\t")
+                        if (name.isNotBlank()) {
+                            TabGroup(
+                                id = id,
+                                name = name,
+                                colorHex = colorHex,
+                                isCollapsed = isCollapsed
+                            )
+                        } else null
+                    } else null
+                }
+        }.getOrDefault(defaultGroups)
+    }
+
+    private fun persistTabGroups(groups: List<TabGroup>) {
+        prefs?.edit()?.apply {
+            val serialized = groups.joinToString("\n") { group ->
+                val cleanName = group.name.replace("\n", " ").replace("\r", " ").replace("\t", " ")
+                "${group.id}\t${group.colorHex}\t${group.isCollapsed}\t$cleanName"
+            }
+            putString(KEY_TAB_GROUPS, serialized)
+            apply()
+        }
+    }
 
     // Settings Persistence
     private fun loadSavedSettings(): BrowserSettings {
@@ -93,9 +174,9 @@ class BrowserRepository(
             themeMode = theme,
             javaScriptEnabled = sp.getBoolean(KEY_JAVASCRIPT_ENABLED, true),
             doNotTrack = sp.getBoolean(KEY_DO_NOT_TRACK, true),
-            showTabGroups = sp.getBoolean(KEY_SHOW_TAB_GROUPS, true),
+            showTabGroups = sp.getBoolean(KEY_SHOW_TAB_GROUPS, false),
             showSpeedDials = sp.getBoolean(KEY_SHOW_SPEED_DIALS, true),
-            showDiscoverFeed = sp.getBoolean(KEY_SHOW_DISCOVER_FEED, true)
+            showDiscoverFeed = sp.getBoolean(KEY_SHOW_DISCOVER_FEED, false)
         )
     }
 
@@ -217,23 +298,40 @@ class BrowserRepository(
 
     // Tab Grouping Operations
     fun createGroup(name: String, colorHex: String): String {
+        val cleanName = name.trim()
+        val existing = _tabGroups.value.find { it.name.equals(cleanName, ignoreCase = true) }
+        if (existing != null) {
+            return existing.id
+        }
         val newGroup = TabGroup(
             id = UUID.randomUUID().toString(),
-            name = name.trim(),
+            name = cleanName,
             colorHex = colorHex
         )
-        _tabGroups.value = _tabGroups.value + newGroup
+        val updated = _tabGroups.value + newGroup
+        _tabGroups.value = updated
+        persistTabGroups(updated)
         return newGroup.id
     }
 
+    fun createGroupAndAssignTab(tabId: String, name: String, colorHex: String): String {
+        val groupId = createGroup(name, colorHex)
+        assignTabToGroup(tabId, groupId)
+        return groupId
+    }
+
     fun updateGroup(groupId: String, name: String, colorHex: String) {
-        _tabGroups.value = _tabGroups.value.map {
-            if (it.id == groupId) it.copy(name = name, colorHex = colorHex) else it
+        val updated = _tabGroups.value.map {
+            if (it.id == groupId) it.copy(name = name.trim(), colorHex = colorHex) else it
         }
+        _tabGroups.value = updated
+        persistTabGroups(updated)
     }
 
     fun deleteGroup(groupId: String, keepTabs: Boolean = true) {
-        _tabGroups.value = _tabGroups.value.filter { it.id != groupId }
+        val updated = _tabGroups.value.filter { it.id != groupId }
+        _tabGroups.value = updated
+        persistTabGroups(updated)
         if (keepTabs) {
             _tabs.value = _tabs.value.map {
                 if (it.groupId == groupId) it.copy(groupId = null) else it
@@ -244,9 +342,11 @@ class BrowserRepository(
     }
 
     fun toggleGroupCollapse(groupId: String) {
-        _tabGroups.value = _tabGroups.value.map {
+        val updated = _tabGroups.value.map {
             if (it.id == groupId) it.copy(isCollapsed = !it.isCollapsed) else it
         }
+        _tabGroups.value = updated
+        persistTabGroups(updated)
     }
 
     fun assignTabToGroup(tabId: String, groupId: String?) {
@@ -647,45 +747,82 @@ class BrowserRepository(
         addToHistory(title.ifBlank { url }, url)
     }
 
+    private fun extractReadableTitle(rawTitle: String, url: String, existingTitle: String? = null): String {
+        val cleaned = rawTitle.trim()
+        val isPlaceholder = cleaned.isBlank() ||
+                cleaned.equals("Aura Home", ignoreCase = true) ||
+                cleaned.equals("New Tab", ignoreCase = true) ||
+                cleaned.equals("about:blank", ignoreCase = true)
+        if (!isPlaceholder && cleaned != url) {
+            return cleaned
+        }
+        if (!existingTitle.isNullOrBlank() &&
+            !existingTitle.equals("Aura Home", ignoreCase = true) &&
+            !existingTitle.equals("New Tab", ignoreCase = true) &&
+            existingTitle != url
+        ) {
+            return existingTitle
+        }
+        // Check if URL is a search engine query URL (?q=... or &q=...)
+        val queryParamMatch = Regex("""[?&]q=([^&]+)""").find(url)
+        if (queryParamMatch != null) {
+            val decoded = runCatching {
+                java.net.URLDecoder.decode(queryParamMatch.groupValues[1], "UTF-8").trim()
+            }.getOrDefault("")
+            if (decoded.isNotBlank()) return decoded
+        }
+        return if (!isPlaceholder) cleaned else url
+    }
+
     private fun addToHistory(title: String, url: String) {
+        if (url.isBlank() || url.startsWith("aura://") || url == "about:blank") return
         val currentHistory = _history.value.toMutableList()
         val existingIndex = currentHistory.indexOfFirst { it.url == url }
         if (existingIndex >= 0) {
             val existing = currentHistory[existingIndex]
             currentHistory.removeAt(existingIndex)
+            val resolvedTitle = extractReadableTitle(title, url, existing.title)
             currentHistory.add(
                 0,
                 existing.copy(
-                    title = title.ifBlank { existing.title },
+                    title = resolvedTitle,
                     timestamp = System.currentTimeMillis(),
                     visitCount = existing.visitCount + 1
                 )
             )
         } else {
+            val resolvedTitle = extractReadableTitle(title, url, null)
             currentHistory.add(
                 0,
                 HistoryItem(
-                    title = title.ifBlank { url },
+                    title = resolvedTitle,
                     url = url,
                     timestamp = System.currentTimeMillis(),
                     visitCount = 1
                 )
             )
         }
-        _history.value = currentHistory.take(100)
+        val updated = currentHistory.take(100)
+        _history.value = updated
+        persistHistory(updated)
     }
 
     fun clearHistory() {
         _history.value = emptyList()
+        persistHistory(emptyList())
     }
 
     fun clearTodayHistory() {
         val oneDayAgo = System.currentTimeMillis() - (24 * 60 * 60 * 1000L)
-        _history.value = _history.value.filter { it.timestamp < oneDayAgo }
+        val updated = _history.value.filter { it.timestamp < oneDayAgo }
+        _history.value = updated
+        persistHistory(updated)
     }
 
     fun removeHistoryItem(id: String) {
-        _history.value = _history.value.filter { it.id != id }
+        val updated = _history.value.filter { it.id != id }
+        _history.value = updated
+        persistHistory(updated)
     }
 
     // Settings Operations - Persisted across app restarts
@@ -768,8 +905,10 @@ class BrowserRepository(
         private const val KEY_DESKTOP_MODE_DEFAULT = "desktop_mode_default"
         private const val KEY_JAVASCRIPT_ENABLED = "javascript_enabled"
         private const val KEY_DO_NOT_TRACK = "do_not_track"
-        private const val KEY_SHOW_TAB_GROUPS = "show_tab_groups"
-        private const val KEY_SHOW_SPEED_DIALS = "show_speed_dials"
-        private const val KEY_SHOW_DISCOVER_FEED = "show_discover_feed"
+        private const val KEY_SHOW_TAB_GROUPS = "show_tab_groups_v2"
+        private const val KEY_SHOW_SPEED_DIALS = "show_speed_dials_v3"
+        private const val KEY_SHOW_DISCOVER_FEED = "show_discover_feed_v2"
+        private const val KEY_HISTORY_RECORDS = "history_records_v1"
+        private const val KEY_TAB_GROUPS = "tab_groups_v1"
     }
 }

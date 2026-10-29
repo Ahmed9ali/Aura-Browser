@@ -40,11 +40,7 @@ class AuraApplication : Application() {
 
     private fun configureGraphicsEnvironment() {
         try {
-            if (!hasHardwareRenderNode()) {
-                System.setProperty("debug.hwui.renderer", "skiagl")
-                System.setProperty("debug.hwui.use_vulkan", "false")
-                System.setProperty("hwui.disable_vsync", "true")
-            }
+            System.setProperty("debug.hwui.use_vulkan", "false")
         } catch (_: Exception) {
         }
     }

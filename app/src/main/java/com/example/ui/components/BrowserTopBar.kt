@@ -137,23 +137,15 @@ fun BrowserTopBar(
                     .fillMaxWidth()
                     .padding(horizontal = 14.dp, vertical = 8.dp)
             ) {
-                // Main Omnibox Pill
+                // Standard Chrome-Style Pill Omnibox Search / Address Bar
                 Surface(
-                    shape = RoundedCornerShape(16.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    border = BorderStroke(
-                        width = 1.dp,
-                        color = if (isHome) {
-                            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.65f)
-                        } else {
-                            MaterialTheme.colorScheme.primary.copy(alpha = 0.22f)
-                        }
-                    ),
-                    tonalElevation = 2.dp,
+                    shape = ExpressivePillShape,
+                    color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    tonalElevation = 1.dp,
                     modifier = Modifier
                         .weight(1f)
                         .height(48.dp)
-                        .clip(RoundedCornerShape(16.dp))
+                        .clip(ExpressivePillShape)
                         .combinedClickable(
                             onClick = onSearchClick,
                             onLongClick = onCopyUrl
@@ -165,114 +157,44 @@ fun BrowserTopBar(
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(start = 10.dp, end = 6.dp)
+                            .padding(start = 16.dp, end = 8.dp)
                     ) {
-                        // Security / Search Squircle Badge
-                        val badgeBgColor = when {
-                            isHome -> MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
-                            isSecureHttps -> Color(0xFF10B981).copy(alpha = 0.15f)
-                            else -> MaterialTheme.colorScheme.secondaryContainer
-                        }
-                        val badgeTint = when {
-                            isHome -> MaterialTheme.colorScheme.primary
-                            isSecureHttps -> Color(0xFF10B981)
-                            else -> MaterialTheme.colorScheme.onSecondaryContainer
-                        }
-                        val badgeIcon = when {
+                        val leadingIcon = when {
                             isHome -> Icons.Default.Search
                             isSecureHttps -> Icons.Default.Lock
                             else -> Icons.Default.Public
                         }
-
-                        Box(
-                            contentAlignment = Alignment.Center,
-                            modifier = Modifier
-                                .size(32.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(badgeBgColor)
-                        ) {
-                            Icon(
-                                imageVector = badgeIcon,
-                                contentDescription = if (isHome) "Search" else "Connection Security",
-                                tint = badgeTint,
-                                modifier = Modifier.size(16.dp)
-                            )
+                        val leadingTint = when {
+                            isHome -> MaterialTheme.colorScheme.onSurfaceVariant
+                            isSecureHttps -> MaterialTheme.colorScheme.onSurfaceVariant
+                            else -> MaterialTheme.colorScheme.onSurfaceVariant
                         }
 
-                        // Optional Active Tab Group Tag
-                        if (activeGroup != null) {
-                            val groupColor = try {
-                                Color(android.graphics.Color.parseColor(activeGroup.colorHex))
-                            } catch (_: Exception) {
-                                MaterialTheme.colorScheme.primary
-                            }
-                            Surface(
-                                shape = ExpressiveChipShape,
-                                color = groupColor.copy(alpha = 0.16f),
-                                border = BorderStroke(1.dp, groupColor.copy(alpha = 0.35f))
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(6.dp)
-                                            .clip(CircleShape)
-                                            .background(groupColor)
-                                    )
-                                    Text(
-                                        text = activeGroup.name,
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = groupColor,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                            }
-                        }
+                        Icon(
+                            imageVector = leadingIcon,
+                            contentDescription = if (isHome) "Search" else "Connection Security",
+                            tint = leadingTint,
+                            modifier = Modifier.size(18.dp)
+                        )
 
-                        // Domain / Search Prompt Hierarchy
-                        if (isHome) {
-                            Column(
-                                verticalArrangement = Arrangement.Center,
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text(
-                                    text = "Search or type web address",
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                        } else {
-                            Column(
-                                verticalArrangement = Arrangement.Center,
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text(
-                                    text = cleanDomain.ifBlank { activeTab?.url.orEmpty() },
-                                    fontSize = 13.5.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                if (cleanSubtitle.isNotBlank() && !cleanSubtitle.equals(cleanDomain, ignoreCase = true)) {
-                                    Text(
-                                        text = cleanSubtitle,
-                                        fontSize = 10.5.sp,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                            }
-                        }
+                        // Single-line Chrome-style URL / Search prompt
+                        Text(
+                            text = if (isHome) {
+                                "Search or type URL"
+                            } else {
+                                cleanDomain.ifBlank { activeTab?.url.orEmpty() }
+                            },
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Normal,
+                            color = if (isHome) {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            } else {
+                                MaterialTheme.colorScheme.onSurface
+                            },
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
 
                         // Reload or Stop Loading Button
                         if (isLoading) {
@@ -285,7 +207,7 @@ fun BrowserTopBar(
                                 Icon(
                                     imageVector = Icons.Default.Close,
                                     contentDescription = "Stop loading",
-                                    tint = MaterialTheme.colorScheme.error,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.size(18.dp)
                                 )
                             }
@@ -302,31 +224,6 @@ fun BrowserTopBar(
                                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.size(18.dp)
                                 )
-                            }
-                        } else {
-                            Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
-                                modifier = Modifier.padding(end = 4.dp)
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(3.dp),
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Shield,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(11.dp)
-                                    )
-                                    Text(
-                                        text = "AURA",
-                                        fontSize = 9.sp,
-                                        fontWeight = FontWeight.ExtraBold,
-                                        color = MaterialTheme.colorScheme.primary
-                                    )
-                                }
                             }
                         }
                     }

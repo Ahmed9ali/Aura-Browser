@@ -281,10 +281,12 @@ class BrowserViewModel(
 
     fun copyToClipboard(context: android.content.Context, text: String, label: String = "Link") {
         try {
+            val trimmed = text.trim()
             val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-            val clip = android.content.ClipData.newPlainText(label, text)
+            val clip = android.content.ClipData.newPlainText(label, trimmed)
             clipboard.setPrimaryClip(clip)
-            _snackbarMessage.value = "Link copied to clipboard: $text"
+            _dismissedClipboardTexts.value = _dismissedClipboardTexts.value - trimmed
+            _snackbarMessage.value = "Link copied to clipboard: $trimmed"
         } catch (_: Exception) {}
     }
 
@@ -318,7 +320,21 @@ class BrowserViewModel(
 
     fun closeAllTabs() {
         repository.closeAllTabs()
-        _currentScreen.value = NavScreen.HOME
+        _snackbarMessage.value = "All tabs closed"
+    }
+
+    fun closeTabs(tabIds: Set<String>) {
+        if (tabIds.isEmpty()) return
+        tabIds.forEach { id -> repository.closeTab(id) }
+        _snackbarMessage.value = "Closed ${tabIds.size} ${if (tabIds.size == 1) "tab" else "tabs"}"
+    }
+
+    fun clearBrowsingData() {
+        repository.clearHistory()
+        repository.closeAllTabs()
+        _dismissedClipboardTexts.value = emptySet()
+        _searchQuery.value = ""
+        _snackbarMessage.value = "Browsing history and tab data cleared"
     }
 
     fun toggleDesktopMode(tabId: String) {
@@ -330,12 +346,42 @@ class BrowserViewModel(
 
     // Tab Grouping Handlers
     fun createGroup(name: String, colorHex: String) {
-        repository.createGroup(name, colorHex)
+        val cleanName = name.trim()
+        if (cleanName.isNotEmpty()) {
+            repository.createGroup(cleanName, colorHex)
+            _snackbarMessage.value = "Group \"$cleanName\" created"
+        }
+        _showCreateGroupDialog.value = false
+    }
+
+    fun createGroupWithTabs(name: String, colorHex: String, tabIds: Set<String>) {
+        val cleanName = name.trim()
+        if (cleanName.isNotEmpty()) {
+            val groupId = repository.createGroup(cleanName, colorHex)
+            tabIds.forEach { tabId ->
+                repository.assignTabToGroup(tabId, groupId)
+            }
+            _snackbarMessage.value = "Grouped ${tabIds.size} ${if (tabIds.size == 1) "tab" else "tabs"} into \"$cleanName\""
+        }
+        _showCreateGroupDialog.value = false
+    }
+
+    fun createGroupAndAssignTab(tabId: String, name: String, colorHex: String) {
+        val cleanName = name.trim()
+        if (cleanName.isNotEmpty()) {
+            repository.createGroupAndAssignTab(tabId, cleanName, colorHex)
+            _snackbarMessage.value = "Categorized tab into group \"$cleanName\""
+        }
+        _tabToMove.value = null
         _showCreateGroupDialog.value = false
     }
 
     fun deleteGroup(groupId: String, keepTabs: Boolean = true) {
+        val folderName = repository.tabGroups.value.find { it.id == groupId }?.name
         repository.deleteGroup(groupId, keepTabs)
+        if (folderName != null) {
+            _snackbarMessage.value = "Folder \"$folderName\" removed"
+        }
     }
 
     fun toggleGroupCollapse(groupId: String) {
@@ -344,6 +390,12 @@ class BrowserViewModel(
 
     fun assignTabToGroup(tabId: String, groupId: String?) {
         repository.assignTabToGroup(tabId, groupId)
+        val folderName = groupId?.let { id -> repository.tabGroups.value.find { it.id == id }?.name }
+        _snackbarMessage.value = if (folderName != null) {
+            "Categorized tab into \"$folderName\""
+        } else {
+            "Removed tab from folder"
+        }
         _tabToMove.value = null
     }
 
@@ -382,23 +434,24 @@ class BrowserViewModel(
     }
 
     fun executeSearch(input: String) {
+        val cleanInput = input.trim()
         val destinationUrl = suggestionsEngine.resolveUrl(
-            input = input,
+            input = cleanInput,
             searchEngine = repository.settings.value.searchEngine
         )
-        loadUrl(destinationUrl)
+        loadUrl(destinationUrl, initialTitle = cleanInput.ifBlank { null })
     }
 
     fun selectSuggestion(suggestion: SearchSuggestion) {
         if (suggestion.targetUrl != null) {
-            loadUrl(suggestion.targetUrl)
+            loadUrl(suggestion.targetUrl, initialTitle = suggestion.title.ifBlank { null })
         } else {
             executeSearch(suggestion.query)
         }
     }
 
     // Web Loading & Lifecycle Handlers
-    fun loadUrl(url: String) {
+    fun loadUrl(url: String, initialTitle: String? = null) {
         val target = if (url.isBlank()) "aura://home" else url
         if (target == "aura://home") {
             repository.updateActiveTab(title = "Aura Home", url = "aura://home")
@@ -406,7 +459,7 @@ class BrowserViewModel(
             return
         }
 
-        repository.updateActiveTab(url = target)
+        repository.updateActiveTab(title = initialTitle, url = target)
         _searchQuery.value = ""
         _currentScreen.value = NavScreen.WEB_PAGE
     }

@@ -90,9 +90,9 @@ data class BrowserSettings(
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
     val javaScriptEnabled: Boolean = true,
     val doNotTrack: Boolean = true,
-    val showTabGroups: Boolean = true,
+    val showTabGroups: Boolean = false,
     val showSpeedDials: Boolean = true,
-    val showDiscoverFeed: Boolean = true
+    val showDiscoverFeed: Boolean = false
 )
 
 enum class NavScreen {

@@ -247,6 +247,7 @@ fun BrowserApp(
                             onClearQuery = { viewModel.clearSearchQuery() },
                             onClearHistory = { viewModel.clearHistory() },
                             onDeleteHistoryItem = { id -> viewModel.removeHistoryItem(id) },
+                            onCopyToClipboard = { text -> viewModel.copyToClipboard(context, text) },
                             onNavigateBack = returnFromSubScreen
                         )
                     }
@@ -260,10 +261,18 @@ fun BrowserApp(
                             tabToMove = uiState.tabToMove,
                             onSelectTab = { id -> viewModel.selectTab(id) },
                             onCloseTab = { id -> viewModel.closeTab(id) },
+                            onCloseSelectedTabs = { ids -> viewModel.closeTabs(ids) },
                             onOpenNewTab = { groupId -> viewModel.openNewTab(groupId = groupId) },
                             onCloseAllTabs = { viewModel.closeAllTabs() },
+                            onClearBrowsingData = { viewModel.clearBrowsingData() },
                             onCloseAllInGroup = { groupId -> viewModel.closeAllTabsInGroup(groupId) },
                             onCreateGroup = { name, color -> viewModel.createGroup(name, color) },
+                            onCreateGroupWithTabs = { name, color, ids ->
+                                viewModel.createGroupWithTabs(name, color, ids)
+                            },
+                            onCreateGroupAndAssignTab = { tabId, name, color ->
+                                viewModel.createGroupAndAssignTab(tabId, name, color)
+                            },
                             onDeleteGroup = { groupId -> viewModel.deleteGroup(groupId) },
                             onToggleGroupCollapse = { groupId -> viewModel.toggleGroupCollapse(groupId) },
                             onOpenCreateGroupDialog = { viewModel.setShowCreateGroupDialog(true) },
