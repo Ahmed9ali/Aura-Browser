@@ -488,16 +488,18 @@ class AutomationEngine(
                     combined.contains("countrylist") || combined.contains("calling-code") ||
                     (combined.contains("country") && (combined.contains("code") || combined.contains("dial") || combined.contains("prefix") || combined.contains("phone") || combined.contains("region"))) ||
                     (combined.contains("callingcode") && !selLower.contains("input")) -> "countryCode"
-            // Check split & full DOB BEFORE phoneNumber so <input type="tel" id="day"|"year"> is never misclassified as phone
+            // Check split & full DOB BEFORE phoneNumber so <input type="tel" id="day"|"year"> is never misclassified as phone.
+            // IMPORTANT: Never use selLower.contains("day") or birth_?day because "birthday" contains "day"!
             combined.contains("dobday") || combined.contains("birth_day") || combined.contains("bday-day") || combined.contains("birthday_day") ||
-                    selector.equals("#day", ignoreCase = true) || selLower.contains("day") ||
-                    (Regex("\\b(day|dd)\\b").containsMatchIn(combined) && !combined.contains("today") && !combined.contains("everyday")) -> "dobDay"
+                    selector.equals("#day", ignoreCase = true) ||
+                    (Regex("\\b(dob[_-]?day|birth[_-]day|bday[_-]day|birthday[_-]day|date[_-]day|day|dd)\\b").containsMatchIn(combined) &&
+                            !combined.contains("today") && !combined.contains("everyday")) -> "dobDay"
             combined.contains("dobmonth") || combined.contains("birth_month") || combined.contains("bday-month") || combined.contains("birthday_month") ||
-                    selector.equals("#month", ignoreCase = true) || selLower.contains("month") ||
-                    Regex("\\b(month|mm|january|february)\\b").containsMatchIn(combined) -> "dobMonth"
+                    selector.equals("#month", ignoreCase = true) ||
+                    Regex("\\b(dob[_-]?month|birth[_-]month|bday[_-]month|birthday[_-]month|date[_-]month|month|mm|january|february)\\b").containsMatchIn(combined) -> "dobMonth"
             combined.contains("dobyear") || combined.contains("birth_year") || combined.contains("bday-year") || combined.contains("birthday_year") ||
-                    selector.equals("#year", ignoreCase = true) || selLower.contains("year") ||
-                    Regex("\\b(year|yyyy|yr)\\b").containsMatchIn(combined) -> "dobYear"
+                    selector.equals("#year", ignoreCase = true) ||
+                    Regex("\\b(dob[_-]?year|birth[_-]year|bday[_-]year|birthday[_-]year|date[_-]year|year|yyyy|yr)\\b").containsMatchIn(combined) -> "dobYear"
             combined.contains("birth") || combined.contains("dob") || combined.contains("bday") || combined.contains("datepicker") -> "dob"
             combined.contains("phone") || combined.contains("mobile") || combined.contains("tel") || combined.contains("whatsapp") || combined.contains("callingcodephone") -> "phoneNumber"
             combined.contains("gender") || combined.contains("sex") -> "gender"
@@ -1428,7 +1430,7 @@ class AutomationEngine(
                                 "dob" -> {
                                     val (y, m, d) = parseDobTriplet(resolvedValue, currentDefaultRecord)
                                     val js = AutomationScripts.createSelectDateScript(step.selector, "$y-$m-$d", d, m, y, fallbackHint)
-                                    evaluateJsWithRetry(js, maxAttempts = 20, retryDelayMs = 220L)
+                                    evaluateJsWithRetry(js, maxAttempts = 25, retryDelayMs = 200L)
                                 }
                                 "countryCode" -> {
                                     val code = resolvedValue.ifBlank { currentDefaultRecord.countryCode }
@@ -1452,7 +1454,7 @@ class AutomationEngine(
                                 "dob" -> {
                                     val (y, m, d) = parseDobTriplet(resolvedValue, currentDefaultRecord)
                                     val js = AutomationScripts.createSelectDateScript(step.selector, "$y-$m-$d", d, m, y, fallbackHint)
-                                    evaluateJsWithRetry(js, maxAttempts = 20, retryDelayMs = 220L)
+                                    evaluateJsWithRetry(js, maxAttempts = 25, retryDelayMs = 200L)
                                 }
                                 "dobDay" -> {
                                     val d = resolvedValue.ifBlank { currentDefaultRecord.dobDay }
@@ -1486,7 +1488,7 @@ class AutomationEngine(
                             val dob = resolvedValue.ifBlank { currentDefaultRecord.dob }
                             val (y, m, d) = parseDobTriplet(dob, currentDefaultRecord)
                             val js = AutomationScripts.createSelectDateScript(step.selector, "$y-$m-$d", d, m, y, fallbackHint)
-                            val ok = evaluateJsWithRetry(js, maxAttempts = 20, retryDelayMs = 220L)
+                            val ok = evaluateJsWithRetry(js, maxAttempts = 25, retryDelayMs = 200L)
                             addLog("[Run $iteration] ${if (ok) "Selected" else "Attempted"} Date: '$y-$m-$d'")
                         }
                         AutomationActionType.UPLOAD_FILE -> {
@@ -1618,11 +1620,33 @@ class AutomationEngine(
         return Triple(fallbackRecord.dobYear, fallbackRecord.dobMonth, fallbackRecord.dobDay)
     }
 
+    private fun isSingleFullBirthdayStep(step: AutomationStep): Boolean {
+        val combined = "${step.selector} ${step.elementDescription}".lowercase()
+        val hasFullDobWord = combined.contains("birthday") ||
+                combined.contains("birthdate") ||
+                combined.contains("date of birth") ||
+                combined.contains("datepicker") ||
+                Regex("\\b(dob|bday)\\b").containsMatchIn(combined)
+        val hasExplicitPartWord = Regex("\\b(dob[_-]?day|birth[_-]day|bday[_-]day|birthday[_-]day|date[_-]day|day|dd|dob[_-]?month|birth[_-]month|bday[_-]month|birthday[_-]month|date[_-]month|month|mm|dob[_-]?year|birth[_-]year|bday[_-]year|birthday[_-]year|date[_-]year|year|yyyy|yr)\\b")
+            .containsMatchIn(combined)
+        return hasFullDobWord && !hasExplicitPartWord
+    }
+
     private fun inferStepFieldKey(step: AutomationStep): String? {
-        if (!step.variableKey.isNullOrBlank()) return step.variableKey
-        val regex = Regex("\\{\\{([a-zA-Z0-9_]+)\\}\\}")
-        val match = regex.find(step.value)
-        if (match != null) return match.groupValues[1]
+        if (step.actionType == AutomationActionType.SELECT_DATE) return "dob"
+        val rawKey = when {
+            !step.variableKey.isNullOrBlank() -> step.variableKey
+            else -> {
+                val regex = Regex("\\{\\{([a-zA-Z0-9_]+)\\}\\}")
+                regex.find(step.value)?.groupValues?.get(1)
+            }
+        }
+        if (rawKey != null) {
+            if ((rawKey == "dobDay" || rawKey == "dobMonth" || rawKey == "dobYear") && isSingleFullBirthdayStep(step)) {
+                return "dob"
+            }
+            return rawKey
+        }
         return when (step.actionType) {
             AutomationActionType.SELECT_COUNTRY_CODE -> "countryCode"
             AutomationActionType.SELECT_DATE -> "dob"

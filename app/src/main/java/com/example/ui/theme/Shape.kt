@@ -28,3 +28,34 @@ val ExpressiveBadgeShape = RoundedCornerShape(10.dp)
 val ExpressiveDockShape = RoundedCornerShape(32.dp)
 val ExpressiveSheetShape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp)
 val ExpressiveDialogShape = RoundedCornerShape(28.dp)
+
+// Material 3 Expressive Grouped List Card shape tokens
+val ExpressiveGroupedOuterRadius = 24.dp
+val ExpressiveGroupedInnerRadius = 4.dp
+
+/**
+ * Returns the Material 3 grouped list card shape for an item at [index] within a group of [count] items.
+ * - Single item: fully rounded (24.dp) on all corners.
+ * - First (top) item: rounded top corners (24.dp), small inner bottom corners (4.dp).
+ * - Middle items: small inner corners (4.dp) on all sides.
+ * - Last (bottom) item: small inner top corners (4.dp), rounded bottom corners (24.dp).
+ */
+fun groupedListCardShape(index: Int, count: Int): RoundedCornerShape {
+    return when {
+        count <= 1 -> RoundedCornerShape(ExpressiveGroupedOuterRadius)
+        index == 0 -> RoundedCornerShape(
+            topStart = ExpressiveGroupedOuterRadius,
+            topEnd = ExpressiveGroupedOuterRadius,
+            bottomStart = ExpressiveGroupedInnerRadius,
+            bottomEnd = ExpressiveGroupedInnerRadius
+        )
+        index == count - 1 -> RoundedCornerShape(
+            topStart = ExpressiveGroupedInnerRadius,
+            topEnd = ExpressiveGroupedInnerRadius,
+            bottomStart = ExpressiveGroupedOuterRadius,
+            bottomEnd = ExpressiveGroupedOuterRadius
+        )
+        else -> RoundedCornerShape(ExpressiveGroupedInnerRadius)
+    }
+}
+

@@ -261,6 +261,13 @@ object AutomationScripts {
                 // 6. Comprehensive Date of Birth detection (Day, Month, Year, and full DOB)
                 // Covers native inputs/selects, Google split inputs, and custom segmented pickers like Huawei ID (28 ▼, 10 ▼, 2006 ▼)
                 var fieldSpecificHint = (name + ' ' + id + ' ' + placeholder + ' ' + ariaLabel + ' ' + (text.length < 25 ? text : '') + ' ' + (el.className || '')).toLowerCase();
+                var ownInputHint = (name + ' ' + id + ' ' + placeholder + ' ' + ariaLabel + ' ' + ac).toLowerCase();
+
+                // Single full-date Birthday <input> (e.g. account.fydeos.io input[name="birthday"]) must be 'dob', never split 'dobDay'
+                if (tag === 'input' && (type === 'date' || (/birthday|birthdate|date.?of.?birth|\bdob\b|datepicker|^bday$/i.test(ownInputHint) && !/\b(day|dd|month|mm|year|yyyy|yr|dob_day|dob_month|dob_year|birth_day|birth_month|birth_year|bday-day|bday-month|bday-year)\b/i.test(ownInputHint)))) {
+                    return 'dob';
+                }
+
                 var dobContainer = el.closest ? el.closest('[class*="birth"], [class*="dob"], [class*="bday"], [class*="date-root"], [class*="date-wrapper"], .hwid-register-inputsContainer, .form-group, .field, .input-group, div') : null;
                 var dobContextText = '';
                 if (dobContainer) {
@@ -269,13 +276,13 @@ object AutomationScripts {
                 }
                 var isDobContext = /date\s*of\s*birth|birth\s*date|birthday|\bdob\b|hwid.*birth|hwid.*date/i.test(dobContextText + ' ' + combined);
 
-                if (ac === 'bday-day' || /^(day|dd|birth_day|dob_day|bday_day|birthday_day|date_day)$/i.test(name) || /^(day|dd|birth_day|dob_day|bday-day)$/i.test(id) || /\b(birth.*day|dob.*day|select.*day|^day$|^dd$)\b/i.test(fieldSpecificHint) || (isDobContext && /\b(day|dd)\b/i.test(fieldSpecificHint) && !/today|everyday/i.test(fieldSpecificHint))) {
+                if (ac === 'bday-day' || /^(day|dd|birth_day|dob_day|bday_day|birthday_day|date_day)$/i.test(name) || /^(day|dd|birth_day|dob_day|bday-day)$/i.test(id) || /\b(birth[_-]day|dob[_-]?day|bday[_-]day|birthday[_-]day|select.*day|^day$|^dd$)\b/i.test(fieldSpecificHint) || (isDobContext && /\b(day|dd)\b/i.test(fieldSpecificHint) && !/birthday|today|everyday/i.test(fieldSpecificHint))) {
                     return 'dobDay';
                 }
-                if (ac === 'bday-month' || /^(month|mm|birth_month|dob_month|bday_month|birthday_month|date_month)$/i.test(name) || /^(month|mm|birth_month|dob_month|bday-month)$/i.test(id) || /\b(birth.*month|dob.*month|select.*month|^month$|^mm$)\b/i.test(fieldSpecificHint) || (isDobContext && /\b(month|mm)\b/i.test(fieldSpecificHint))) {
+                if (ac === 'bday-month' || /^(month|mm|birth_month|dob_month|bday_month|birthday_month|date_month)$/i.test(name) || /^(month|mm|birth_month|dob_month|bday-month)$/i.test(id) || /\b(birth[_-]month|dob[_-]?month|bday[_-]month|birthday[_-]month|select.*month|^month$|^mm$)\b/i.test(fieldSpecificHint) || (isDobContext && /\b(month|mm)\b/i.test(fieldSpecificHint))) {
                     return 'dobMonth';
                 }
-                if (ac === 'bday-year' || /^(year|yyyy|yy|birth_year|dob_year|bday_year|birthday_year|date_year)$/i.test(name) || /^(year|yyyy|birth_year|dob_year|bday-year)$/i.test(id) || /\b(birth.*year|dob.*year|select.*year|^year$|^yyyy$)\b/i.test(fieldSpecificHint) || (isDobContext && /\b(year|yyyy|yr)\b/i.test(fieldSpecificHint))) {
+                if (ac === 'bday-year' || /^(year|yyyy|yy|birth_year|dob_year|bday_year|birthday_year|date_year)$/i.test(name) || /^(year|yyyy|birth_year|dob_year|bday-year)$/i.test(id) || /\b(birth[_-]year|dob[_-]?year|bday[_-]year|birthday[_-]year|select.*year|^year$|^yyyy$)\b/i.test(fieldSpecificHint) || (isDobContext && /\b(year|yyyy|yr)\b/i.test(fieldSpecificHint))) {
                     return 'dobYear';
                 }
 
@@ -284,18 +291,20 @@ object AutomationScripts {
                     if (/^(19\d\d|20\d\d)$/.test(cleanNumericText)) return 'dobYear';
                     if (/^(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)$/i.test(text)) return 'dobMonth';
 
-                    // Check segmented position among sibling triggers in the DOB container
-                    if (dobContainer) {
-                        var allTriggers = dobContainer.querySelectorAll('[class*="select"], [class*="drop"], [class*="picker"], [class*="item"], [class*="box"], button, [role="combobox"], [role="button"], [role="spinbutton"], input, select');
+                    // Check segmented position among sibling triggers on the same horizontal row in the DOB container
+                    if (dobContainer && tag !== 'input') {
+                        var elRect = el.getBoundingClientRect();
+                        var allTriggers = dobContainer.querySelectorAll('[class*="select"], [class*="drop"], [class*="picker"], button, [role="combobox"], [role="button"], [role="spinbutton"], input, select');
                         var leafTriggers = [];
                         for (var lt = 0; lt < allTriggers.length; lt++) {
                             var sibT = allTriggers[lt];
                             if (sibT.querySelector && sibT.querySelector('button, [class*="select"], [class*="drop"], input, select')) continue;
-                            if (leafTriggers.indexOf(sibT) < 0 && (sibT === el || sibT.getBoundingClientRect().width > 10)) {
+                            var sibRect = sibT.getBoundingClientRect();
+                            if (leafTriggers.indexOf(sibT) < 0 && sibRect.width > 12 && Math.abs(sibRect.top - elRect.top) < 36) {
                                 leafTriggers.push(sibT);
                             }
                         }
-                        if (leafTriggers.length >= 3) {
+                        if (leafTriggers.length >= 3 && leafTriggers.length <= 5) {
                             var myIndex = leafTriggers.indexOf(el);
                             if (myIndex < 0) {
                                 for (var k = 0; k < leafTriggers.length; k++) {
@@ -833,6 +842,11 @@ object AutomationScripts {
 
                 // IMPORTANT: Classify Split DOB (Day, Month, Year) and Full DOB BEFORE PHONE (type="tel"),
                 // because Google, Yahoo, and mobile forms use <input type="tel" id="day"|"year"> for birthday parts!
+                var ownInputHint = (name + ' ' + id + ' ' + placeholder + ' ' + ariaLabel + ' ' + ac).toLowerCase();
+                if (tag === 'input' && (type === 'date' || (/birthday|birthdate|date.?of.?birth|\bdob\b|datepicker|^bday$/i.test(ownInputHint) && !/\b(day|dd|month|mm|year|yyyy|yr|dob_day|dob_month|dob_year|birth_day|birth_month|birth_year|bday-day|bday-month|bday-year)\b/i.test(ownInputHint)))) {
+                    return 'DOB';
+                }
+
                 var dobContainer = el.closest ? el.closest('[class*="birth"], [class*="dob"], [class*="bday"], [class*="date-root"], [class*="date-wrapper"], .hwid-register-inputsContainer, .form-group, .field, .input-group, div') : null;
                 var dobContextText = '';
                 if (dobContainer) {
@@ -841,26 +855,28 @@ object AutomationScripts {
                 }
                 var isDobContext = /date\s*of\s*birth|birth\s*date|birthday|\bdob\b|hwid.*birth|hwid.*date/i.test(dobContextText + ' ' + combined);
 
-                if (ac === 'bday-day' || /^(day|dd|birth_day|dob_day|bday_day|birthday_day|date_day)$/i.test(name) || /^(day|dd|birth_day|dob_day|bday-day)$/i.test(id) || /\b(birth.*day|dob.*day|select.*day|^day$|^dd$)\b/i.test(fieldHint) || (isDobContext && /\b(day|dd)\b/i.test(fieldHint) && !/today|everyday/i.test(fieldHint))) return 'DOB_DAY';
-                if (ac === 'bday-month' || /^(month|mm|birth_month|dob_month|bday_month|birthday_month|date_month)$/i.test(name) || /^(month|mm|birth_month|dob_month|bday-month)$/i.test(id) || /\b(birth.*month|dob.*month|select.*month|^month$|^mm$)\b/i.test(fieldHint) || (isDobContext && /\b(month|mm)\b/i.test(fieldHint))) return 'DOB_MONTH';
-                if (ac === 'bday-year' || /^(year|yyyy|yy|birth_year|dob_year|bday_year|birthday_year|date_year)$/i.test(name) || /^(year|yyyy|birth_year|dob_year|bday-year)$/i.test(id) || /\b(birth.*year|dob.*year|select.*year|^year$|^yyyy$)\b/i.test(fieldHint) || (isDobContext && /\b(year|yyyy|yr)\b/i.test(fieldHint))) return 'DOB_YEAR';
+                if (ac === 'bday-day' || /^(day|dd|birth_day|dob_day|bday_day|birthday_day|date_day)$/i.test(name) || /^(day|dd|birth_day|dob_day|bday-day)$/i.test(id) || /\b(birth[_-]day|dob[_-]?day|bday[_-]day|birthday[_-]day|select.*day|^day$|^dd$)\b/i.test(fieldHint) || (isDobContext && /\b(day|dd)\b/i.test(fieldHint) && !/birthday|today|everyday/i.test(fieldHint))) return 'DOB_DAY';
+                if (ac === 'bday-month' || /^(month|mm|birth_month|dob_month|bday_month|birthday_month|date_month)$/i.test(name) || /^(month|mm|birth_month|dob_month|bday-month)$/i.test(id) || /\b(birth[_-]month|dob[_-]?month|bday[_-]month|birthday[_-]month|select.*month|^month$|^mm$)\b/i.test(fieldHint) || (isDobContext && /\b(month|mm)\b/i.test(fieldHint))) return 'DOB_MONTH';
+                if (ac === 'bday-year' || /^(year|yyyy|yy|birth_year|dob_year|bday_year|birthday_year|date_year)$/i.test(name) || /^(year|yyyy|birth_year|dob_year|bday-year)$/i.test(id) || /\b(birth[_-]year|dob[_-]?year|bday[_-]year|birthday[_-]year|select.*year|^year$|^yyyy$)\b/i.test(fieldHint) || (isDobContext && /\b(year|yyyy|yr)\b/i.test(fieldHint))) return 'DOB_YEAR';
 
                 if (isDobContext) {
                     var cleanNumericText = text.replace(/[^0-9]/g, '').trim();
                     if (/^(19\d\d|20\d\d)$/.test(cleanNumericText)) return 'DOB_YEAR';
                     if (/^(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)$/i.test(text)) return 'DOB_MONTH';
 
-                    if (dobContainer) {
-                        var allTriggers = dobContainer.querySelectorAll('[class*="select"], [class*="drop"], [class*="picker"], [class*="item"], [class*="box"], button, [role="combobox"], [role="button"], [role="spinbutton"], input, select');
+                    if (dobContainer && tag !== 'input') {
+                        var elRect = el.getBoundingClientRect();
+                        var allTriggers = dobContainer.querySelectorAll('[class*="select"], [class*="drop"], [class*="picker"], button, [role="combobox"], [role="button"], [role="spinbutton"], input, select');
                         var leafTriggers = [];
                         for (var lt = 0; lt < allTriggers.length; lt++) {
                             var sibT = allTriggers[lt];
                             if (sibT.querySelector && sibT.querySelector('button, [class*="select"], [class*="drop"], input, select')) continue;
-                            if (leafTriggers.indexOf(sibT) < 0 && (sibT === el || sibT.getBoundingClientRect().width > 10)) {
+                            var sibRect = sibT.getBoundingClientRect();
+                            if (leafTriggers.indexOf(sibT) < 0 && sibRect.width > 12 && Math.abs(sibRect.top - elRect.top) < 36) {
                                 leafTriggers.push(sibT);
                             }
                         }
-                        if (leafTriggers.length >= 3) {
+                        if (leafTriggers.length >= 3 && leafTriggers.length <= 5) {
                             var myIndex = leafTriggers.indexOf(el);
                             if (myIndex < 0) {
                                 for (var k = 0; k < leafTriggers.length; k++) {
@@ -1287,8 +1303,12 @@ object AutomationScripts {
                 if (node.closest && node.closest('.aura-hud')) return false;
                 try {
                     if (node.getClientRects && node.getClientRects().length === 0) return false;
-                    var st = window.getComputedStyle(node);
-                    if (!st || st.display === 'none' || st.visibility === 'hidden' || parseFloat(st.opacity) === 0) return false;
+                    var cur = node;
+                    while (cur && cur.nodeType === 1 && cur !== document.body && cur !== document.documentElement) {
+                        var st = window.getComputedStyle(cur);
+                        if (!st || st.display === 'none' || st.visibility === 'hidden' || parseFloat(st.opacity) === 0) return false;
+                        cur = cur.parentElement;
+                    }
                     var r = node.getBoundingClientRect();
                     return r.width > 4 && r.height > 4;
                 } catch (e) {
@@ -1308,7 +1328,7 @@ object AutomationScripts {
                 var cx = rect.left + Math.max(4, Math.min(rect.width - 4, rect.width / 2));
                 var cy = rect.top + Math.max(4, Math.min(rect.height - 4, rect.height / 2));
                 var evtInit = { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy, button: 0, buttons: 1 };
-                ['pointerover', 'mouseover', 'pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach(function(evtName) {
+                ['pointerover', 'mouseover', 'pointerdown', 'mousedown', 'pointerup', 'mouseup'].forEach(function(evtName) {
                     try {
                         var ev = (evtName.indexOf('pointer') === 0 && typeof PointerEvent !== 'undefined')
                             ? new PointerEvent(evtName, evtInit)
@@ -1320,6 +1340,12 @@ object AutomationScripts {
                 });
                 if (typeof targetEl.click === 'function') {
                     try { targetEl.click(); } catch (e) {}
+                } else {
+                    try {
+                        targetEl.dispatchEvent(new MouseEvent('click', evtInit));
+                    } catch (e3) {
+                        try { targetEl.dispatchEvent(new Event('click', { bubbles: true, cancelable: true })); } catch (e4) {}
+                    }
                 }
             }
 
@@ -1522,6 +1548,10 @@ object AutomationScripts {
                     try {
                         var st = window.getComputedStyle(node);
                         if ((st.position === 'fixed' || st.position === 'absolute') && isNodeVisible(node)) {
+                            var zVal = parseInt(st.zIndex, 10) || 0;
+                            var nodeHint = ((node.className && typeof node.className === 'string' ? node.className : '') + ' ' + (node.id || '') + ' ' + (node.getAttribute('role') || '')).toLowerCase();
+                            var isPopupLike = zVal >= 10 || /modal|sheet|drawer|popup|popover|dropdown|picker|calendar|menu|listbox|dialog|overlay|portal|select|options/i.test(nodeHint);
+                            if (!isPopupLike) continue;
                             var rect = node.getBoundingClientRect();
                             if (rect.width >= 100 && rect.height >= 40 && rect.height <= window.innerHeight * 0.96) {
                                 addOverlay(node);
@@ -2642,28 +2672,96 @@ object AutomationScripts {
                 var targetDayNum = parseInt(dayNumStr, 10) || 14;
 
                 function findDatePickerOverlays(triggerNode) {
-                    var list = findActiveOverlays(triggerNode);
-                    // Also check if any visible element in document has a Decade range header like "2020-2029"
-                    var allNodes = document.body ? document.body.querySelectorAll('div, table, section, aside, dialog') : [];
-                    for (var i = 0; i < allNodes.length; i++) {
-                        var n = allNodes[i];
-                        if (!isNodeVisible(n) || n.classList.contains('aura-hud')) continue;
-                        if (triggerNode && (n === triggerNode || n.contains(triggerNode))) continue;
-                        var r = n.getBoundingClientRect();
-                        if (r.width < 140 || r.height < 100 || r.width > 650 || r.height > 650) continue;
-                        var txt = (n.innerText || '').trim();
-                        if (/\b(19\d\d|20\d\d)\s*[-~–—]\s*(19\d\d|20\d\d)\b/.test(txt)) {
-                            var alreadyCovered = false;
-                            for (var j = 0; j < list.length; j++) {
-                                if (list[j] === n || list[j].contains(n) || n.contains(list[j])) {
-                                    alreadyCovered = true;
-                                    break;
-                                }
+                    var results = [];
+                    var seen = [];
+                    function pushPickerOverlay(node) {
+                        if (!node || seen.indexOf(node) >= 0) return;
+                        if (!isNodeVisible(node)) return;
+                        if (triggerNode && node === triggerNode) return;
+                        // If a more specific child calendar container exists inside node, prefer the child
+                        for (var k = 0; k < results.length; k++) {
+                            if (results[k] === node) return;
+                            if (node.contains && node.contains(results[k])) return;
+                            if (results[k].contains && results[k].contains(node)) {
+                                results[k] = node;
+                                seen.push(node);
+                                return;
                             }
-                            if (!alreadyCovered) list.push(n);
+                        }
+                        seen.push(node);
+                        results.push(node);
+                    }
+
+                    // 1. Explicit datepicker / calendar / wheel-picker containers
+                    var explicitPickerSel = [
+                        '.datepicker-dropdown',
+                        '.datepicker-picker',
+                        '.datepicker',
+                        '.flatpickr-calendar.open',
+                        '.flatpickr-calendar',
+                        '.react-datepicker-popper',
+                        '.react-datepicker',
+                        '.vdp-datepicker__calendar',
+                        '.mx-datepicker-main',
+                        '.mx-datepicker-popup',
+                        '.dp__menu',
+                        '.ant-picker-dropdown',
+                        '.ant-picker-panel-container',
+                        '.ant-calendar-picker-container',
+                        '.el-picker-panel',
+                        '.el-date-picker',
+                        '.MuiPickersPopper-root',
+                        '.MuiDateCalendar-root',
+                        '.pika-single',
+                        '.air-datepicker',
+                        '.litepicker',
+                        '.vanilla-calendar',
+                        '.duet-date__dialog',
+                        '.daterangepicker',
+                        '.picker-modal',
+                        '.wheel-picker',
+                        '.adm-picker',
+                        '.van-picker',
+                        'ion-datetime',
+                        'ion-picker',
+                        '[class*="datepicker-dropdown"]',
+                        '[class*="datepicker-picker"]',
+                        '[class*="date-picker"]:not(input)',
+                        '[class*="calendar-popup"]',
+                        '[class*="calendar-picker"]'
+                    ].join(', ');
+                    var explicitMatches = document.querySelectorAll(explicitPickerSel);
+                    for (var e = 0; e < explicitMatches.length; e++) {
+                        var em = explicitMatches[e];
+                        if (triggerNode && (em === triggerNode || (em.contains(triggerNode) && !em.querySelector('table, .datepicker-grid, .datepicker-cells, .datepicker-years, .datepicker-months, .datepicker-days')))) continue;
+                        pushPickerOverlay(em);
+                    }
+
+                    // 2. Scan active overlays and DOM for any visible popup/table/div containing a calendar grid
+                    //    (e.g. Decade range header "2020-2029", >=6 4-digit years, >=6 month names, or weekday header + day grid)
+                    var candidates = findActiveOverlays(triggerNode);
+                    var bodyNodes = document.body ? document.body.querySelectorAll('div, table, section, aside, dialog') : [];
+                    for (var b = 0; b < bodyNodes.length; b++) {
+                        candidates.push(bodyNodes[b]);
+                    }
+                    for (var i = 0; i < candidates.length; i++) {
+                        var n = candidates[i];
+                        if (!n || !isNodeVisible(n) || (n.classList && n.classList.contains('aura-hud'))) continue;
+                        if (triggerNode && (n === triggerNode || (n.contains(triggerNode) && n.getAttribute('role') !== 'dialog'))) continue;
+                        var r = n.getBoundingClientRect();
+                        if (r.width < 130 || r.height < 90 || r.width > 680 || r.height > 680) continue;
+                        var txt = (n.innerText || '').trim();
+                        if (!txt || txt.length > 1500) continue;
+                        var hasDecadeHeader = /\b(19\d\d|20\d\d)\s*[-~–—]\s*(19\d\d|20\d\d)\b/.test(txt);
+                        var yearCount = (txt.match(/\b(19\d\d|20\d\d)\b/g) || []).length;
+                        var hasMonthGrid = /\bjan\b[\s\S]*\bfeb\b[\s\S]*\bmar\b[\s\S]*\bapr\b/i.test(txt);
+                        var hasDayGrid = /\b(su|mo|tu|we|th|fr|sa|sun|mon|tue|wed|thu|fri|sat)\b/i.test(txt) && /\b15\b/.test(txt) && /\b28\b/.test(txt);
+                        var hasWheelCols = n.querySelectorAll && n.querySelectorAll('.picker-column, .wheel-column, .adm-picker-column, .van-picker-column').length >= 2;
+                        if (hasDecadeHeader || yearCount >= 6 || hasMonthGrid || hasDayGrid || hasWheelCols) {
+                            pushPickerOverlay(n);
                         }
                     }
-                    return list;
+                    return results;
                 }
 
                 function openDatePickerTrigger(triggerNode) {
@@ -2680,11 +2778,9 @@ object AutomationScripts {
 
                 function tapCalendarCell(cellObj) {
                     if (!cellObj) return;
-                    if (cellObj.node) {
-                        dispatchHumanTap(cellObj.node);
-                    }
-                    if (cellObj.cellRoot && cellObj.cellRoot !== cellObj.node) {
-                        dispatchHumanTap(cellObj.cellRoot);
+                    var targetNode = cellObj.node || cellObj.cellRoot;
+                    if (targetNode) {
+                        dispatchHumanTap(targetNode);
                     }
                 }
 
@@ -2714,6 +2810,7 @@ object AutomationScripts {
                 function findCalendarHeaderSwitch(ov) {
                     var switchSelectors = [
                         '.datepicker-switch',
+                        '.view-switch',
                         '.vdp-datepicker .day__month_btn',
                         '.vdp-datepicker header .up',
                         '.mx-btn-current-year',
@@ -2724,6 +2821,7 @@ object AutomationScripts {
                         '.MuiPickersCalendarHeader-label',
                         '.flatpickr-current-month',
                         '.react-datepicker__current-month',
+                        '.dp__month_year_select',
                         'thead th[colspan]'
                     ].join(', ');
                     var matches = ov.querySelectorAll(switchSelectors);
@@ -2732,17 +2830,27 @@ object AutomationScripts {
                     }
                     var ovRect = ov.getBoundingClientRect();
                     var candidates = ov.querySelectorAll('th, button, span, div, a');
+                    var bestSwitch = null;
                     for (var c = 0; c < candidates.length; c++) {
                         var cand = candidates[c];
                         if (!isNodeVisible(cand)) continue;
                         var r = cand.getBoundingClientRect();
-                        if (r.top - ovRect.top > Math.max(65, ovRect.height * 0.28)) continue;
-                        var t = (cand.innerText || cand.textContent || '').trim();
-                        if (/^(19\d\d|20\d\d)\s*[-~–—]\s*(19\d\d|20\d\d)$/.test(t) || /^(19\d\d|20\d\d)$/.test(t)) {
-                            return cand;
+                        if (r.top - ovRect.top > Math.max(68, ovRect.height * 0.28)) continue;
+                        // Avoid matching the full-width outer header bar that wraps [«] [2020-2029] [»]
+                        if (r.width > ovRect.width * 0.86 || r.height > 64) continue;
+                        var t = (cand.innerText || cand.textContent || '').replace(/\s+/g, ' ').trim();
+                        if (!t || t.length > 28) continue;
+                        var isHeaderTitle = (
+                            /^(19\d\d|20\d\d)\s*[-~–—]\s*(19\d\d|20\d\d)$/.test(t) ||
+                            /^(19\d\d|20\d\d)(年)?$/.test(t) ||
+                            /^([a-z]{3,9}\s+(19\d\d|20\d\d)|(19\d\d|20\d\d)\s+[a-z]{3,9}|(19\d\d|20\d\d)\s*[-年/.]\s*\d{1,2})/i.test(t)
+                        );
+                        if (isHeaderTitle) {
+                            // Prefer the innermost matching element so we never return the parent header container
+                            bestSwitch = cand;
                         }
                     }
-                    return null;
+                    return bestSwitch;
                 }
 
                 function findCalendarNavBtn(ov, dir, preferSuper) {
@@ -2757,8 +2865,8 @@ object AutomationScripts {
                         }
                     }
                     var stdSel = isPrev
-                        ? '.prev, th.prev, button.prev, .vdp-datepicker header .prev, .mx-btn-icon-left, .ant-picker-header-prev-btn, .el-date-picker__prev-btn, .flatpickr-prev-month, .react-datepicker__navigation--previous, [aria-label*="prev" i], [title*="prev" i]'
-                        : '.next, th.next, button.next, .vdp-datepicker header .next, .mx-btn-icon-right, .ant-picker-header-next-btn, .el-date-picker__next-btn, .flatpickr-next-month, .react-datepicker__navigation--next, [aria-label*="next" i], [title*="next" i]';
+                        ? '.prev, .prev-btn, .prev-button, th.prev, button.prev, .datepicker-header .prev, .datepicker-controls .prev-btn, .vdp-datepicker header .prev, .mx-btn-icon-left, .ant-picker-header-prev-btn, .el-date-picker__prev-btn, .flatpickr-prev-month, .react-datepicker__navigation--previous, .MuiPickersArrowSwitcher-root button:first-child, [aria-label*="prev" i], [title*="prev" i], [data-action*="prev" i]'
+                        : '.next, .next-btn, .next-button, th.next, button.next, .datepicker-header .next, .datepicker-controls .next-btn, .vdp-datepicker header .next, .mx-btn-icon-right, .ant-picker-header-next-btn, .el-date-picker__next-btn, .flatpickr-next-month, .react-datepicker__navigation--next, .MuiPickersArrowSwitcher-root button:last-child, [aria-label*="next" i], [title*="next" i], [data-action*="next" i]';
                     var stdBtns = ov.querySelectorAll(stdSel);
                     for (var j = 0; j < stdBtns.length; j++) {
                         if (isNodeVisible(stdBtns[j])) return stdBtns[j];
@@ -2766,39 +2874,40 @@ object AutomationScripts {
                     // Text match in top header area of ov (e.g. «, <<, ‹, <, », >>, ›, >)
                     var ovRect = ov.getBoundingClientRect();
                     var headerMaxY = ovRect.top + Math.max(72, ovRect.height * 0.32);
-                    var arrowRe = isPrev ? /^(«|<<|‹|<|⟨|⟪|prev|previous)$/i : /^(»|>>|›|>|⟩|⟫|next)$/i;
-                    var allHeaderNodes = ov.querySelectorAll('th, button, a, span, div, i');
+                    var arrowRe = isPrev ? /^(«|<<|‹|<|⟨|⟪|←|◀|◁|prev|previous)$/i : /^(»|>>|›|>|⟩|⟫|→|▶|▷|next)$/i;
+                    var allHeaderNodes = ov.querySelectorAll('th, button, a, span, div, i, svg');
                     for (var k = 0; k < allHeaderNodes.length; k++) {
                         var hn = allHeaderNodes[k];
                         if (!isNodeVisible(hn)) continue;
                         var hr = hn.getBoundingClientRect();
                         if (hr.top > headerMaxY || hr.width > 90 || hr.height > 70) continue;
                         var hTxt = (hn.innerText || hn.textContent || '').trim();
-                        if (arrowRe.test(hTxt)) return hn;
-                    }
-                    // Positional fallback relative to header switch element
-                    var hdrSwitch = findCalendarHeaderSwitch(ov);
-                    if (hdrSwitch) {
-                        var swRect = hdrSwitch.getBoundingClientRect();
-                        var bestBtn = null;
-                        for (var p = 0; p < allHeaderNodes.length; p++) {
-                            var cand = allHeaderNodes[p];
-                            if (cand === hdrSwitch || cand.contains(hdrSwitch) || hdrSwitch.contains(cand)) continue;
-                            if (!isNodeVisible(cand)) continue;
-                            var cr = cand.getBoundingClientRect();
-                            if (Math.abs((cr.top + cr.height / 2) - (swRect.top + swRect.height / 2)) > 28) continue;
-                            if (cr.width < 12 || cr.width > 80 || cr.height < 12 || cr.height > 64) continue;
-                            if (isPrev && (cr.left + cr.width / 2) < swRect.left) {
-                                bestBtn = cand;
-                                break;
-                            }
-                            if (!isPrev && (cr.left + cr.width / 2) > swRect.right) {
-                                bestBtn = cand;
-                            }
+                        if (arrowRe.test(hTxt)) {
+                            return (hn.closest && hn.closest('button, th, a, [role="button"]')) || hn;
                         }
-                        if (bestBtn) return bestBtn;
                     }
-                    return null;
+                    // Positional fallback in the top header bar (handles SVG / icon / CSS ::before buttons where innerText is empty)
+                    var hdrSwitch = findCalendarHeaderSwitch(ov);
+                    var leftLimitX = hdrSwitch ? hdrSwitch.getBoundingClientRect().left : (ovRect.left + ovRect.width * 0.36);
+                    var rightLimitX = hdrSwitch ? hdrSwitch.getBoundingClientRect().right : (ovRect.right - ovRect.width * 0.36);
+                    var bestBtn = null;
+                    for (var p = 0; p < allHeaderNodes.length; p++) {
+                        var cand = allHeaderNodes[p];
+                        if (hdrSwitch && (cand === hdrSwitch || cand.contains(hdrSwitch))) continue;
+                        if (!isNodeVisible(cand)) continue;
+                        var cr = cand.getBoundingClientRect();
+                        if (cr.top > ovRect.top + 65 || (cr.bottom - ovRect.top) > 78) continue;
+                        if (cr.width < 10 || cr.width > 82 || cr.height < 10 || cr.height > 62) continue;
+                        var centerX = cr.left + cr.width / 2;
+                        if (isPrev && centerX <= leftLimitX + 4) {
+                            bestBtn = (cand.closest && cand.closest('button, th, a, [role="button"]')) || cand;
+                            break;
+                        }
+                        if (!isPrev && centerX >= rightLimitX - 4) {
+                            bestBtn = (cand.closest && cand.closest('button, th, a, [role="button"]')) || cand;
+                        }
+                    }
+                    return bestBtn;
                 }
 
                 function collectVisibleCalendarCells(ov) {
@@ -2806,18 +2915,18 @@ object AutomationScripts {
                     var seenRoots = [];
                     var ovRect = ov.getBoundingClientRect();
                     var hdrSwitch = findCalendarHeaderSwitch(ov);
-                    var rawNodes = ov.querySelectorAll('tbody td, tbody span, tbody button, tbody div, tbody a, .datepicker-years span, .datepicker-months span, .datepicker-days td, .vdp-datepicker__calendar .cell, .mx-calendar-content td, .ant-picker-body td, .el-picker-panel__content td, .flatpickr-day, .react-datepicker__day, .react-datepicker__month-text, .react-datepicker__year-text, .MuiPickersDay-root, .MuiPickersYear-yearButton, .MuiPickersMonth-monthButton, [role="gridcell"], td, span, button, div');
+                    var rawNodes = ov.querySelectorAll('tbody td, tbody span, tbody button, tbody div, tbody a, .datepicker-years span, .datepicker-months span, .datepicker-days td, .datepicker-cell, .vdp-datepicker__calendar .cell, .mx-calendar-content td, .ant-picker-body td, .el-picker-panel__content td, .flatpickr-day, .react-datepicker__day, .react-datepicker__month-text, .react-datepicker__year-text, .MuiPickersDay-root, .MuiPickersYear-yearButton, .MuiPickersMonth-monthButton, [role="gridcell"], td, span, button, div');
 
                     for (var i = 0; i < rawNodes.length; i++) {
                         var n = rawNodes[i];
                         if (!isNodeVisible(n)) continue;
-                        if (hdrSwitch && (n === hdrSwitch || n.contains(hdrSwitch) || hdrSwitch.contains(n))) continue;
-                        if (n.closest && n.closest('thead, header, .datepicker-header, .ant-picker-header, .mx-calendar-header, .el-date-picker__header, .MuiPickersCalendarHeader-root, .flatpickr-months, .flatpickr-weekdays, .react-datepicker__header, th, .dow')) continue;
+                        if (hdrSwitch && (n === hdrSwitch || n.contains(hdrSwitch))) continue;
+                        if (n.closest && n.closest('thead, header, .datepicker-header, .datepicker-controls, .ant-picker-header, .mx-calendar-header, .el-date-picker__header, .MuiPickersCalendarHeader-root, .flatpickr-months, .flatpickr-weekdays, .react-datepicker__header, th, .dow, .days-of-week')) continue;
 
                         var nr = n.getBoundingClientRect();
-                        if (nr.width < 16 || nr.height < 14 || nr.width > 160 || nr.height > 90) continue;
+                        if (nr.width < 14 || nr.height < 12 || nr.width > 180 || nr.height > 95) continue;
                         // Skip top header navigation bar if not inside tbody
-                        if (!n.closest('tbody') && (nr.top - ovRect.top) < 38 && nr.height < 42) {
+                        if (!n.closest('tbody') && (nr.top - ovRect.top) < 42 && nr.height < 46) {
                             var topTxt = (n.innerText || n.textContent || '').trim();
                             if (/^(«|<<|‹|<|»|>>|›|>|\d{4}\s*[-~–—]\s*\d{4})$/.test(topTxt)) continue;
                         }
@@ -2826,7 +2935,7 @@ object AutomationScripts {
                         if (!txt || txt.length > 16) continue;
                         if (/^(su|mo|tu|we|th|fr|sa|sun|mon|tue|wed|thu|fri|sat|«|»|‹|›|<|>|today|clear|now|cancel|ok|confirm|done)$/i.test(txt)) continue;
 
-                        // Prefer innermost leaf node for text, while tracking cellRoot (e.g. <td>)
+                        // Prefer innermost leaf node for text
                         var hasChildWithSameText = false;
                         for (var ch = 0; ch < n.children.length; ch++) {
                             var childEl = n.children[ch];
@@ -2837,7 +2946,14 @@ object AutomationScripts {
                         }
                         if (hasChildWithSameText) continue;
 
-                        var cellRoot = (n.closest ? n.closest('td, [role="gridcell"], button, .cell, .year, .month, .day') : null) || n;
+                        // CRITICAL: Only promote cellRoot to an ancestor (like <td> or <button>) if that ancestor's own trimmed text
+                        // equals txt! In Bootstrap/VanillaJS datepickers, all 12 year/month <span>s sit inside a single <td colspan="7">,
+                        // so promoting to <td> without checking text would collapse all 12 years/months into 1 cell!
+                        var candRoot = n.closest ? n.closest('td, [role="gridcell"], button, .datepicker-cell, .cell, .year, .month, .day') : null;
+                        var cellRoot = n;
+                        if (candRoot && (candRoot.innerText || candRoot.textContent || '').replace(/\s+/g, ' ').trim() === txt) {
+                            cellRoot = candRoot;
+                        }
                         if (seenRoots.indexOf(cellRoot) >= 0) continue;
                         seenRoots.push(cellRoot);
 
@@ -2977,7 +3093,7 @@ object AutomationScripts {
                             }
                         }
 
-                        // If targetYearNum is inside the current decade range, tap that year cell!
+                        // If targetYearNum is inside the current decade range (or directly visible as non-muted), tap that year cell!
                         if (targetYearNum >= minDecadeYear && targetYearNum <= maxDecadeYear) {
                             var exactYearCell = null;
                             for (var yc = 0; yc < yearCells.length; yc++) {
@@ -3002,14 +3118,21 @@ object AutomationScripts {
                         }
 
                         // Otherwise navigate Previous («) or Next (») decade
-                        if (targetYearNum < minDecadeYear && (window._auraDecadeNavClicks || 0) < 10) {
+                        if (targetYearNum < minDecadeYear && (window._auraDecadeNavClicks || 0) < 12) {
                             var prevDecBtn = findCalendarNavBtn(ov, 'prev', true);
                             if (prevDecBtn) {
                                 window._auraDecadeNavClicks = (window._auraDecadeNavClicks || 0) + 1;
                                 dispatchHumanTap(prevDecBtn);
                                 return 'STEPPED:DECADE_PREV';
                             }
-                        } else if (targetYearNum > maxDecadeYear && (window._auraDecadeNavClicks || 0) < 10) {
+                            // If no « button found, try tapping the decade header switch (e.g. "2020-2029") to zoom out to Decade-Range cells
+                            var zoomHdr = findCalendarHeaderSwitch(ov);
+                            if (zoomHdr && (window._auraHeaderSwitchClicks || 0) < 2) {
+                                window._auraHeaderSwitchClicks = (window._auraHeaderSwitchClicks || 0) + 1;
+                                dispatchHumanTap(zoomHdr);
+                                return 'STEPPED:ZOOM_TO_DECADES';
+                            }
+                        } else if (targetYearNum > maxDecadeYear && (window._auraDecadeNavClicks || 0) < 12) {
                             var nextDecBtn = findCalendarNavBtn(ov, 'next', true);
                             if (nextDecBtn) {
                                 window._auraDecadeNavClicks = (window._auraDecadeNavClicks || 0) + 1;
@@ -3136,18 +3259,20 @@ object AutomationScripts {
                 var stepKey = 'dob_' + '$escapedSelector';
                 var overlays = findDatePickerOverlays(el);
 
-                // Phase 1: If no datepicker popup is open yet on the first attempt, tap the trigger to open it
-                if (overlays.length === 0 && window._auraActiveDateKey !== stepKey) {
+                // Phase 1: On the first attempt for this DOB step, if no calendar overlay is open yet, tap the trigger to open it
+                if (window._auraActiveDateKey !== stepKey) {
                     window._auraActiveDateKey = stepKey;
                     window._auraActiveDateAttempts = 1;
                     window._auraDateYearSelected = false;
                     window._auraDateMonthSelected = false;
                     window._auraHeaderSwitchClicks = 0;
                     window._auraDecadeNavClicks = 0;
-                    openDatePickerTrigger(el);
-                    overlays = findDatePickerOverlays(el);
                     if (overlays.length === 0) {
-                        return 'PENDING:OPENED_DATE_PICKER';
+                        openDatePickerTrigger(el);
+                        overlays = findDatePickerOverlays(el);
+                        if (overlays.length === 0) {
+                            return 'PENDING:OPENED_DATE_PICKER';
+                        }
                     }
                 } else {
                     window._auraActiveDateAttempts = (window._auraActiveDateAttempts || 1) + 1;
@@ -3176,7 +3301,7 @@ object AutomationScripts {
                                         setNativeInputValueNoKeyboard(el, formattedDate);
                                     }
                                 } catch (e) {}
-                            }, 140);
+                            }, 160);
                             return 'SUCCESS:DATE_PICKER_SELECTED';
                         }
 
@@ -3193,6 +3318,12 @@ object AutomationScripts {
 
                         break;
                     }
+
+                    // While a calendar overlay is open on screen and we haven't exhausted attempts,
+                    // NEVER fall through to Phase 3 (which would blur the input and abort the popup!).
+                    if (window._auraActiveDateAttempts <= 18) {
+                        return 'PENDING:CALENDAR_OVERLAY_OPEN';
+                    }
                 }
 
                 var isCustomPickerTrigger = (
@@ -3204,7 +3335,7 @@ object AutomationScripts {
                     /datepicker|date-picker|flatpickr|ant-picker|MuiPickers|react-datepicker|vdp-datepicker|mx-datepicker/i.test((el.className || '') + ' ' + (el.parentElement ? el.parentElement.className : ''))
                 );
 
-                if (isCustomPickerTrigger && window._auraActiveDateAttempts <= 3) {
+                if (isCustomPickerTrigger && window._auraActiveDateAttempts <= 4) {
                     openDatePickerTrigger(el);
                     return 'PENDING:WAITING_FOR_DATE_PICKER';
                 }

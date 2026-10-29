@@ -34,14 +34,20 @@ import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -65,6 +71,8 @@ import com.example.ui.theme.ExpressiveCardShape
 import com.example.ui.theme.ExpressiveChipShape
 import com.example.ui.theme.ExpressivePillShape
 import com.example.ui.theme.ExpressiveSquircleShape
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 data class DiscoverStory(
     val title: String,
@@ -78,8 +86,10 @@ data class DiscoverStory(
 /**
  * Material 3 Expressive Home Screen
  * Features bold brand hierarchy, pill search trigger, squircle speed dials,
+ * Material 3 PullToRefreshBox with shape-morphing LoadingIndicator,
  * and high-contrast tonal container sections.
  */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
     settings: BrowserSettings = BrowserSettings(),
@@ -98,6 +108,9 @@ fun HomeScreen(
     var isManageMode by remember { mutableStateOf(false) }
     var speedDialToEdit by remember { mutableStateOf<SpeedDial?>(null) }
     var showAddSpeedDialDialog by remember { mutableStateOf(false) }
+    var isRefreshing by remember { mutableStateOf(false) }
+    val pullToRefreshState = rememberPullToRefreshState()
+    val coroutineScope = rememberCoroutineScope()
 
     val discoverStories = listOf(
         DiscoverStory(
@@ -140,14 +153,39 @@ fun HomeScreen(
         label = "header_top_padding"
     )
 
-    LazyColumn(
-        contentPadding = PaddingValues(bottom = 96.dp),
+    PullToRefreshBox(
+        isRefreshing = isRefreshing,
+        onRefresh = {
+            coroutineScope.launch {
+                isRefreshing = true
+                delay(850)
+                isRefreshing = false
+            }
+        },
+        state = pullToRefreshState,
+        indicator = {
+            PullToRefreshDefaults.LoadingIndicator(
+                state = pullToRefreshState,
+                isRefreshing = isRefreshing,
+                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .testTag("home_pull_to_refresh_indicator")
+            )
+        },
         modifier = modifier
             .fillMaxSize()
-            .testTag("home_screen")
+            .testTag("home_pull_to_refresh_box")
     ) {
-        // Expressive Hero Header & Aura Brand
-        item {
+        LazyColumn(
+            contentPadding = PaddingValues(bottom = 96.dp),
+            modifier = Modifier
+                .fillMaxSize()
+                .testTag("home_screen")
+        ) {
+            // Expressive Hero Header & Aura Brand
+            item {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -667,6 +705,7 @@ fun HomeScreen(
                     }
                 }
             }
+        }
         }
     }
 

@@ -309,6 +309,7 @@ fun BrowserApp(
                             onClearAllHistory = { viewModel.clearHistory() },
                             onClearTodayHistory = { viewModel.clearTodayHistory() },
                             onCopyUrl = { url -> viewModel.copyToClipboard(context, url) },
+                            onRefreshHistory = { viewModel.showMessage("Browsing history refreshed") },
                             onNavigateBack = returnFromSubScreen
                         )
                     }
@@ -371,7 +372,8 @@ fun BrowserApp(
                             onDeleteSpeedDial = { id ->
                                 viewModel.deleteSpeedDial(id)
                             },
-                            onResetSpeedDials = { viewModel.resetSpeedDials() }
+                            onResetSpeedDials = { viewModel.resetSpeedDials() },
+                            onRefreshSettings = { viewModel.showMessage("Settings synchronized") }
                         )
                     }
 

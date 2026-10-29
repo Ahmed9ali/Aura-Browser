@@ -691,6 +691,17 @@ class ExampleUnitTest {
 
     @Test
     fun testMultiStageDatePickerDobSelectionScript() {
+        val testScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Unconfined)
+        val engine = com.example.automation.AutomationEngine(testScope)
+        engine.startFreshRecordingScript("https://account.fydeos.io")
+
+        // Verify that a single Birthday input (input[name="birthday"]) is NEVER misclassified as "dobDay" due to substring "day"
+        engine.jsInterface.onUserAction("INPUT", "input[name=\"birthday\"]", "Birthday", "")
+        val steps = engine.currentScript.value.steps
+        assertEquals(1, steps.size)
+        assertEquals("dob", steps[0].variableKey)
+        assertEquals("{{dob}}", steps[0].value)
+
         val dobJs = com.example.automation.AutomationScripts.createSelectDateScript(
             selector = "input[name='birthday']",
             isoDate = "1980-08-19",
@@ -704,6 +715,7 @@ class ExampleUnitTest {
         assertTrue(dobJs.contains("STEPPED:DECADE_PREV"))
         assertTrue(dobJs.contains("STEPPED:YEAR_SELECTED"))
         assertTrue(dobJs.contains("STEPPED:MONTH_SELECTED"))
+        assertTrue(dobJs.contains("PENDING:CALENDAR_OVERLAY_OPEN"))
         assertTrue(dobJs.contains("SUCCESS:DATE_PICKER_SELECTED"))
         assertTrue(dobJs.contains("var yearStr = '1980'"))
         assertTrue(dobJs.contains("var monthPad = '08'"))
