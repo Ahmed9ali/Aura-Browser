@@ -914,8 +914,6 @@ fun HistoryCardItem(
     shape: Shape = ExpressiveCardShape,
     modifier: Modifier = Modifier
 ) {
-    val timeFormatter = remember { SimpleDateFormat("h:mm a", Locale.getDefault()) }
-    val formattedTime = remember(item.timestamp) { timeFormatter.format(Date(item.timestamp)) }
     val relativeTime = remember(item.timestamp) { formatRelativeTime(item.timestamp) }
     val domainHost = remember(item.url) { extractDomainHost(item.url) }
     val domainInitial = remember(domainHost, item.title) {
@@ -924,7 +922,6 @@ fun HistoryCardItem(
             ?: ""
     }
     val domainAccent = remember(domainHost) { domainAccentColor(domainHost) }
-    val isSecureHttps = remember(item.url) { item.url.startsWith("https://", ignoreCase = true) }
     val cleanDisplayUrl = remember(item.url) {
         item.url.removePrefix("https://").removePrefix("http://").removePrefix("www.")
     }
@@ -943,70 +940,61 @@ fun HistoryCardItem(
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 13.dp)
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 10.dp)
         ) {
-            // Domain Monogram / Favicon Squircle Badge
-            Box(
-                contentAlignment = Alignment.BottomEnd,
-                modifier = Modifier.size(44.dp)
+            // Compact Domain Monogram Squircle Badge
+            Surface(
+                shape = ExpressiveSquircleShape,
+                color = domainAccent.copy(alpha = 0.16f),
+                border = BorderStroke(1.dp, domainAccent.copy(alpha = 0.3f)),
+                modifier = Modifier.size(36.dp)
             ) {
-                Surface(
-                    shape = ExpressiveSquircleShape,
-                    color = domainAccent.copy(alpha = 0.16f),
-                    border = BorderStroke(1.dp, domainAccent.copy(alpha = 0.32f)),
-                    modifier = Modifier.size(42.dp)
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        if (domainInitial.isNotEmpty()) {
-                            Text(
-                                text = domainInitial,
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = domainAccent
-                            )
-                        } else {
-                            Icon(
-                                imageVector = Icons.Default.Public,
-                                contentDescription = null,
-                                tint = domainAccent,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                    }
-                }
-
-                // Subtle HTTPS Lock Badge
-                if (isSecureHttps) {
-                    Surface(
-                        shape = CircleShape,
-                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.surface),
-                        modifier = Modifier.size(16.dp)
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = Icons.Default.Lock,
-                                contentDescription = "HTTPS Secure",
-                                tint = Color(0xFF10B981),
-                                modifier = Modifier.size(9.dp)
-                            )
-                        }
+                Box(contentAlignment = Alignment.Center) {
+                    if (domainInitial.isNotEmpty()) {
+                        Text(
+                            text = domainInitial,
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = domainAccent
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.Public,
+                            contentDescription = null,
+                            tint = domainAccent,
+                            modifier = Modifier.size(18.dp)
+                        )
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.width(13.dp))
+            Spacer(modifier = Modifier.width(12.dp))
 
-            // Title, Domain Pill, URL & Visit Metadata
+            // Compact 2-Line Title + URL & Relative Time
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = item.title.ifBlank { domainHost.ifBlank { item.url } },
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = item.title.ifBlank { domainHost.ifBlank { item.url } },
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
+                    Text(
+                        text = relativeTime,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                        maxLines = 1
+                    )
+                }
 
                 Spacer(modifier = Modifier.height(2.dp))
 
@@ -1017,60 +1005,14 @@ fun HistoryCardItem(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-
-                Spacer(modifier = Modifier.height(6.dp))
-
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    if (domainHost.isNotBlank()) {
-                        Surface(
-                            shape = ExpressiveChipShape,
-                            color = domainAccent.copy(alpha = 0.12f)
-                        ) {
-                            Text(
-                                text = domainHost,
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.SemiBold,
-                                color = domainAccent,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                            )
-                        }
-                    }
-
-                    Text(
-                        text = "$formattedTime • $relativeTime",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
-                        maxLines = 1
-                    )
-
-                    if (item.visitCount > 1) {
-                        Surface(
-                            shape = ExpressiveChipShape,
-                            color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.75f)
-                        ) {
-                            Text(
-                                text = "${item.visitCount} visits",
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSecondaryContainer,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                            )
-                        }
-                    }
-                }
             }
 
             Spacer(modifier = Modifier.width(10.dp))
 
-            // Action Buttons Cluster
+            // Compact Action Pills (Copy & Delete — redirect removed since tapping card opens URL)
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 if (onCopy != null) {
                     Surface(
@@ -1078,7 +1020,7 @@ fun HistoryCardItem(
                         color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.85f),
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)),
                         modifier = Modifier
-                            .size(32.dp)
+                            .size(30.dp)
                             .clip(CircleShape)
                             .clickable(onClick = onCopy)
                             .testTag("btn_copy_history_${item.id}")
@@ -1088,29 +1030,9 @@ fun HistoryCardItem(
                                 imageVector = Icons.Default.ContentCopy,
                                 contentDescription = "Copy Link",
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(15.dp)
+                                modifier = Modifier.size(14.dp)
                             )
                         }
-                    }
-                }
-
-                Surface(
-                    shape = CircleShape,
-                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)),
-                    modifier = Modifier
-                        .size(32.dp)
-                        .clip(CircleShape)
-                        .clickable(onClick = onOpenInNewTab)
-                        .testTag("btn_open_history_new_tab_${item.id}")
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = Icons.Default.OpenInNew,
-                            contentDescription = "Open in New Tab",
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(15.dp)
-                        )
                     }
                 }
 
@@ -1119,7 +1041,7 @@ fun HistoryCardItem(
                     color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f),
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.22f)),
                     modifier = Modifier
-                        .size(32.dp)
+                        .size(30.dp)
                         .clip(CircleShape)
                         .clickable(onClick = onDelete)
                         .testTag("btn_delete_history_${item.id}")
@@ -1129,7 +1051,7 @@ fun HistoryCardItem(
                             imageVector = Icons.Default.Delete,
                             contentDescription = "Delete item",
                             tint = MaterialTheme.colorScheme.error,
-                            modifier = Modifier.size(15.dp)
+                            modifier = Modifier.size(14.dp)
                         )
                     }
                 }

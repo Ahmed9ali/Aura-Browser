@@ -80,6 +80,8 @@ fun WebViewScreen(
 ) {
     val context = LocalContext.current
     var webViewInstance by remember { mutableStateOf<WebView?>(null) }
+    var webViewRecreationKey by remember(tab.id) { mutableStateOf(0) }
+    var hasAutoRetriedRenderer by remember(tab.id) { mutableStateOf(false) }
     var hasError by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf("") }
     var lastLoadedUrl by remember(tab.id) { mutableStateOf<String?>(null) }
@@ -159,180 +161,217 @@ fun WebViewScreen(
             .fillMaxSize()
             .testTag("webview_container")
     ) {
-        AndroidView(
-            factory = { ctx ->
-                WebView(ctx).apply {
-                    layoutParams = ViewGroup.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.MATCH_PARENT
-                    )
+        androidx.compose.runtime.key(tab.id, webViewRecreationKey) {
+            AndroidView(
+                factory = { ctx ->
+                    WebView(ctx).apply {
+                        layoutParams = ViewGroup.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT
+                        )
 
-                    // Use software layer on WebView to prevent DRM rendernode (/dev/dri/renderD128) errors on cloud emulators
-                    setLayerType(android.view.View.LAYER_TYPE_SOFTWARE, null)
-
-                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                        setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, true)
-                    }
-
-                    settings.apply {
-                        javaScriptEnabled = true
-                        domStorageEnabled = true
-                        allowContentAccess = true
-                        allowFileAccess = false
-                        builtInZoomControls = true
-                        displayZoomControls = false
-                        setSupportZoom(true)
-                        mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
-                        cacheMode = WebSettings.LOAD_DEFAULT
+                        // Use software layer on WebView to prevent DRM rendernode (/dev/dri/renderD128) and GPU crashes on cloud emulators
+                        setLayerType(android.view.View.LAYER_TYPE_SOFTWARE, null)
 
                         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                            safeBrowsingEnabled = false
+                            setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, true)
                         }
 
-                        if (isDesktopMode) {
-                            userAgentString = desktopUserAgent
-                            useWideViewPort = true
-                            loadWithOverviewMode = true
-                        } else {
-                            userAgentString = null
-                            useWideViewPort = false
-                            loadWithOverviewMode = false
-                        }
-                    }
+                        settings.apply {
+                            javaScriptEnabled = true
+                            domStorageEnabled = true
+                            allowContentAccess = true
+                            allowFileAccess = false
+                            builtInZoomControls = true
+                            displayZoomControls = false
+                            setSupportZoom(true)
+                            mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+                            cacheMode = WebSettings.LOAD_DEFAULT
+                            mediaPlaybackRequiresUserGesture = true
 
-                    // Register JavaScript interface for Automation Engine
-                    automationEngine?.let { engine ->
-                        addJavascriptInterface(engine.jsInterface, "AuraAutomation")
-                    }
-
-                    webViewClient = object : WebViewClient() {
-                        override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
-                            val nextUrl = request?.url?.toString() ?: return false
-                            if (nextUrl.startsWith("http://") || nextUrl.startsWith("https://")) {
-                                return false
+                            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                                safeBrowsingEnabled = false
                             }
-                            return try {
-                                val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, request.url)
-                                ctx.startActivity(intent)
-                                true
-                            } catch (e: Exception) {
-                                true
-                            }
-                        }
 
-                        override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
-                            super.onPageStarted(view, url, favicon)
-                            hasError = false
-                            if (!url.isNullOrBlank()) {
-                                lastLoadedUrl = url
-                                automationEngine?.syncCurrentPageUrl(url)
-                                automationEngine?.onPageLoadStarted(url)
-                            }
-                            onWebStateChanged(
-                                null,
-                                url,
-                                10,
-                                true,
-                                view?.canGoBack(),
-                                view?.canGoForward()
-                            )
-                        }
-
-                        override fun onPageFinished(view: WebView?, url: String?) {
-                            super.onPageFinished(view, url)
-                            if (!url.isNullOrBlank()) {
-                                lastLoadedUrl = url
-                                automationEngine?.onPageLoaded(url)
+                            if (isDesktopMode) {
+                                userAgentString = desktopUserAgent
+                                useWideViewPort = true
+                                loadWithOverviewMode = true
                             } else {
+                                userAgentString = null
+                                useWideViewPort = false
+                                loadWithOverviewMode = false
+                            }
+                        }
+
+                        // Register JavaScript interface for Automation Engine
+                        automationEngine?.let { engine ->
+                            addJavascriptInterface(engine.jsInterface, "AuraAutomation")
+                        }
+
+                        webViewClient = object : WebViewClient() {
+                            override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                                val nextUrl = request?.url?.toString() ?: return false
+                                if (nextUrl.startsWith("http://") || nextUrl.startsWith("https://")) {
+                                    return false
+                                }
+                                return try {
+                                    val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, request.url)
+                                    ctx.startActivity(intent)
+                                    true
+                                } catch (e: Exception) {
+                                    true
+                                }
+                            }
+
+                            override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+                                super.onPageStarted(view, url, favicon)
+                                hasError = false
+                                if (!url.isNullOrBlank()) {
+                                    lastLoadedUrl = url
+                                    automationEngine?.syncCurrentPageUrl(url)
+                                    automationEngine?.onPageLoadStarted(url)
+                                }
+                                onWebStateChanged(
+                                    null,
+                                    url,
+                                    10,
+                                    true,
+                                    view?.canGoBack(),
+                                    view?.canGoForward()
+                                )
+                            }
+
+                            override fun onPageFinished(view: WebView?, url: String?) {
+                                super.onPageFinished(view, url)
+                                hasAutoRetriedRenderer = false
+                                if (!url.isNullOrBlank()) {
+                                    lastLoadedUrl = url
+                                    automationEngine?.onPageLoaded(url)
+                                } else {
+                                    automationEngine?.onPageLoaded(lastLoadedUrl ?: "")
+                                }
+                                onWebStateChanged(
+                                    view?.title,
+                                    url,
+                                    100,
+                                    false,
+                                    view?.canGoBack(),
+                                    view?.canGoForward()
+                                )
+                            }
+
+                            override fun onReceivedError(
+                                view: WebView?,
+                                request: WebResourceRequest?,
+                                error: WebResourceError?
+                            ) {
+                                super.onReceivedError(view, request, error)
+                                if (request?.isForMainFrame == true) {
+                                    hasError = true
+                                    errorMessage = error?.description?.toString() ?: "Failed to load page"
+                                    automationEngine?.onPageLoaded(request.url?.toString() ?: lastLoadedUrl ?: "")
+                                    onWebStateChanged(null, null, 100, false, null, null)
+                                }
+                            }
+
+                            override fun onReceivedSslError(
+                                view: WebView?,
+                                handler: android.webkit.SslErrorHandler?,
+                                error: android.net.http.SslError?
+                            ) {
+                                super.onReceivedSslError(view, handler, error)
+                            }
+
+                            override fun onRenderProcessGone(
+                                view: WebView?,
+                                detail: android.webkit.RenderProcessGoneDetail?
+                            ): Boolean {
+                                // Cleanly detach and destroy the dead WebView instance per Android WebView requirements
+                                try {
+                                    view?.stopLoading()
+                                    view?.removeJavascriptInterface("AuraAutomation")
+                                    (view?.parent as? ViewGroup)?.removeView(view)
+                                    view?.destroy()
+                                } catch (_: Exception) {
+                                }
+                                if (webViewInstance === view) {
+                                    webViewInstance = null
+                                }
                                 automationEngine?.onPageLoaded(lastLoadedUrl ?: "")
-                            }
-                            onWebStateChanged(
-                                view?.title,
-                                url,
-                                100,
-                                false,
-                                view?.canGoBack(),
-                                view?.canGoForward()
-                            )
-                        }
-
-                        override fun onReceivedError(
-                            view: WebView?,
-                            request: WebResourceRequest?,
-                            error: WebResourceError?
-                        ) {
-                            super.onReceivedError(view, request, error)
-                            if (request?.isForMainFrame == true) {
-                                hasError = true
-                                errorMessage = error?.description?.toString() ?: "Failed to load page"
-                                automationEngine?.onPageLoaded(request.url?.toString() ?: lastLoadedUrl ?: "")
-                                onWebStateChanged(null, null, 100, false, null, null)
+                                if (!hasAutoRetriedRenderer) {
+                                    hasAutoRetriedRenderer = true
+                                    hasError = false
+                                    webViewRecreationKey++
+                                } else {
+                                    hasError = true
+                                    errorMessage = "Page renderer restarted. Tap 'Try Again'."
+                                }
+                                return true
                             }
                         }
 
-                        override fun onReceivedSslError(
-                            view: WebView?,
-                            handler: android.webkit.SslErrorHandler?,
-                            error: android.net.http.SslError?
-                        ) {
-                            // Default to super which handles SSL validation safely
-                            super.onReceivedSslError(view, handler, error)
+                        webChromeClient = object : WebChromeClient() {
+                            override fun onProgressChanged(view: WebView?, newProgress: Int) {
+                                super.onProgressChanged(view, newProgress)
+                                automationEngine?.onPageLoadProgress(newProgress)
+                                onWebStateChanged(
+                                    null,
+                                    null,
+                                    newProgress,
+                                    newProgress < 100,
+                                    view?.canGoBack(),
+                                    view?.canGoForward()
+                                )
+                            }
+
+                            override fun onReceivedTitle(view: WebView?, title: String?) {
+                                super.onReceivedTitle(view, title)
+                                if (!title.isNullOrBlank()) {
+                                    onWebStateChanged(title, null, null, null, null, null)
+                                }
+                            }
                         }
 
-                        override fun onRenderProcessGone(
-                            view: WebView?,
-                            detail: android.webkit.RenderProcessGoneDetail?
-                        ): Boolean {
-                            // Prevent app crash if Chromium renderer terminates or restarts
-                            hasError = true
-                            errorMessage = "Page renderer reloaded. Tap 'Try Again'."
-                            automationEngine?.onPageLoaded(lastLoadedUrl ?: "")
-                            return true
+                        val initialTargetUrl = lastLoadedUrl ?: tab.url
+                        if (!initialTargetUrl.startsWith("aura://") && initialTargetUrl.isNotBlank()) {
+                            lastLoadedUrl = initialTargetUrl
+                            lastObservedTabPropUrl = tab.url
+                            loadUrl(initialTargetUrl)
                         }
+                        webViewInstance = this
                     }
-
-                    webChromeClient = object : WebChromeClient() {
-                        override fun onProgressChanged(view: WebView?, newProgress: Int) {
-                            super.onProgressChanged(view, newProgress)
-                            automationEngine?.onPageLoadProgress(newProgress)
-                            onWebStateChanged(
-                                null,
-                                null,
-                                newProgress,
-                                newProgress < 100,
-                                view?.canGoBack(),
-                                view?.canGoForward()
-                            )
-                        }
-
-                        override fun onReceivedTitle(view: WebView?, title: String?) {
-                            super.onReceivedTitle(view, title)
-                            if (!title.isNullOrBlank()) {
-                                onWebStateChanged(title, null, null, null, null, null)
-                            }
-                        }
-                    }
-
-                    if (!tab.url.startsWith("aura://") && tab.url.isNotBlank()) {
-                        lastLoadedUrl = tab.url
+                },
+                update = { webView ->
+                    // Only load when tab.url prop itself explicitly changed from the ViewModel
+                    if (tab.url != lastObservedTabPropUrl) {
                         lastObservedTabPropUrl = tab.url
-                        loadUrl(tab.url)
+                        if (tab.url.isNotBlank() && !tab.url.startsWith("aura://") && !areUrlsEquivalent(tab.url, lastLoadedUrl)) {
+                            lastLoadedUrl = tab.url
+                            webView.loadUrl(tab.url)
+                        }
                     }
-                    webViewInstance = this
-                }
-            },
-            update = { webView ->
-                // Only load when tab.url prop itself explicitly changed from the ViewModel, avoiding race conditions during multi-page WebView navigation
-                if (tab.url != lastObservedTabPropUrl) {
-                    lastObservedTabPropUrl = tab.url
-                    if (tab.url.isNotBlank() && !tab.url.startsWith("aura://") && !areUrlsEquivalent(tab.url, lastLoadedUrl)) {
-                        lastLoadedUrl = tab.url
-                        webView.loadUrl(tab.url)
+                },
+                onRelease = { webView ->
+                    try {
+                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                            webView.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_WAIVED, true)
+                        }
+                        webView.stopLoading()
+                        webView.onPause()
+                        webView.removeJavascriptInterface("AuraAutomation")
+                        webView.webChromeClient = null
+                        webView.destroy()
+                    } catch (_: Exception) {
+                    } finally {
+                        if (webViewInstance === webView) {
+                            webViewInstance = null
+                        }
                     }
-                }
-            },
-            modifier = Modifier.fillMaxSize()
-        )
+                },
+                modifier = Modifier.fillMaxSize()
+            )
+        }
 
         // Error Screen Overlay if network failed or domain cannot be reached
         if (hasError) {
@@ -386,7 +425,12 @@ fun WebViewScreen(
                         Button(
                             onClick = {
                                 hasError = false
-                                webViewInstance?.reload()
+                                hasAutoRetriedRenderer = false
+                                if (webViewInstance == null) {
+                                    webViewRecreationKey++
+                                } else {
+                                    webViewInstance?.reload()
+                                }
                             }
                         ) {
                             Icon(
@@ -460,22 +504,6 @@ fun WebViewScreen(
                         onCloseHud = { automationEngine.setHudVisible(false) }
                     )
                 }
-            }
-        }
-    }
-
-    DisposableEffect(tab.id) {
-        onDispose {
-            try {
-                webViewInstance?.apply {
-                    stopLoading()
-                    removeJavascriptInterface("AuraAutomation")
-                    (parent as? ViewGroup)?.removeView(this)
-                    destroy()
-                }
-            } catch (_: Exception) {
-            } finally {
-                webViewInstance = null
             }
         }
     }

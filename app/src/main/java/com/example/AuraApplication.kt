@@ -40,7 +40,17 @@ class AuraApplication : Application() {
 
     private fun configureGraphicsEnvironment() {
         try {
-            System.setProperty("debug.hwui.use_vulkan", "false")
+            if (!hasHardwareRenderNode()) {
+                try {
+                    android.system.Os.setenv("LIBGL_ALWAYS_SOFTWARE", "1", true)
+                    android.system.Os.setenv("GALLIUM_DRIVER", "llvmpipe", true)
+                    android.system.Os.setenv("MESA_LOADER_DRIVER_OVERRIDE", "swrast", true)
+                } catch (_: Exception) {
+                }
+                System.setProperty("debug.hwui.renderer", "skiagl")
+                System.setProperty("debug.hwui.use_vulkan", "false")
+                System.setProperty("hwui.disable_vsync", "true")
+            }
         } catch (_: Exception) {
         }
     }
