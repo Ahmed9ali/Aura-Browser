@@ -190,16 +190,20 @@ class DevToolsEngine(
         _liveDomNodes.value = nodes
         rebuildDomTreeSummaries(nodes)
 
-        if (_inspectedElement.value == null && nodes.isNotEmpty()) {
+        if (_activeTool.value == DevToolTab.INSPECT_DOM && _inspectedElement.value == null && nodes.isNotEmpty()) {
             val defaultNode = nodes.firstOrNull { it.tagName in listOf("h1", "h2", "input", "a", "p") } ?: nodes.first()
             inspectLiveDomNode(defaultNode, fromTouch = false)
+        } else if (_activeTool.value != DevToolTab.INSPECT_DOM && !_isInspectTouchMode.value) {
+            _highlightedSelector.value = null
         }
 
         if (!_isSnifferPaused.value) {
             _networkLogs.update { current ->
                 (listOf(mainEntry) + current).take(400)
             }
-            probeSubresourcesAsync(url, subresourceUrls, adShieldEnabled)
+            if (_activeTool.value == DevToolTab.NETWORK_SNIFFER) {
+                probeSubresourcesAsync(url, subresourceUrls, adShieldEnabled)
+            }
         }
     }
 

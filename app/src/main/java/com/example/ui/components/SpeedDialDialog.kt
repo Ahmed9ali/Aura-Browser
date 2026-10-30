@@ -116,7 +116,7 @@ fun SpeedDialEditDialog(
         shape = com.example.ui.theme.ExpressiveDialogShape,
         title = {
             Text(
-                text = if (initialDial == null) "Add Speed Dial Shortcut" else "Edit Speed Dial Shortcut",
+                text = if (initialDial == null) "Add Recent Shortcut" else "Edit Recent Shortcut",
                 style = MaterialTheme.typography.titleLarge
             )
         },
@@ -305,12 +305,12 @@ fun ManageSpeedDialsDialog(
             ) {
                 Column {
                     Text(
-                        text = "Manage Speed Dials",
+                        text = "Manage Recents",
                         fontWeight = FontWeight.Bold,
                         fontSize = 18.sp
                     )
                     Text(
-                        text = "${speedDials.size} shortcuts configured",
+                        text = "${speedDials.size} recent shortcuts",
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -323,7 +323,7 @@ fun ManageSpeedDialsDialog(
                 ) {
                     Icon(
                         imageVector = Icons.Default.Add,
-                        contentDescription = "Add new shortcut",
+                        contentDescription = "Add new recent shortcut",
                         tint = MaterialTheme.colorScheme.primary
                     )
                 }
@@ -331,114 +331,139 @@ fun ManageSpeedDialsDialog(
         },
         text = {
             Column(modifier = Modifier.fillMaxWidth()) {
-                LazyColumn(
+                Text(
+                    text = "Slide horizontally • Tap to edit or remove",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(bottom = 10.dp)
+                )
+
+                // Horizontal-only sliding Recents strip with Add button inside Settings Manage Recents dialog
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 8.dp),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(max = 340.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                        .testTag("settings_recents_horizontal_row")
                 ) {
-                    if (speedDials.isEmpty()) {
-                        item {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 32.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = "No speed dials configured.\nTap + Add Shortcut to add one.",
-                                    fontSize = 13.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    lineHeight = 18.sp
-                                )
-                            }
+                    items(speedDials, key = { it.id }) { dial ->
+                        val color = try {
+                            Color(android.graphics.Color.parseColor(dial.colorHex))
+                        } catch (_: Exception) {
+                            MaterialTheme.colorScheme.primary
                         }
-                    } else {
-                        items(speedDials, key = { it.id }) { dial ->
-                            val color = try {
-                                Color(android.graphics.Color.parseColor(dial.colorHex))
-                            } catch (e: Exception) {
-                                MaterialTheme.colorScheme.primary
-                            }
-
-                            Surface(
-                                shape = RoundedCornerShape(12.dp),
-                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 12.dp, vertical = 8.dp)
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier
+                                .width(72.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .clickable { onEdit(dial) }
+                                .padding(vertical = 4.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Surface(
+                                    shape = com.example.ui.theme.ExpressiveSquircleShape,
+                                    color = color.copy(alpha = 0.16f),
+                                    modifier = Modifier.size(54.dp)
                                 ) {
-                                    Surface(
-                                        shape = CircleShape,
-                                        color = color.copy(alpha = 0.15f),
-                                        modifier = Modifier.size(34.dp)
-                                    ) {
-                                        Box(contentAlignment = Alignment.Center) {
-                                            Icon(
-                                                imageVector = getSpeedDialIcon(dial.iconCategory),
-                                                contentDescription = null,
-                                                tint = color,
-                                                modifier = Modifier.size(18.dp)
-                                            )
-                                        }
-                                    }
-
-                                    Spacer(modifier = Modifier.width(10.dp))
-
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = dial.title,
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = MaterialTheme.colorScheme.onSurface,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                        Text(
-                                            text = dial.url,
-                                            fontSize = 11.sp,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                    }
-
-                                    IconButton(
-                                        onClick = { onEdit(dial) },
-                                        modifier = Modifier.size(32.dp)
-                                    ) {
+                                    Box(contentAlignment = Alignment.Center) {
                                         Icon(
-                                            imageVector = Icons.Default.Edit,
-                                            contentDescription = "Edit shortcut ${dial.title}",
-                                            tint = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(16.dp)
+                                            imageVector = getSpeedDialIcon(dial.iconCategory),
+                                            contentDescription = dial.title,
+                                            tint = color,
+                                            modifier = Modifier.size(26.dp)
                                         )
                                     }
+                                }
 
-                                    IconButton(
-                                        onClick = { onDelete(dial.id) },
-                                        modifier = Modifier.size(32.dp)
-                                    ) {
+                                Surface(
+                                    shape = CircleShape,
+                                    color = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier
+                                        .size(20.dp)
+                                        .align(Alignment.TopStart)
+                                        .clip(CircleShape)
+                                        .clickable { onDelete(dial.id) }
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
                                         Icon(
                                             imageVector = Icons.Default.DeleteOutline,
                                             contentDescription = "Delete shortcut ${dial.title}",
-                                            tint = MaterialTheme.colorScheme.error,
-                                            modifier = Modifier.size(16.dp)
+                                            tint = MaterialTheme.colorScheme.onError,
+                                            modifier = Modifier.size(12.dp)
+                                        )
+                                    }
+                                }
+
+                                Surface(
+                                    shape = CircleShape,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier
+                                        .size(20.dp)
+                                        .align(Alignment.TopEnd)
+                                        .clip(CircleShape)
+                                        .clickable { onEdit(dial) }
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            imageVector = Icons.Default.Edit,
+                                            contentDescription = "Edit shortcut ${dial.title}",
+                                            tint = MaterialTheme.colorScheme.onPrimary,
+                                            modifier = Modifier.size(11.dp)
                                         )
                                     }
                                 }
                             }
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = dial.title,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
+
+                    item(key = "horiz_add_recent") {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier
+                                .width(72.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .clickable(onClick = onAddNew)
+                                .padding(vertical = 4.dp)
+                        ) {
+                            Surface(
+                                shape = com.example.ui.theme.ExpressiveSquircleShape,
+                                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f),
+                                modifier = Modifier.size(54.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Default.Add,
+                                        contentDescription = "Add Shortcut",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(26.dp)
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = "Add",
+                                fontSize = 12.sp,
+                                maxLines = 1,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.SemiBold
+                            )
                         }
                     }
                 }
 
                 Spacer(modifier = Modifier.height(10.dp))
                 HorizontalDivider()
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(10.dp))
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),

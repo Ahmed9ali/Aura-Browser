@@ -75,6 +75,9 @@ class AutomationEngine(
     var onRotateProxy: (() -> Unit)? = null
     var webViewProvider: (() -> WebView?)? = null
     var webViewNavigator: ((String) -> Unit)? = null
+    var fallbackDomScanner: (() -> List<ScannedElement>)? = null
+    var fallbackStepExecutor: (suspend (AutomationStep, String) -> Boolean)? = null
+    var fallbackClearHighlights: (() -> Unit)? = null
 
     private sealed class ExhaustionDecision {
         object Stop : ExhaustionDecision()
@@ -224,6 +227,21 @@ class AutomationEngine(
         }
 
         @JavascriptInterface
+        fun onAuthIframeDetected(iframeUrl: String) {
+            if (iframeUrl.isBlank() || !iframeUrl.startsWith("http")) return
+            scope.launch {
+                val wv = webViewProvider?.invoke()
+                val currentUrl = wv?.url ?: lastKnownPageUrl
+                if (!arePageUrlsSame(currentUrl, iframeUrl)) {
+                    addLog("Detected embedded Auth iframe (${extractDomain(iframeUrl)}) -> unwrapping for direct DOM access...")
+                    lastKnownPageUrl = iframeUrl
+                    autoReadyOnNextScan = true
+                    webViewNavigator?.invoke(iframeUrl) ?: wv?.loadUrl(iframeUrl)
+                }
+            }
+        }
+
+        @JavascriptInterface
         fun onScanResults(jsonString: String) {
             scope.launch {
                 try {
@@ -349,7 +367,7 @@ class AutomationEngine(
      * Converts grabbed page elements directly into an ordered, ready-to-use workflow:
      * 1. All Input / Dropdown / Date / Country / Upload fields (bound to Data Sheet variables)
      * 2. Checkboxes & Radio buttons (e.g., Terms & Conditions, options)
-     * 3. Primary Submit / Next / Continue button
+     * 3. Primary Submit / Next / Continue button (plus intermediate Next button on 2-step login flows like Apple Sign-In)
      */
     private fun buildReadyStepsFromGrabbedElements(elements: List<ScannedElement>) {
         if (elements.isEmpty()) return
@@ -377,11 +395,27 @@ class AutomationEngine(
             ?: elements.firstOrNull { it.semanticType == ElementSemanticType.NEXT_BUTTON }
             ?: elements.firstOrNull { it.isButton && it.semanticType == ElementSemanticType.GENERIC_BUTTON }
 
+        // If this is a 2-step auth widget (e.g. Apple Sign-In with #account_name_text_field -> #sign-in -> #password_text_field),
+        // insert the intermediate #sign-in / NEXT_BUTTON before the deferred password field AND after the password field.
+        val step1NextBtn = elements.firstOrNull {
+            it.semanticType == ElementSemanticType.NEXT_BUTTON &&
+                    (it.selector.contains("sign-in") || it.idAttr.equals("sign-in", ignoreCase = true))
+        }
+        val pwdIdx = inputAndSelectElements.indexOfFirst { it.semanticType == ElementSemanticType.PASSWORD }
+
         val orderedActionable = buildList {
-            addAll(inputAndSelectElements)
+            if (step1NextBtn != null && pwdIdx > 0) {
+                addAll(inputAndSelectElements.subList(0, pwdIdx))
+                add(step1NextBtn)
+                addAll(inputAndSelectElements.subList(pwdIdx, inputAndSelectElements.size))
+            } else {
+                addAll(inputAndSelectElements)
+            }
             addAll(checkAndRadioElements)
-            if (primarySubmitOrNext != null) add(primarySubmitOrNext)
-        }.distinctBy { it.selector }
+            if (primarySubmitOrNext != null && !any { it.selector == primarySubmitOrNext.selector }) {
+                add(primarySubmitOrNext)
+            }
+        }.distinctBy { "${it.selector}_${it.semanticType}" }
 
         val targetList = orderedActionable.ifEmpty { elements }
 
@@ -860,13 +894,31 @@ class AutomationEngine(
                 timeoutMs = 8000L
             )
             addLog("Scanning & grabbing page elements...")
-            injectJs(AutomationScripts.DOM_SCANNER)
+            val wv = webViewProvider?.invoke()
+            val fallbackScanner = fallbackDomScanner
+            if (wv != null || fallbackScanner == null) {
+                injectJs(AutomationScripts.DOM_SCANNER)
+            } else {
+                val fallbackElements = fallbackScanner.invoke()
+                _scannedElements.value = fallbackElements
+                val shouldBuildReady = autoReadyOnNextScan
+                autoReadyOnNextScan = false
+                if (fallbackElements.isNotEmpty() && shouldBuildReady) {
+                    buildReadyStepsFromGrabbedElements(fallbackElements)
+                } else {
+                    addLog("Scanned ${fallbackElements.size} elements on page.")
+                }
+                if (_executionState.value.status == AutomationStatus.SCANNING) {
+                    _executionState.value = _executionState.value.copy(status = AutomationStatus.RECORDING)
+                }
+            }
         }
     }
 
     fun clearScanHighlights() {
         autoReadyOnNextScan = false
         injectJs(AutomationScripts.CLEAR_SCAN_HIGHLIGHTS)
+        fallbackClearHighlights?.invoke()
         _scannedElements.value = emptyList()
         if (_executionState.value.status == AutomationStatus.SCANNING) {
             _executionState.value = _executionState.value.copy(status = AutomationStatus.IDLE)
@@ -1396,6 +1448,28 @@ class AutomationEngine(
                         }
                     } else {
                         step.value
+                    }
+
+                    if (webViewProvider?.invoke() == null &&
+                        step.actionType != AutomationActionType.NAVIGATE &&
+                        step.actionType != AutomationActionType.WAIT &&
+                        fallbackStepExecutor != null
+                    ) {
+                        val effectiveVal = when (step.actionType) {
+                            AutomationActionType.SELECT_DATE -> {
+                                val dob = resolvedValue.ifBlank { currentDefaultRecord.dob }
+                                val (y, m, d) = parseDobTriplet(dob, currentDefaultRecord)
+                                "$y-$m-$d"
+                            }
+                            AutomationActionType.SELECT_COUNTRY_CODE -> {
+                                resolvedValue.ifBlank { currentDefaultRecord.countryCode }
+                            }
+                            else -> resolvedValue
+                        }
+                        val ok = fallbackStepExecutor?.invoke(step, effectiveVal) ?: false
+                        addLog("[Run $iteration] ${if (ok) "Executed" else "Attempted"} ${step.elementDescription} -> '$effectiveVal'")
+                        hideWebViewSoftKeyboard()
+                        continue
                     }
 
                     when (step.actionType) {

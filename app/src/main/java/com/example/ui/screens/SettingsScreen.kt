@@ -22,7 +22,7 @@ import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Psychology
@@ -99,6 +99,7 @@ fun SettingsScreen(
     onDeleteSpeedDial: (String) -> Unit = {},
     onResetSpeedDials: () -> Unit = {},
     onRefreshSettings: () -> Unit = {},
+    onOpenWelcomePage: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var showEngineDialog by remember { mutableStateOf(false) }
@@ -254,10 +255,10 @@ fun SettingsScreen(
 
                         SettingsGroupedSwitchCard(
                             shape = groupedListCardShape(index = 1, count = 4),
-                            icon = Icons.Default.GridView,
+                            icon = Icons.Default.History,
                             badgeColor = Color(0xFF10B981),
-                            title = "Speed Dials",
-                            subtitle = "Display website shortcuts grid on home screen",
+                            title = "Recents",
+                            subtitle = "Display horizontal recent shortcuts on home screen",
                             checked = settings.showSpeedDials,
                             onCheckedChange = { onToggleSpeedDials() },
                             testTag = "setting_toggle_speed_dials"
@@ -278,19 +279,29 @@ fun SettingsScreen(
                             shape = groupedListCardShape(index = 3, count = 4),
                             icon = Icons.Default.Edit,
                             badgeColor = MaterialTheme.colorScheme.primary,
-                            title = "Manage Speed Dials",
-                            subtitle = "${speedDials.size} shortcuts configured • Add, edit, or remove",
+                            title = "Manage Recents",
+                            subtitle = "${speedDials.size} recent shortcuts • Add, edit, or remove",
                             onClick = { showManageSpeedDials = true },
                             testTag = "setting_manage_speed_dials"
                         )
                     }
                 }
 
-                // Group 5: About Section (2 grouped cards with top & bottom rounded ends)
+                // Group 5: About Section (3 grouped cards with top & bottom rounded ends)
                 item {
                     SettingsGroupSection(title = "About") {
+                        SettingsGroupedClickableCard(
+                            shape = groupedListCardShape(index = 0, count = 3),
+                            icon = Icons.Default.AutoAwesome,
+                            badgeColor = MaterialTheme.colorScheme.secondary,
+                            title = "Welcome Tour & Setup",
+                            subtitle = "View the Aura Browser welcome guide and initial setup page",
+                            onClick = onOpenWelcomePage,
+                            testTag = "setting_replay_welcome_tour"
+                        )
+
                         SettingsGroupedInfoCard(
-                            shape = groupedListCardShape(index = 0, count = 2),
+                            shape = groupedListCardShape(index = 1, count = 3),
                             icon = Icons.Default.Info,
                             badgeColor = MaterialTheme.colorScheme.primary,
                             title = "About Aura Browser",
@@ -298,11 +309,11 @@ fun SettingsScreen(
                         )
 
                         SettingsGroupedInfoCard(
-                            shape = groupedListCardShape(index = 1, count = 2),
+                            shape = groupedListCardShape(index = 2, count = 3),
                             icon = Icons.Default.AutoAwesome,
                             badgeColor = MaterialTheme.colorScheme.tertiary,
                             title = "Capabilities & Architecture",
-                            subtitle = "Features tab grouping, fast speed dials, customized suggestions engine, autonomous web automation, and hardened browsing."
+                            subtitle = "Features tab grouping, horizontal recents, customized suggestions engine, autonomous web automation, and hardened browsing."
                         )
                     }
                     Spacer(modifier = Modifier.height(90.dp))
@@ -453,7 +464,7 @@ fun SettingsScreen(
             title = { Text("Clear Browsing Data", style = MaterialTheme.typography.titleLarge) },
             text = {
                 Text(
-                    text = "This will remove your browsing history and clean cached site storage. Your speed dials and bookmarks will remain intact.",
+                    text = "This will remove your browsing history and clean cached site storage. Your recent shortcuts and bookmarks will remain intact.",
                     style = MaterialTheme.typography.bodyMedium
                 )
             },

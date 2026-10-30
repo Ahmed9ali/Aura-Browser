@@ -157,7 +157,10 @@ fun BrowserTheme(
         content = {
             CompositionLocalProvider(
                 LocalIndication provides AuraComposeIndication,
-                LocalRippleConfiguration provides null
+                LocalRippleConfiguration provides null,
+                androidx.compose.material3.LocalTextStyle provides androidx.compose.material3.LocalTextStyle.current.copy(
+                    fontFamily = VarelaRoundFontFamily
+                )
             ) {
                 content()
             }

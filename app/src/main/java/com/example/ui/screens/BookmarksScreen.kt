@@ -1238,7 +1238,7 @@ fun BookmarksScreen(
                         onValueChange = {},
                         readOnly = true,
                         label = { Text("Export Preview (${bookmarks.size} bookmarks)") },
-                        textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                        textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = com.example.ui.theme.VarelaRoundFontFamily),
                         minLines = 4,
                         maxLines = 7,
                         shape = ExpressiveCardShape,

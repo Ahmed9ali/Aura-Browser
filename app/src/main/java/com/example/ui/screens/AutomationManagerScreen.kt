@@ -1357,7 +1357,7 @@ private fun EasyFieldCard(
                     Text(
                         text = values.take(3).joinToString(" • ") + if (values.size > 3) " • +${values.size - 3} more" else "",
                         fontSize = 11.sp,
-                        fontFamily = FontFamily.Monospace,
+                        fontFamily = com.example.ui.theme.VarelaRoundFontFamily,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -1441,7 +1441,7 @@ private fun EasyLogsTab(
                     Text(
                         text = msg,
                         fontSize = 11.sp,
-                        fontFamily = FontFamily.Monospace,
+                        fontFamily = com.example.ui.theme.VarelaRoundFontFamily,
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
                     )
                 }

@@ -489,6 +489,15 @@ class BrowserViewModel(
         _isLoading.value = false
     }
 
+    private fun normalizeUrlForComparison(rawUrl: String): String {
+        return rawUrl.trim()
+            .lowercase()
+            .removePrefix("https://")
+            .removePrefix("http://")
+            .removePrefix("www.")
+            .trimEnd('/')
+    }
+
     fun updateWebState(
         title: String? = null,
         url: String? = null,
@@ -498,7 +507,17 @@ class BrowserViewModel(
         canForward: Boolean? = null
     ) {
         if (title != null || url != null) {
-            repository.updateActiveTab(title = title, url = url)
+            val currentTabUrl = repository.tabs.value.find { it.id == repository.activeTabId.value }?.url.orEmpty()
+            val isNewUrlNavigation = url != null &&
+                !url.startsWith("aura://") &&
+                url != "about:blank" &&
+                normalizeUrlForComparison(url) != normalizeUrlForComparison(currentTabUrl) &&
+                loading != false
+            repository.updateActiveTab(
+                title = title,
+                url = url,
+                recordVisit = isNewUrlNavigation
+            )
         }
         if (progress != null) _loadProgress.value = progress
         if (loading != null) _isLoading.value = loading
@@ -631,24 +650,32 @@ class BrowserViewModel(
         repository.toggleShowDiscoverFeed()
     }
 
-    // Speed Dial Management
+    fun completeOnboarding() {
+        repository.completeOnboarding()
+    }
+
+    fun resetOnboarding() {
+        repository.resetOnboarding()
+    }
+
+    // Recents Management
     fun addSpeedDial(title: String, url: String, iconCategory: String = "web", colorHex: String = "#4285F4") {
         repository.addSpeedDial(title, url, iconCategory, colorHex)
-        _snackbarMessage.value = "Shortcut added to Speed Dials"
+        _snackbarMessage.value = "Shortcut added to Recents"
     }
 
     fun updateSpeedDial(id: String, title: String, url: String, iconCategory: String = "web", colorHex: String = "#4285F4") {
         repository.updateSpeedDial(id, title, url, iconCategory, colorHex)
-        _snackbarMessage.value = "Speed Dial updated"
+        _snackbarMessage.value = "Recent shortcut updated"
     }
 
     fun deleteSpeedDial(id: String) {
         repository.deleteSpeedDial(id)
-        _snackbarMessage.value = "Speed Dial removed"
+        _snackbarMessage.value = "Removed from Recents"
     }
 
     fun resetSpeedDials() {
         repository.resetSpeedDials()
-        _snackbarMessage.value = "Speed Dials reset to default"
+        _snackbarMessage.value = "Recents reset to default"
     }
 }

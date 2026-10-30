@@ -31,26 +31,17 @@ class BrowserRepository(
             title = "Aura Home",
             url = "aura://home",
             groupId = null,
-            previewSnippet = "Fast discovery & smart speed dials"
+            previewSnippet = "Fast discovery & smart recents"
         )
     )
 
     // Clean initial groups (empty for fresh app)
     private val defaultGroups = emptyList<TabGroup>()
 
-    // Default Speed Dials for Home Screen
-    val defaultSpeedDials = listOf(
-        SpeedDial("Google", "https://www.google.com", "search", "#4285F4"),
-        SpeedDial("GitHub", "https://github.com", "code", "#24292E"),
-        SpeedDial("Wikipedia", "https://www.wikipedia.org", "wiki", "#333333"),
-        SpeedDial("Reddit", "https://www.reddit.com", "social", "#FF4500"),
-        SpeedDial("YouTube", "https://www.youtube.com", "video", "#FF0000"),
-        SpeedDial("Hacker News", "https://news.ycombinator.com", "news", "#FF6600"),
-        SpeedDial("Android Dev", "https://developer.android.com", "tech", "#3DDC84"),
-        SpeedDial("DuckDuckGo", "https://duckduckgo.com", "privacy", "#DE5833")
-    )
+    // Recents start empty and only appear when a user visits a website multiple times
+    val defaultSpeedDials = emptyList<SpeedDial>()
 
-    private val _speedDials = MutableStateFlow<List<SpeedDial>>(defaultSpeedDials)
+    private val _speedDials = MutableStateFlow<List<SpeedDial>>(loadSavedSpeedDials())
     val speedDials: StateFlow<List<SpeedDial>> = _speedDials.asStateFlow()
 
     // Observable states - Fresh and clean initial state
@@ -176,7 +167,8 @@ class BrowserRepository(
             doNotTrack = sp.getBoolean(KEY_DO_NOT_TRACK, true),
             showTabGroups = sp.getBoolean(KEY_SHOW_TAB_GROUPS, false),
             showSpeedDials = sp.getBoolean(KEY_SHOW_SPEED_DIALS, true),
-            showDiscoverFeed = sp.getBoolean(KEY_SHOW_DISCOVER_FEED, false)
+            showDiscoverFeed = sp.getBoolean(KEY_SHOW_DISCOVER_FEED, false),
+            hasCompletedOnboarding = sp.getBoolean(KEY_HAS_COMPLETED_ONBOARDING, false)
         )
     }
 
@@ -192,6 +184,7 @@ class BrowserRepository(
             putBoolean(KEY_SHOW_TAB_GROUPS, newSettings.showTabGroups)
             putBoolean(KEY_SHOW_SPEED_DIALS, newSettings.showSpeedDials)
             putBoolean(KEY_SHOW_DISCOVER_FEED, newSettings.showDiscoverFeed)
+            putBoolean(KEY_HAS_COMPLETED_ONBOARDING, newSettings.hasCompletedOnboarding)
             apply()
         }
     }
@@ -207,6 +200,9 @@ class BrowserRepository(
         )
         _tabs.value = _tabs.value + newTab
         _activeTabId.value = newTab.id
+        if (url.isNotBlank() && !url.startsWith("aura://") && url != "about:blank") {
+            addToHistory(title.ifBlank { url }, url)
+        }
         return newTab.id
     }
 
@@ -264,7 +260,12 @@ class BrowserRepository(
         _activeTabId.value = freshTab.id
     }
 
-    fun updateActiveTab(title: String? = null, url: String? = null, isDesktop: Boolean? = null) {
+    fun updateActiveTab(
+        title: String? = null,
+        url: String? = null,
+        isDesktop: Boolean? = null,
+        recordVisit: Boolean = true
+    ) {
         val activeId = _activeTabId.value
         val currentTab = _tabs.value.find { it.id == activeId } ?: return
         val newTitle = title ?: currentTab.title
@@ -286,7 +287,11 @@ class BrowserRepository(
         }
 
         if (url != null && !url.startsWith("aura://") && url != "about:blank") {
-            addToHistory(title ?: url, url)
+            if (recordVisit) {
+                addToHistory(title ?: url, url)
+            } else if (!title.isNullOrBlank()) {
+                updateLatestHistoryTitle(title, url)
+            }
         }
     }
 
@@ -774,10 +779,43 @@ class BrowserRepository(
         return if (!isPlaceholder) cleaned else url
     }
 
+    private fun extractNormalizedHost(rawUrl: String): String {
+        val trimmed = rawUrl.trim()
+        if (trimmed.isBlank()) return ""
+        return runCatching {
+            val withScheme = if (!trimmed.contains("://")) "https://$trimmed" else trimmed
+            java.net.URI(withScheme).host?.lowercase()?.removePrefix("www.") ?: ""
+        }.getOrDefault("")
+    }
+
+    private fun countTotalVisitsForWebsite(url: String, historyItems: List<HistoryItem> = _history.value): Int {
+        val host = extractNormalizedHost(url)
+        return historyItems.sumOf { item ->
+            val matchesSite = item.url.equals(url, ignoreCase = true) ||
+                (host.isNotBlank() && extractNormalizedHost(item.url) == host)
+            if (matchesSite) item.visitCount else 0
+        }
+    }
+
+    private fun updateLatestHistoryTitle(title: String, url: String) {
+        if (url.isBlank() || url.startsWith("aura://") || url == "about:blank") return
+        val currentHistory = _history.value.toMutableList()
+        val existingIndex = currentHistory.indexOfFirst { it.url.equals(url, ignoreCase = true) }
+        if (existingIndex >= 0) {
+            val existing = currentHistory[existingIndex]
+            val resolvedTitle = extractReadableTitle(title, url, existing.title)
+            if (resolvedTitle != existing.title) {
+                currentHistory[existingIndex] = existing.copy(title = resolvedTitle)
+                _history.value = currentHistory
+                persistHistory(currentHistory)
+            }
+        }
+    }
+
     private fun addToHistory(title: String, url: String) {
         if (url.isBlank() || url.startsWith("aura://") || url == "about:blank") return
         val currentHistory = _history.value.toMutableList()
-        val existingIndex = currentHistory.indexOfFirst { it.url == url }
+        val existingIndex = currentHistory.indexOfFirst { it.url.equals(url, ignoreCase = true) }
         if (existingIndex >= 0) {
             val existing = currentHistory[existingIndex]
             currentHistory.removeAt(existingIndex)
@@ -805,11 +843,123 @@ class BrowserRepository(
         val updated = currentHistory.take(100)
         _history.value = updated
         persistHistory(updated)
+        promoteOrAddRecentFromVisit(title, url)
+    }
+
+    private fun loadSavedSpeedDials(): List<SpeedDial> {
+        val sp = prefs ?: return defaultSpeedDials
+        if (!sp.contains(KEY_RECENT_SHORTCUTS)) return defaultSpeedDials
+        val raw = sp.getString(KEY_RECENT_SHORTCUTS, null) ?: return defaultSpeedDials
+        if (raw.isBlank()) return emptyList()
+        return runCatching {
+            raw.lines()
+                .filter { it.isNotBlank() }
+                .mapNotNull { line ->
+                    val parts = line.split("\t")
+                    if (parts.size >= 5) {
+                        val id = parts[0]
+                        val iconCategory = parts[1]
+                        val colorHex = parts[2]
+                        val url = parts[3]
+                        val title = parts.subList(4, parts.size).joinToString("\t")
+                        if (url.isNotBlank()) {
+                            SpeedDial(
+                                id = id,
+                                title = title.ifBlank { "Shortcut" },
+                                url = url,
+                                iconCategory = iconCategory.ifBlank { "web" },
+                                colorHex = colorHex.ifBlank { "#4285F4" }
+                            )
+                        } else null
+                    } else null
+                }
+        }.getOrDefault(defaultSpeedDials)
+    }
+
+    private fun persistSpeedDials(items: List<SpeedDial>) {
+        prefs?.edit()?.apply {
+            val serialized = items.take(24).joinToString("\n") { item ->
+                val cleanTitle = item.title.replace("\n", " ").replace("\r", " ").replace("\t", " ")
+                val cleanUrl = item.url.replace("\n", "").replace("\r", "").replace("\t", "")
+                "${item.id}\t${item.iconCategory}\t${item.colorHex}\t$cleanUrl\t$cleanTitle"
+            }
+            putString(KEY_RECENT_SHORTCUTS, serialized)
+            apply()
+        }
+    }
+
+    private fun promoteOrAddRecentFromVisit(rawTitle: String, url: String) {
+        if (url.isBlank() || url.startsWith("aura://") || url == "about:blank") return
+        // Only show a website in Recents when the user has visited it more than once (visitCount >= 2)
+        val totalVisitsForSite = countTotalVisitsForWebsite(url)
+        if (totalVisitsForSite < 2) return
+
+        val current = _speedDials.value.toMutableList()
+        val host = extractNormalizedHost(url)
+        val existingIdx = current.indexOfFirst { dial ->
+            dial.url.equals(url, ignoreCase = true) ||
+                (host.isNotBlank() && extractNormalizedHost(dial.url) == host)
+        }
+        if (existingIdx >= 0) {
+            val item = current.removeAt(existingIdx)
+            current.add(0, item)
+            _speedDials.value = current
+            persistSpeedDials(current)
+            return
+        }
+        // Skip adding raw search query result pages as permanent recents if the search engine host is already in recents
+        if (url.contains("?q=", ignoreCase = true) || url.contains("&q=", ignoreCase = true)) return
+
+        val shortLabel = when {
+            host.isNotBlank() -> host.substringBefore(".")
+                .replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
+            rawTitle.isNotBlank() -> rawTitle.take(14)
+            else -> "Website"
+        }
+        val inferredCategory = when {
+            host.contains("github") || host.contains("gitlab") || host.contains("stackoverflow") -> "code"
+            host.contains("youtube") || host.contains("vimeo") || host.contains("twitch") -> "video"
+            host.contains("reddit") || host.contains("x.com") || host.contains("instagram") || host.contains("facebook") -> "social"
+            host.contains("news") || host.contains("bbc") || host.contains("nytimes") -> "news"
+            host.contains("duckduckgo") || host.contains("brave") -> "privacy"
+            host.contains("google") || host.contains("bing") -> "search"
+            host.contains("android") || host.contains("apple") || host.contains("microsoft") -> "tech"
+            else -> "web"
+        }
+        val palette = listOf("#4285F4", "#6366F1", "#0284C7", "#10B981", "#FF4500", "#9C27B0", "#DE5833")
+        val pickedColor = palette[(host.hashCode().ushr(1)) % palette.size]
+        val canonicalUrl = if (host.isNotBlank() && (url.startsWith("http://") || url.startsWith("https://"))) {
+            val scheme = if (url.startsWith("http://", ignoreCase = true)) "http" else "https"
+            "$scheme://$host"
+        } else {
+            url
+        }
+        val newRecent = SpeedDial(
+            title = shortLabel,
+            url = canonicalUrl,
+            iconCategory = inferredCategory,
+            colorHex = pickedColor
+        )
+        val updated = (listOf(newRecent) + current).take(20)
+        _speedDials.value = updated
+        persistSpeedDials(updated)
+    }
+
+    private fun pruneRecentsBelowThreshold() {
+        val remaining = _speedDials.value.filter { dial ->
+            countTotalVisitsForWebsite(dial.url) >= 2
+        }
+        if (remaining.size != _speedDials.value.size) {
+            _speedDials.value = remaining
+            persistSpeedDials(remaining)
+        }
     }
 
     fun clearHistory() {
         _history.value = emptyList()
         persistHistory(emptyList())
+        _speedDials.value = emptyList()
+        persistSpeedDials(emptyList())
     }
 
     fun clearTodayHistory() {
@@ -817,12 +967,14 @@ class BrowserRepository(
         val updated = _history.value.filter { it.timestamp < oneDayAgo }
         _history.value = updated
         persistHistory(updated)
+        pruneRecentsBelowThreshold()
     }
 
     fun removeHistoryItem(id: String) {
         val updated = _history.value.filter { it.id != id }
         _history.value = updated
         persistHistory(updated)
+        pruneRecentsBelowThreshold()
     }
 
     // Settings Operations - Persisted across app restarts
@@ -844,7 +996,15 @@ class BrowserRepository(
         updateSettings { it.copy(showDiscoverFeed = !it.showDiscoverFeed) }
     }
 
-    // Speed Dial Operations
+    fun completeOnboarding() {
+        updateSettings { it.copy(hasCompletedOnboarding = true) }
+    }
+
+    fun resetOnboarding() {
+        updateSettings { it.copy(hasCompletedOnboarding = false) }
+    }
+
+    // Recents / Speed Dial Operations
     fun addSpeedDial(title: String, url: String, iconCategory: String = "web", colorHex: String = "#4285F4") {
         val trimmedTitle = title.trim().ifBlank { "Shortcut" }
         val trimmedUrl = url.trim()
@@ -862,7 +1022,9 @@ class BrowserRepository(
             iconCategory = iconCategory,
             colorHex = colorHex
         )
-        _speedDials.value = _speedDials.value + newDial
+        val updated = listOf(newDial) + _speedDials.value.filterNot { it.url.equals(formattedUrl, ignoreCase = true) }
+        _speedDials.value = updated
+        persistSpeedDials(updated)
     }
 
     fun updateSpeedDial(id: String, title: String, url: String, iconCategory: String = "web", colorHex: String = "#4285F4") {
@@ -876,7 +1038,7 @@ class BrowserRepository(
         } else {
             trimmedUrl
         }
-        _speedDials.value = _speedDials.value.map {
+        val updated = _speedDials.value.map {
             if (it.id == id) {
                 it.copy(
                     title = trimmedTitle,
@@ -886,14 +1048,19 @@ class BrowserRepository(
                 )
             } else it
         }
+        _speedDials.value = updated
+        persistSpeedDials(updated)
     }
 
     fun deleteSpeedDial(id: String) {
-        _speedDials.value = _speedDials.value.filter { it.id != id }
+        val updated = _speedDials.value.filter { it.id != id }
+        _speedDials.value = updated
+        persistSpeedDials(updated)
     }
 
     fun resetSpeedDials() {
         _speedDials.value = defaultSpeedDials
+        persistSpeedDials(defaultSpeedDials)
     }
 
     companion object {
@@ -908,7 +1075,9 @@ class BrowserRepository(
         private const val KEY_SHOW_TAB_GROUPS = "show_tab_groups_v2"
         private const val KEY_SHOW_SPEED_DIALS = "show_speed_dials_v3"
         private const val KEY_SHOW_DISCOVER_FEED = "show_discover_feed_v2"
+        private const val KEY_HAS_COMPLETED_ONBOARDING = "has_completed_onboarding_v1"
         private const val KEY_HISTORY_RECORDS = "history_records_v1"
         private const val KEY_TAB_GROUPS = "tab_groups_v1"
+        private const val KEY_RECENT_SHORTCUTS = "recent_shortcuts_v2"
     }
 }

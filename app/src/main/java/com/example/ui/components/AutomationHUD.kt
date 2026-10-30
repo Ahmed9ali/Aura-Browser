@@ -2624,7 +2624,7 @@ fun ScannedElementCard(
             Text(
                 text = element.selector,
                 fontSize = 10.sp,
-                fontFamily = FontFamily.Monospace,
+                fontFamily = com.example.ui.theme.VarelaRoundFontFamily,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis

@@ -48,6 +48,7 @@ import com.example.ui.screens.SearchScreen
 import com.example.ui.screens.SettingsScreen
 import com.example.ui.screens.TabsScreen
 import com.example.ui.screens.WebViewScreen
+import com.example.ui.screens.WelcomeScreen
 import com.example.ui.theme.BrowserTheme
 import com.example.viewmodel.BrowserViewModel
 
@@ -89,6 +90,23 @@ fun BrowserApp(
 ) {
     val context = LocalContext.current
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+
+    if (!uiState.settings.hasCompletedOnboarding) {
+        WelcomeScreen(
+            settings = uiState.settings,
+            onSetSearchEngine = { engine -> viewModel.setSearchEngine(engine) },
+            onSetThemeMode = { mode -> viewModel.setThemeMode(mode) },
+            onToggleAdShield = { viewModel.toggleAdShield() },
+            onToggleSpeedDials = { viewModel.toggleShowSpeedDials() },
+            onCompleteOnboarding = {
+                viewModel.completeOnboarding()
+                viewModel.navigateTo(NavScreen.HOME)
+            },
+            modifier = modifier
+        )
+        return
+    }
+
     val activeTab = uiState.activeTab
     val activeGroup = uiState.tabGroups.find { it.id == activeTab?.groupId }
     val isBookmarked = activeTab?.url?.let {
@@ -382,7 +400,8 @@ fun BrowserApp(
                                 viewModel.deleteSpeedDial(id)
                             },
                             onResetSpeedDials = { viewModel.resetSpeedDials() },
-                            onRefreshSettings = { viewModel.showMessage("Settings synchronized") }
+                            onRefreshSettings = { viewModel.showMessage("Settings synchronized") },
+                            onOpenWelcomePage = { viewModel.resetOnboarding() }
                         )
                     }
 

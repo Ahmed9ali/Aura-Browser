@@ -26,9 +26,10 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowForward
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Explore
-import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Search
@@ -178,182 +179,41 @@ fun HomeScreen(
                 .fillMaxSize()
                 .testTag("home_screen")
         ) {
-        // Speed Dials Section directly below the Top 1 Search Bar
-        if (settings.showSpeedDials) {
+        // Recents Section directly below the Top Search Bar (Horizontal sliding only, shown only when visited >= 2 times)
+        if (settings.showSpeedDials && speedDials.isNotEmpty()) {
             item {
-                Column(
+                Surface(
+                    shape = ExpressiveCardShape,
+                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    tonalElevation = 2.dp,
+                    border = BorderStroke(
+                        1.dp,
+                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                    ),
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 20.dp, vertical = 12.dp)
+                        .testTag("recents_container")
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween,
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(bottom = 12.dp)
+                            .testTag("recents_horizontal_row")
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Surface(
-                                shape = ExpressiveChipShape,
-                                color = MaterialTheme.colorScheme.primaryContainer,
-                                modifier = Modifier.size(28.dp)
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        imageVector = Icons.Default.GridView,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                }
-                            }
-                            Text(
-                                text = "Speed Dials",
-                                style = MaterialTheme.typography.titleMedium,
-                                color = MaterialTheme.colorScheme.onSurface
+                        items(
+                            items = speedDials,
+                            key = { dial -> dial.id }
+                        ) { dial ->
+                            SpeedDialItem(
+                                dial = dial,
+                                isManageMode = false,
+                                onClick = { onOpenUrl(dial.url) },
+                                onEdit = { speedDialToEdit = dial },
+                                onDelete = { onDeleteSpeedDial(dial.id) },
+                                modifier = Modifier.width(72.dp)
                             )
-                            Surface(
-                                shape = ExpressiveChipShape,
-                                color = MaterialTheme.colorScheme.surfaceVariant,
-                                modifier = Modifier.padding(start = 2.dp)
-                            ) {
-                                Text(
-                                    text = "${speedDials.size}",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                )
-                            }
-                        }
-
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            // Add button
-                            Surface(
-                                shape = ExpressivePillShape,
-                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f),
-                                modifier = Modifier
-                                    .clip(ExpressivePillShape)
-                                    .clickable { showAddSpeedDialDialog = true }
-                                    .testTag("btn_home_add_speed_dial")
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Add,
-                                        contentDescription = "Add shortcut",
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(14.dp)
-                                    )
-                                    Text(
-                                        text = "Add",
-                                        style = MaterialTheme.typography.labelMedium,
-                                        color = MaterialTheme.colorScheme.primary
-                                    )
-                                }
-                            }
-
-                            // Manage/Done button
-                            Surface(
-                                shape = ExpressivePillShape,
-                                color = if (isManageMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHigh,
-                                modifier = Modifier
-                                    .clip(ExpressivePillShape)
-                                    .clickable { isManageMode = !isManageMode }
-                                    .testTag("btn_toggle_manage_speed_dials")
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = if (isManageMode) Icons.Default.Check else Icons.Default.Edit,
-                                        contentDescription = if (isManageMode) "Done managing" else "Manage speed dials",
-                                        tint = if (isManageMode) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.size(14.dp)
-                                    )
-                                    Text(
-                                        text = if (isManageMode) "Done" else "Manage",
-                                        style = MaterialTheme.typography.labelMedium,
-                                        color = if (isManageMode) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    // Grid of Speed dials + Add Shortcut tile
-                    val chunkedDials = speedDials.chunked(4)
-                    chunkedDials.forEachIndexed { rowIndex, rowItems ->
-                        val isLastRow = rowIndex == chunkedDials.size - 1
-                        val canAppendAddTile = isLastRow && rowItems.size < 4
-
-                        Row(
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(bottom = 12.dp)
-                        ) {
-                            rowItems.forEach { dial ->
-                                SpeedDialItem(
-                                    dial = dial,
-                                    isManageMode = isManageMode,
-                                    onClick = {
-                                        if (isManageMode) {
-                                            speedDialToEdit = dial
-                                        } else {
-                                            onOpenUrl(dial.url)
-                                        }
-                                    },
-                                    onEdit = { speedDialToEdit = dial },
-                                    onDelete = { onDeleteSpeedDial(dial.id) },
-                                    modifier = Modifier.weight(1f)
-                                )
-                            }
-
-                            if (canAppendAddTile) {
-                                AddSpeedDialGridItem(
-                                    onClick = { showAddSpeedDialDialog = true },
-                                    modifier = Modifier.weight(1f)
-                                )
-                                val remainingSpace = 4 - (rowItems.size + 1)
-                                repeat(remainingSpace) {
-                                    Spacer(modifier = Modifier.weight(1f))
-                                }
-                            } else {
-                                val fillCount = 4 - rowItems.size
-                                repeat(fillCount) {
-                                    Spacer(modifier = Modifier.weight(1f))
-                                }
-                            }
-                        }
-                    }
-
-                    // If speedDials is empty or perfectly filled with 4-item multiple, show Add tile row
-                    if (speedDials.isEmpty() || speedDials.size % 4 == 0) {
-                        Row(
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(bottom = 12.dp)
-                        ) {
-                            AddSpeedDialGridItem(
-                                onClick = { showAddSpeedDialDialog = true },
-                                modifier = Modifier.weight(1f)
-                            )
-                            repeat(3) {
-                                Spacer(modifier = Modifier.weight(1f))
-                            }
                         }
                     }
                 }
@@ -664,17 +524,38 @@ fun SpeedDialItem(
             if (isManageMode) {
                 Surface(
                     shape = CircleShape,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier
+                        .size(20.dp)
+                        .align(Alignment.TopStart)
+                        .clip(CircleShape)
+                        .clickable(onClick = onDelete)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Remove ${dial.title}",
+                            tint = MaterialTheme.colorScheme.onError,
+                            modifier = Modifier.size(12.dp)
+                        )
+                    }
+                }
+
+                Surface(
+                    shape = CircleShape,
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier
-                        .size(22.dp)
+                        .size(20.dp)
                         .align(Alignment.TopEnd)
+                        .clip(CircleShape)
+                        .clickable(onClick = onEdit)
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
                             imageVector = Icons.Default.Edit,
-                            contentDescription = "Edit",
+                            contentDescription = "Edit ${dial.title}",
                             tint = MaterialTheme.colorScheme.onPrimary,
-                            modifier = Modifier.size(12.dp)
+                            modifier = Modifier.size(11.dp)
                         )
                     }
                 }

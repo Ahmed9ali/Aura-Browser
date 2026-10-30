@@ -610,7 +610,7 @@ private fun RealSourceViewPanel(
                             textStyle = TextStyle(
                                 fontSize = 12.sp,
                                 color = MaterialTheme.colorScheme.onSurface,
-                                fontFamily = FontFamily.Monospace
+                                fontFamily = com.example.ui.theme.VarelaRoundFontFamily
                             ),
                             cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                             modifier = Modifier.fillMaxWidth()
@@ -705,7 +705,7 @@ private fun RealSourceViewPanel(
                             Text(
                                 text = lineNum.toString().padStart(4, ' '),
                                 fontSize = 11.sp,
-                                fontFamily = FontFamily.Monospace,
+                                fontFamily = com.example.ui.theme.VarelaRoundFontFamily,
                                 color = Color(0xFF64748B),
                                 modifier = Modifier
                                     .width(42.dp)
@@ -715,7 +715,7 @@ private fun RealSourceViewPanel(
                                 text = highlightHtmlLine(lineContent, searchQuery),
                                 fontSize = 11.5.sp,
                                 lineHeight = 16.sp,
-                                fontFamily = FontFamily.Monospace,
+                                fontFamily = com.example.ui.theme.VarelaRoundFontFamily,
                                 softWrap = wordWrap
                             )
                         }
@@ -935,6 +935,7 @@ private fun RealDomInspectorPanel(
                                         onValueChange = { treeSearchQuery = it },
                                         singleLine = true,
                                         textStyle = TextStyle(
+                                            fontFamily = com.example.ui.theme.VarelaRoundFontFamily,
                                             fontSize = 12.sp,
                                             color = MaterialTheme.colorScheme.onSurface
                                         ),
@@ -1001,7 +1002,7 @@ private fun RealDomInspectorPanel(
                                         Text(
                                             text = "<${node.tagName}>",
                                             fontSize = 11.sp,
-                                            fontFamily = FontFamily.Monospace,
+                                            fontFamily = com.example.ui.theme.VarelaRoundFontFamily,
                                             fontWeight = FontWeight.Bold,
                                             color = Color(0xFF06B6D4),
                                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
@@ -1025,7 +1026,7 @@ private fun RealDomInspectorPanel(
                                         Text(
                                             text = identifier,
                                             fontSize = 12.sp,
-                                            fontFamily = FontFamily.Monospace,
+                                            fontFamily = com.example.ui.theme.VarelaRoundFontFamily,
                                             fontWeight = FontWeight.SemiBold,
                                             color = MaterialTheme.colorScheme.onSurface,
                                             maxLines = 1,
@@ -1046,7 +1047,7 @@ private fun RealDomInspectorPanel(
                                         Text(
                                             text = node.dimensionsLabel,
                                             fontSize = 10.5.sp,
-                                            fontFamily = FontFamily.Monospace,
+                                            fontFamily = com.example.ui.theme.VarelaRoundFontFamily,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                     }
@@ -1090,7 +1091,7 @@ private fun RealDomInspectorPanel(
                                     Text(
                                         text = snippet,
                                         fontSize = 11.sp,
-                                        fontFamily = FontFamily.Monospace,
+                                        fontFamily = com.example.ui.theme.VarelaRoundFontFamily,
                                         color = MaterialTheme.colorScheme.primary,
                                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
                                     )
@@ -1148,7 +1149,7 @@ private fun RealDomInspectorPanel(
                                     Text(
                                         text = entry.level,
                                         fontSize = 10.sp,
-                                        fontFamily = FontFamily.Monospace,
+                                        fontFamily = com.example.ui.theme.VarelaRoundFontFamily,
                                         fontWeight = FontWeight.Bold,
                                         color = badgeColor,
                                         modifier = Modifier.width(48.dp)
@@ -1156,7 +1157,7 @@ private fun RealDomInspectorPanel(
                                     Text(
                                         text = entry.message,
                                         fontSize = 11.5.sp,
-                                        fontFamily = FontFamily.Monospace,
+                                        fontFamily = com.example.ui.theme.VarelaRoundFontFamily,
                                         color = MaterialTheme.colorScheme.onSurface,
                                         modifier = Modifier.weight(1f)
                                     )
@@ -1184,7 +1185,7 @@ private fun RealDomInspectorPanel(
                             singleLine = true,
                             textStyle = TextStyle(
                                 fontSize = 12.sp,
-                                fontFamily = FontFamily.Monospace
+                                fontFamily = com.example.ui.theme.VarelaRoundFontFamily
                             ),
                             shape = ExpressivePillShape,
                             modifier = Modifier.weight(1f)
@@ -1317,7 +1318,7 @@ private fun SelectedElementDetailsView(
                                     append(">")
                                 },
                                 fontSize = 13.sp,
-                                fontFamily = FontFamily.Monospace,
+                                fontFamily = com.example.ui.theme.VarelaRoundFontFamily,
                                 fontWeight = FontWeight.Bold,
                                 color = Color(0xFF06B6D4),
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
@@ -1329,7 +1330,7 @@ private fun SelectedElementDetailsView(
                         Text(
                             text = "${element.widthPx} × ${element.heightPx} px • (${element.leftPx}, ${element.topPx})",
                             fontSize = 11.5.sp,
-                            fontFamily = FontFamily.Monospace,
+                            fontFamily = com.example.ui.theme.VarelaRoundFontFamily,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.weight(1f)
                         )
@@ -1363,7 +1364,7 @@ private fun SelectedElementDetailsView(
                     Text(
                         text = "Selector: ${element.cssSelector}",
                         fontSize = 11.sp,
-                        fontFamily = FontFamily.Monospace,
+                        fontFamily = com.example.ui.theme.VarelaRoundFontFamily,
                         color = MaterialTheme.colorScheme.onSurface,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis
@@ -1372,7 +1373,7 @@ private fun SelectedElementDetailsView(
                         Text(
                             text = "XPath: ${element.xpath}",
                             fontSize = 10.5.sp,
-                            fontFamily = FontFamily.Monospace,
+                            fontFamily = com.example.ui.theme.VarelaRoundFontFamily,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
@@ -1407,7 +1408,7 @@ private fun SelectedElementDetailsView(
                             onValueChange = { editedText = it },
                             label = { Text("innerText", fontSize = 11.sp) },
                             singleLine = true,
-                            textStyle = TextStyle(fontSize = 12.sp),
+                            textStyle = TextStyle(fontSize = 12.sp, fontFamily = com.example.ui.theme.VarelaRoundFontFamily),
                             modifier = Modifier.weight(1f)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
@@ -1427,7 +1428,7 @@ private fun SelectedElementDetailsView(
                             onValueChange = { stylePropInput = it },
                             label = { Text("CSS Prop", fontSize = 10.5.sp) },
                             singleLine = true,
-                            textStyle = TextStyle(fontSize = 11.5.sp, fontFamily = FontFamily.Monospace),
+                            textStyle = TextStyle(fontSize = 11.5.sp, fontFamily = com.example.ui.theme.VarelaRoundFontFamily),
                             modifier = Modifier.weight(0.45f)
                         )
                         Spacer(modifier = Modifier.width(6.dp))
@@ -1436,7 +1437,7 @@ private fun SelectedElementDetailsView(
                             onValueChange = { styleValInput = it },
                             label = { Text("Value", fontSize = 10.5.sp) },
                             singleLine = true,
-                            textStyle = TextStyle(fontSize = 11.5.sp, fontFamily = FontFamily.Monospace),
+                            textStyle = TextStyle(fontSize = 11.5.sp, fontFamily = com.example.ui.theme.VarelaRoundFontFamily),
                             modifier = Modifier.weight(0.45f)
                         )
                         Spacer(modifier = Modifier.width(6.dp))
@@ -1482,7 +1483,7 @@ private fun SelectedElementDetailsView(
                                 Text(
                                     text = k,
                                     fontSize = 11.5.sp,
-                                    fontFamily = FontFamily.Monospace,
+                                    fontFamily = com.example.ui.theme.VarelaRoundFontFamily,
                                     fontWeight = FontWeight.Bold,
                                     color = Color(0xFF38BDF8),
                                     modifier = Modifier.width(110.dp)
@@ -1490,7 +1491,7 @@ private fun SelectedElementDetailsView(
                                 Text(
                                     text = v,
                                     fontSize = 11.5.sp,
-                                    fontFamily = FontFamily.Monospace,
+                                    fontFamily = com.example.ui.theme.VarelaRoundFontFamily,
                                     color = MaterialTheme.colorScheme.onSurface,
                                     modifier = Modifier.weight(1f)
                                 )
@@ -1528,7 +1529,7 @@ private fun SelectedElementDetailsView(
                                 Text(
                                     text = k,
                                     fontSize = 11.5.sp,
-                                    fontFamily = FontFamily.Monospace,
+                                    fontFamily = com.example.ui.theme.VarelaRoundFontFamily,
                                     fontWeight = FontWeight.Medium,
                                     color = Color(0xFFA78BFA),
                                     modifier = Modifier.width(130.dp)
@@ -1536,7 +1537,7 @@ private fun SelectedElementDetailsView(
                                 Text(
                                     text = v,
                                     fontSize = 11.5.sp,
-                                    fontFamily = FontFamily.Monospace,
+                                    fontFamily = com.example.ui.theme.VarelaRoundFontFamily,
                                     color = MaterialTheme.colorScheme.onSurface,
                                     modifier = Modifier.weight(1f)
                                 )
@@ -1580,7 +1581,7 @@ private fun SelectedElementDetailsView(
                     Text(
                         text = highlightHtmlLine(element.outerHtml.take(2500), ""),
                         fontSize = 11.sp,
-                        fontFamily = FontFamily.Monospace,
+                        fontFamily = com.example.ui.theme.VarelaRoundFontFamily,
                         modifier = Modifier.padding(12.dp)
                     )
                 }
@@ -1757,7 +1758,7 @@ private fun RealNetworkSnifferPanel(
                             textStyle = TextStyle(
                                 fontSize = 11.5.sp,
                                 color = MaterialTheme.colorScheme.onSurface,
-                                fontFamily = FontFamily.Monospace
+                                fontFamily = com.example.ui.theme.VarelaRoundFontFamily
                             ),
                             cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                             modifier = Modifier.fillMaxWidth()
@@ -1864,7 +1865,7 @@ private fun RealNetworkSnifferPanel(
                                     Text(
                                         text = entry.method,
                                         fontSize = 10.sp,
-                                        fontFamily = FontFamily.Monospace,
+                                        fontFamily = com.example.ui.theme.VarelaRoundFontFamily,
                                         fontWeight = FontWeight.Bold,
                                         color = statusColor,
                                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
@@ -1885,7 +1886,7 @@ private fun RealNetworkSnifferPanel(
                                             else -> "200"
                                         },
                                         fontSize = 10.sp,
-                                        fontFamily = FontFamily.Monospace,
+                                        fontFamily = com.example.ui.theme.VarelaRoundFontFamily,
                                         fontWeight = FontWeight.SemiBold,
                                         color = statusColor,
                                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
@@ -1931,7 +1932,7 @@ private fun RealNetworkSnifferPanel(
                                 Text(
                                     text = metricsText,
                                     fontSize = 10.sp,
-                                    fontFamily = FontFamily.Monospace,
+                                    fontFamily = com.example.ui.theme.VarelaRoundFontFamily,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
@@ -1941,7 +1942,7 @@ private fun RealNetworkSnifferPanel(
                             Text(
                                 text = entry.pathAndQuery,
                                 fontSize = 11.sp,
-                                fontFamily = FontFamily.Monospace,
+                                fontFamily = com.example.ui.theme.VarelaRoundFontFamily,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = if (isExpanded) 4 else 1,
                                 overflow = TextOverflow.Ellipsis
@@ -2006,7 +2007,7 @@ private fun RealNetworkSnifferPanel(
                                     Text(
                                         text = "Full URL: ${entry.url}",
                                         fontSize = 10.5.sp,
-                                        fontFamily = FontFamily.Monospace,
+                                        fontFamily = com.example.ui.theme.VarelaRoundFontFamily,
                                         color = MaterialTheme.colorScheme.onSurface
                                     )
 
@@ -2029,7 +2030,7 @@ private fun RealNetworkSnifferPanel(
                                                     Text(
                                                         text = "$k: $v",
                                                         fontSize = 10.5.sp,
-                                                        fontFamily = FontFamily.Monospace,
+                                                        fontFamily = com.example.ui.theme.VarelaRoundFontFamily,
                                                         color = Color(0xFFE2E8F0)
                                                     )
                                                 }
@@ -2056,7 +2057,7 @@ private fun RealNetworkSnifferPanel(
                                                     Text(
                                                         text = "$k: $v",
                                                         fontSize = 10.5.sp,
-                                                        fontFamily = FontFamily.Monospace,
+                                                        fontFamily = com.example.ui.theme.VarelaRoundFontFamily,
                                                         color = Color(0xFFA7F3D0)
                                                     )
                                                 }
@@ -2096,7 +2097,7 @@ private fun RealNetworkSnifferPanel(
                                             Text(
                                                 text = entry.responsePreview.take(3000),
                                                 fontSize = 10.5.sp,
-                                                fontFamily = FontFamily.Monospace,
+                                                fontFamily = com.example.ui.theme.VarelaRoundFontFamily,
                                                 color = Color(0xFFE2E8F0),
                                                 modifier = Modifier.padding(8.dp)
                                             )

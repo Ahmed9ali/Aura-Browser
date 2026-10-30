@@ -92,7 +92,8 @@ data class BrowserSettings(
     val doNotTrack: Boolean = true,
     val showTabGroups: Boolean = false,
     val showSpeedDials: Boolean = true,
-    val showDiscoverFeed: Boolean = false
+    val showDiscoverFeed: Boolean = false,
+    val hasCompletedOnboarding: Boolean = false
 )
 
 enum class NavScreen {

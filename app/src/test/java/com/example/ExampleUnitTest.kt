@@ -721,4 +721,80 @@ class ExampleUnitTest {
         assertTrue(dobJs.contains("var monthPad = '08'"))
         assertTrue(dobJs.contains("var dayNumStr = '19'"))
     }
+
+    @Test
+    fun testRecentsAppearOnlyWhenWebsiteVisitedMultipleTimes() {
+        // Fresh repository starts with empty Recents (no pre-populated dummy shortcuts)
+        assertTrue(repository.speedDials.value.isEmpty())
+
+        // 1st visit to github.com -> recorded in history with visitCount = 1, NOT in Recents yet
+        repository.updateActiveTab(title = "GitHub", url = "https://github.com")
+        assertEquals(1, repository.history.value.size)
+        assertEquals(1, repository.history.value.first().visitCount)
+        assertTrue(repository.speedDials.value.isEmpty())
+
+        // Page load progress/title update for the same tab URL does not increment visitCount
+        repository.updateActiveTab(
+            title = "GitHub · Build and ship software",
+            url = "https://github.com",
+            recordVisit = false
+        )
+        assertEquals(1, repository.history.value.first().visitCount)
+        assertEquals("GitHub · Build and ship software", repository.history.value.first().title)
+        assertTrue(repository.speedDials.value.isEmpty())
+
+        // 2nd visit to github.com -> visitCount becomes 2, website now appears in Recents
+        repository.updateActiveTab(title = "GitHub", url = "https://github.com")
+        assertEquals(2, repository.history.value.first().visitCount)
+        assertEquals(1, repository.speedDials.value.size)
+        assertEquals("Github", repository.speedDials.value.first().title)
+        assertEquals("https://github.com", repository.speedDials.value.first().url)
+
+        // Clear history also clears Recents
+        repository.clearHistory()
+        assertTrue(repository.speedDials.value.isEmpty())
+    }
+
+    @Test
+    fun testWelcomeOnboardingStateAndVarelaRoundTypography() {
+        // 1. Verify fresh install starts with Welcome onboarding incomplete (hasCompletedOnboarding = false)
+        assertFalse(
+            "New user install should display Welcome Screen by default",
+            repository.settings.value.hasCompletedOnboarding
+        )
+
+        // 2. Verify completing onboarding updates settings to true
+        repository.completeOnboarding()
+        assertTrue(
+            "Completing Welcome Screen should mark onboarding as completed",
+            repository.settings.value.hasCompletedOnboarding
+        )
+
+        // 3. Verify replaying welcome tour resets onboarding to false
+        repository.resetOnboarding()
+        assertFalse(
+            "Resetting onboarding should allow replaying the Welcome Screen",
+            repository.settings.value.hasCompletedOnboarding
+        )
+
+        // 4. Verify entire app Typography uses VarelaRoundFontFamily
+        val typography = com.example.ui.theme.Typography
+        val expectedFont = com.example.ui.theme.VarelaRoundFontFamily
+        assertEquals(expectedFont, typography.displayLarge.fontFamily)
+        assertEquals(expectedFont, typography.displayMedium.fontFamily)
+        assertEquals(expectedFont, typography.displaySmall.fontFamily)
+        assertEquals(expectedFont, typography.headlineLarge.fontFamily)
+        assertEquals(expectedFont, typography.headlineMedium.fontFamily)
+        assertEquals(expectedFont, typography.headlineSmall.fontFamily)
+        assertEquals(expectedFont, typography.titleLarge.fontFamily)
+        assertEquals(expectedFont, typography.titleMedium.fontFamily)
+        assertEquals(expectedFont, typography.titleSmall.fontFamily)
+        assertEquals(expectedFont, typography.bodyLarge.fontFamily)
+        assertEquals(expectedFont, typography.bodyMedium.fontFamily)
+        assertEquals(expectedFont, typography.bodySmall.fontFamily)
+        assertEquals(expectedFont, typography.labelLarge.fontFamily)
+        assertEquals(expectedFont, typography.labelMedium.fontFamily)
+        assertEquals(expectedFont, typography.labelSmall.fontFamily)
+    }
 }
+

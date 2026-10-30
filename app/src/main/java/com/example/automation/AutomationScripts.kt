@@ -19,15 +19,40 @@ object AutomationScripts {
             window._auraLastCapturedTime = 0;
             window._auraLastCapturedAction = '';
 
+            if (!Element.prototype._auraAttachShadowPatched && Element.prototype.attachShadow) {
+                var origAttach = Element.prototype.attachShadow;
+                Element.prototype.attachShadow = function(init) {
+                    var sr = origAttach.call(this, init);
+                    this._auraShadowRoot = sr;
+                    return sr;
+                };
+                Element.prototype._auraAttachShadowPatched = true;
+            }
+
             function cssEscape(str) {
                 if (window.CSS && window.CSS.escape) return window.CSS.escape(str);
                 return String(str).replace(/([ !"#$%&'()*+,.\/:;<=>?@\[\\\]^`{|}~])/g, '\\$1');
             }
 
+            function getQueryRoot(targetEl) {
+                if (!targetEl) return document;
+                try {
+                    var rn = targetEl.getRootNode ? targetEl.getRootNode() : document;
+                    if (rn && rn.querySelectorAll) return rn;
+                } catch (e) {}
+                return targetEl.ownerDocument || document;
+            }
+
             function isUniqueSelector(sel, targetEl) {
                 try {
-                    var matches = document.querySelectorAll(sel);
-                    return matches.length === 1 && matches[0] === targetEl;
+                    var rootNode = getQueryRoot(targetEl);
+                    var matches = rootNode.querySelectorAll(sel);
+                    if (matches.length === 1 && matches[0] === targetEl) return true;
+                    if (rootNode !== document) {
+                        var docMatches = document.querySelectorAll(sel);
+                        if (docMatches.length === 1 && docMatches[0] === targetEl) return true;
+                    }
+                    return false;
                 } catch (e) {
                     return false;
                 }
@@ -36,19 +61,22 @@ object AutomationScripts {
             function getCssSelector(el) {
                 if (!el || el === document || el.nodeType !== 1) return '';
                 var tag = el.tagName.toLowerCase();
+                var rootNode = getQueryRoot(el);
 
                 if (el.id) {
                     var idSel = '#' + cssEscape(el.id);
                     if (isUniqueSelector(idSel, el)) return idSel;
                 }
 
-                var testAttrs = ['data-testid', 'data-test', 'data-qa', 'data-cy', 'data-automation-id'];
+                var testAttrs = ['data-testid', 'data-test', 'data-qa', 'data-cy', 'data-automation-id', 'can-field', 'data-field', 'data-focus-method'];
                 for (var t = 0; t < testAttrs.length; t++) {
                     var attr = testAttrs[t];
                     var val = el.getAttribute(attr);
                     if (val) {
                         var testSel = '[' + attr + '="' + val.replace(/"/g, '\\"') + '"]';
                         if (isUniqueSelector(testSel, el)) return testSel;
+                        var tagTestSel = tag + testSel;
+                        if (isUniqueSelector(tagTestSel, el)) return tagTestSel;
                     }
                 }
 
@@ -79,7 +107,7 @@ object AutomationScripts {
 
                 var path = [];
                 var curr = el;
-                while (curr && curr.nodeType === 1 && curr !== document.body && curr !== document.documentElement) {
+                while (curr && curr.nodeType === 1 && curr !== rootNode && curr !== document.body && curr !== document.documentElement) {
                     var seg = curr.tagName.toLowerCase();
                     if (curr.id) {
                         var candidateId = '#' + cssEscape(curr.id);
@@ -106,12 +134,13 @@ object AutomationScripts {
                     }
                     curr = curr.parentElement;
                 }
-                return path.join(' > ');
+                return path.join(' > ') || tag;
             }
 
             function getAssociatedLabelText(el) {
                 if (!el) return '';
                 var parts = [];
+                var rootNode = getQueryRoot(el);
                 try {
                     if (el.labels && el.labels.length > 0) {
                         for (var i = 0; i < el.labels.length; i++) {
@@ -119,7 +148,9 @@ object AutomationScripts {
                         }
                     }
                     if (el.id) {
-                        var forLbl = document.querySelector('label[for="' + el.id.replace(/"/g, '\\"') + '"]');
+                        var escapedId = el.id.replace(/"/g, '\\"');
+                        var forLbl = (rootNode.querySelector ? rootNode.querySelector('label[for="' + escapedId + '"]') : null) ||
+                                     document.querySelector('label[for="' + escapedId + '"]');
                         if (forLbl) parts.push(forLbl.innerText || forLbl.textContent || '');
                     }
                     var closestLbl = el.closest ? el.closest('label') : null;
@@ -128,7 +159,8 @@ object AutomationScripts {
                     if (ariaLabelledBy) {
                         var ids = ariaLabelledBy.split(/\s+/);
                         for (var j = 0; j < ids.length; j++) {
-                            var refEl = document.getElementById(ids[j]);
+                            var refEl = (rootNode.getElementById ? rootNode.getElementById(ids[j]) : (rootNode.querySelector ? rootNode.querySelector('#' + cssEscape(ids[j])) : null)) ||
+                                        document.getElementById(ids[j]);
                             if (refEl) parts.push(refEl.innerText || refEl.textContent || '');
                         }
                     }
@@ -136,19 +168,32 @@ object AutomationScripts {
                     if (ariaDescribedBy) {
                         var dIds = ariaDescribedBy.split(/\s+/);
                         for (var k = 0; k < dIds.length; k++) {
-                            var dEl = document.getElementById(dIds[k]);
+                            var dEl = (rootNode.getElementById ? rootNode.getElementById(dIds[k]) : (rootNode.querySelector ? rootNode.querySelector('#' + cssEscape(dIds[k])) : null)) ||
+                                      document.getElementById(dIds[k]);
                             if (dEl) parts.push(dEl.innerText || dEl.textContent || '');
                         }
                     }
+                    var canField = el.getAttribute('can-field') || el.getAttribute('data-field') || el.getAttribute('data-name') || el.getAttribute('aria-placeholder') || el.getAttribute('title') || '';
+                    if (canField) parts.push(canField);
+
                     var prev = el.previousElementSibling;
-                    if (prev && (prev.tagName === 'LABEL' || prev.tagName === 'SPAN' || prev.tagName === 'DIV')) {
+                    if (prev && (prev.tagName === 'LABEL' || prev.tagName === 'SPAN' || prev.tagName === 'DIV' || prev.tagName === 'P')) {
                         var prevTxt = (prev.innerText || prev.textContent || '').trim();
-                        if (prevTxt.length < 60) parts.push(prevTxt);
+                        if (prevTxt.length > 0 && prevTxt.length < 80) parts.push(prevTxt);
                     }
-                    var fieldContainer = el.closest ? el.closest('.form-group, .field, .input-group, .form-field, .MuiFormControl-root, .ant-form-item, fieldset') : null;
+                    // Floating labels (Apple ID .form-textbox-label, Material Outlined, Bootstrap form-floating, Tailwind peer) place label AFTER input
+                    var next = el.nextElementSibling;
+                    if (next && (next.tagName === 'LABEL' || next.tagName === 'SPAN' || next.tagName === 'DIV')) {
+                        var nextTxt = (next.innerText || next.textContent || '').trim();
+                        if (nextTxt.length > 0 && nextTxt.length < 80) parts.push(nextTxt);
+                    }
+                    var fieldContainer = el.closest ? el.closest('.form-textbox, idms-textbox, idms-dropdown, wc-birthday, .form-dropdown, .form-element, .si-field-container, .van-cell, .van-field, .weui-cell, .adm-list-item, .form-group, .field, .input-group, .form-field, .MuiFormControl-root, .ant-form-item, [class*="textbox"], [class*="form-item"], [class*="input-box"], fieldset') : null;
                     if (fieldContainer) {
-                        var containerLbl = fieldContainer.querySelector('label, legend, .label, .form-label, .MuiFormLabel-root');
-                        if (containerLbl) parts.push(containerLbl.innerText || containerLbl.textContent || '');
+                        var containerLbls = fieldContainer.querySelectorAll('label, legend, .label, .form-label, .form-textbox-label, .form-dropdown-label, .MuiFormLabel-root, .van-field__label, .van-cell__title, .weui-label, [class*="label"]');
+                        for (var cl = 0; cl < containerLbls.length; cl++) {
+                            var cTxt = (containerLbls[cl].innerText || containerLbls[cl].textContent || '').trim();
+                            if (cTxt.length > 0 && cTxt.length < 80) parts.push(cTxt);
+                        }
                     }
                 } catch (e) {}
                 return parts.join(' ').replace(/\s+/g, ' ').trim();
@@ -162,13 +207,12 @@ object AutomationScripts {
                 var cls = (el.className && typeof el.className === 'string') ? el.className : '';
                 if (/callingCode|calling-code|countryDropDown|country-code|countryCode|dial-code|dialCode|phone-country|phoneprefix|iti__|PhoneInputCountry|selected-flag|flag-dropdown/i.test(cls)) return true;
                 if (el.hasAttribute('data-dial-code') || el.hasAttribute('data-country-code')) return true;
-                var idAndName = ((el.id || '') + ' ' + (el.name || '')).toLowerCase();
+                var idAndName = ((el.id || '') + ' ' + (el.name || '') + ' ' + (el.getAttribute('can-field') || '')).toLowerCase();
                 if (/countrylist|country_code|country-code|countrycode|dialcode|dial_code|phone_country|calling_code|callingcode|phoneprefix/i.test(idAndName)) return true;
                 if (/country.*code|dial.*code|calling.*code|phone.*prefix|phone.*code|phone.*country/i.test(combined)) return true;
                 var txt = (el.innerText || el.textContent || el.value || '').trim();
                 // Match e.g. +213(Algeria), +1 (US), +44, etc.
-                if (txt.length <= 25 && /^\s*([^\w\s]{1,4}\s*)?([a-zA-Z]{2}\s*)?\+\d{1,4}/.test(txt)) return true;
-                var tag = (el.tagName || '').toLowerCase();
+                if (txt.length <= 28 && /^\s*([^\w\s]{1,4}\s*)?([a-zA-Z]{2}\s*)?\+\d{1,4}/.test(txt)) return true;
                 if (tag === 'select' && el.options && el.options.length > 3) {
                     var sampleOpts = '';
                     for (var i = 0; i < Math.min(el.options.length, 8); i++) {
@@ -190,26 +234,50 @@ object AutomationScripts {
             function isCustomDropdownOrSheetTrigger(el, combined) {
                 if (!el || !el.tagName) return false;
                 var tag = el.tagName.toLowerCase();
-                if (tag === 'select') return true;
+                if (tag === 'select' || tag === 'idms-dropdown') return true;
                 var role = (el.getAttribute('role') || '').toLowerCase();
                 if (role === 'combobox' || role === 'listbox' || role === 'spinbutton') return true;
                 var hasPopup = (el.getAttribute('aria-haspopup') || '').toLowerCase();
                 if (hasPopup === 'listbox' || hasPopup === 'dialog' || hasPopup === 'menu' || hasPopup === 'true') return true;
                 if (el.hasAttribute('aria-expanded')) return true;
                 var cls = (el.className && typeof el.className === 'string') ? el.className : '';
-                if (/MuiSelect-select|ant-select-selector|react-select__control|v-select|el-select|select-trigger|dropdown-toggle|custom-select|picker-trigger|bottom-sheet-trigger|hwid-countryDropDown|hwid-select|hwid-drop/i.test(cls)) {
+                if (/MuiSelect-select|ant-select-selector|react-select__control|v-select|el-select|select-trigger|dropdown-toggle|custom-select|picker-trigger|bottom-sheet-trigger|sheet-trigger|form-dropdown|idms-dropdown|van-cell|van-field|weui-cell|adm-list-item|hwid-countryDropDown|hwid-select|hwid-drop/i.test(cls)) {
                     return true;
                 }
-                if (tag === 'input' && el.readOnly && /select|choose|pick|country|gender|state|month|day|year|category/i.test(combined)) {
+                if (tag === 'input' && el.readOnly && /select|choose|pick|country|region|gender|state|month|day|year|birth|dob|date|category/i.test(combined)) {
                     return true;
                 }
                 var txt = (el.innerText || el.textContent || el.placeholder || '').trim();
-                if ((tag === 'button' || role === 'button' || tag === 'div' || tag === 'span') &&
-                    (/^(select|choose|pick)\b/i.test(txt) || /\b(gender|sex|country|state|province|month|day|year)\b/i.test(combined)) &&
-                    !/submit|sign.*up|register|login|log.*in|continue|next/i.test(txt)) {
+                var hasChevronIcon = el.querySelector && el.querySelector('svg, i[class*="arrow"], i[class*="chevron"], i[class*="caret"], [class*="icon-arrow"], [class*="icon-right"], [class*="dropdown-icon"]');
+                if ((tag === 'button' || role === 'button' || tag === 'div' || tag === 'span' || tag === 'li' || tag === 'a') &&
+                    (/^(select|choose|pick)\b/i.test(txt) || /\b(gender|sex|country|region|state|province|month|day|year|birthday|date of birth|dob)\b/i.test(combined) || hasChevronIcon) &&
+                    !/submit|sign.*up|register|login|log.*in|continue|next|forgot|reset/i.test(txt)) {
                     return true;
                 }
                 return false;
+            }
+
+            function getDobContainerAndContext(el) {
+                if (!el || !el.closest) return { container: null, isDob: false };
+                var dobContainer = el.closest('wc-birthday, [class*="birth"], [class*="dob"], [class*="bday"], [class*="date-root"], [class*="date-wrapper"], [class*="date-picker"], [class*="datepicker"], .hwid-register-inputsContainer, fieldset, .form-group, .field, .input-group, .form-row, .form-element, div');
+                var dobContextText = '';
+                var checkNode = dobContainer;
+                for (var depth = 0; depth < 3 && checkNode && checkNode !== document.body; depth++) {
+                    var rawCTxt = (checkNode.innerText || checkNode.textContent || '').trim();
+                    if (rawCTxt.length < 650) {
+                        dobContextText += ' ' + rawCTxt.toLowerCase();
+                    }
+                    var prevSib = checkNode.previousElementSibling;
+                    if (prevSib) {
+                        var pTxt = (prevSib.innerText || prevSib.textContent || '').trim();
+                        if (pTxt.length < 200) dobContextText += ' ' + pTxt.toLowerCase();
+                    }
+                    if (/date\s*of\s*birth|birth\s*date|birthday|\bdob\b|\bbday\b|when\s*were\s*you\s*born/i.test(dobContextText)) {
+                        return { container: checkNode, isDob: true };
+                    }
+                    checkNode = checkNode.parentElement;
+                }
+                return { container: dobContainer, isDob: false };
             }
 
             function detectFieldKey(el) {
@@ -217,6 +285,7 @@ object AutomationScripts {
                 var tag = el.tagName.toLowerCase();
                 var type = (el.type || '').toLowerCase();
                 var ac = (el.autocomplete || '').toLowerCase();
+                var canField = (el.getAttribute('can-field') || el.getAttribute('data-field') || '').toLowerCase();
                 var labelTxt = getAssociatedLabelText(el);
                 var name = (el.name || '').toLowerCase();
                 var id = (el.id || '').toLowerCase();
@@ -226,6 +295,7 @@ object AutomationScripts {
                 var combined = (
                     name + ' ' +
                     id + ' ' +
+                    canField + ' ' +
                     placeholder + ' ' +
                     ariaLabel + ' ' +
                     (el.getAttribute('data-label') || '') + ' ' +
@@ -233,6 +303,14 @@ object AutomationScripts {
                     labelTxt + ' ' +
                     (text.length < 40 ? text : '')
                 ).toLowerCase();
+
+                // Apple Sign-In & Apple Account explicit identifiers
+                if (id === 'account_name_text_field' || canField === 'accountname' || /apple\s*id|email\s*or\s*phone/i.test(combined)) {
+                    return 'email';
+                }
+                if (id === 'password_text_field' || canField === 'password') {
+                    return 'password';
+                }
 
                 // 1. Password check
                 if (type === 'password' || ac === 'new-password' || ac === 'current-password' || /pass|pwd|secret/i.test(combined)) {
@@ -243,8 +321,10 @@ object AutomationScripts {
                 // 2. Phone input check: If editable input with phone placeholder or inside callingCodePhone container
                 if (tag === 'input' && !el.readOnly && el.type !== 'button' && el.type !== 'submit') {
                     var parentPhoneCont = el.closest ? el.closest('.hwid-callingCodePhone-root, [class*="callingCode"], .iti, .PhoneInput, .react-tel-input, .phone-input') : null;
-                    if (type === 'tel' || /phone|mobile|cell|telephone|whatsapp|contact.*num/i.test(placeholder + ' ' + name + ' ' + id) || parentPhoneCont) {
-                        return 'phoneNumber';
+                    if (type === 'tel' || /phone|mobile|cell|telephone|whatsapp|contact.*num/i.test(placeholder + ' ' + name + ' ' + id + ' ' + canField) || parentPhoneCont) {
+                        if (!/birth|dob|bday|day|month|year/i.test(name + ' ' + id + ' ' + placeholder + ' ' + ariaLabel)) {
+                            return 'phoneNumber';
+                        }
                     }
                 }
 
@@ -256,25 +336,19 @@ object AutomationScripts {
 
                 // 5. Email & Username
                 if (type === 'email' || ac === 'email' || /email|e-mail|mail/i.test(combined)) return 'email';
-                if (ac === 'username' || /user|username|login|handle|nick|account/i.test(combined)) return 'username';
+                if (ac === 'username' || /user|username|login|handle|nick|account|identifier/i.test(combined)) return 'username';
 
                 // 6. Comprehensive Date of Birth detection (Day, Month, Year, and full DOB)
-                // Covers native inputs/selects, Google split inputs, and custom segmented pickers like Huawei ID (28 ▼, 10 ▼, 2006 ▼)
-                var fieldSpecificHint = (name + ' ' + id + ' ' + placeholder + ' ' + ariaLabel + ' ' + (text.length < 25 ? text : '') + ' ' + (el.className || '')).toLowerCase();
-                var ownInputHint = (name + ' ' + id + ' ' + placeholder + ' ' + ariaLabel + ' ' + ac).toLowerCase();
+                var fieldSpecificHint = (name + ' ' + id + ' ' + canField + ' ' + placeholder + ' ' + ariaLabel + ' ' + (text.length < 25 ? text : '') + ' ' + (el.className || '')).toLowerCase();
+                var ownInputHint = (name + ' ' + id + ' ' + canField + ' ' + placeholder + ' ' + ariaLabel + ' ' + ac + ' ' + labelTxt).toLowerCase();
 
-                // Single full-date Birthday <input> (e.g. account.fydeos.io input[name="birthday"]) must be 'dob', never split 'dobDay'
-                if (tag === 'input' && (type === 'date' || (/birthday|birthdate|date.?of.?birth|\bdob\b|datepicker|^bday$/i.test(ownInputHint) && !/\b(day|dd|month|mm|year|yyyy|yr|dob_day|dob_month|dob_year|birth_day|birth_month|birth_year|bday-day|bday-month|bday-year)\b/i.test(ownInputHint)))) {
+                if (tag === 'input' && (type === 'date' || (/birthday|birthdate|date.?of.?birth|\bdob\b|datepicker|^bday$|mm\/dd\/yyyy|dd\/mm\/yyyy|yyyy-mm-dd/i.test(ownInputHint) && !/\b(day|dd|month|mm|year|yyyy|yr|dob_day|dob_month|dob_year|birth_day|birth_month|birth_year|bday-day|bday-month|bday-year)\b/i.test(name + ' ' + id + ' ' + placeholder + ' ' + ariaLabel)))) {
                     return 'dob';
                 }
 
-                var dobContainer = el.closest ? el.closest('[class*="birth"], [class*="dob"], [class*="bday"], [class*="date-root"], [class*="date-wrapper"], .hwid-register-inputsContainer, .form-group, .field, .input-group, div') : null;
-                var dobContextText = '';
-                if (dobContainer) {
-                    var rawCTxt = (dobContainer.innerText || dobContainer.textContent || '').trim();
-                    if (rawCTxt.length < 250) dobContextText = rawCTxt.toLowerCase();
-                }
-                var isDobContext = /date\s*of\s*birth|birth\s*date|birthday|\bdob\b|hwid.*birth|hwid.*date/i.test(dobContextText + ' ' + combined);
+                var dobInfo = getDobContainerAndContext(el);
+                var dobContainer = dobInfo.container;
+                var isDobContext = dobInfo.isDob || /date\s*of\s*birth|birth\s*date|birthday|\bdob\b|hwid.*birth|hwid.*date/i.test(combined);
 
                 if (ac === 'bday-day' || /^(day|dd|birth_day|dob_day|bday_day|birthday_day|date_day)$/i.test(name) || /^(day|dd|birth_day|dob_day|bday-day)$/i.test(id) || /\b(birth[_-]day|dob[_-]?day|bday[_-]day|birthday[_-]day|select.*day|^day$|^dd$)\b/i.test(fieldSpecificHint) || (isDobContext && /\b(day|dd)\b/i.test(fieldSpecificHint) && !/birthday|today|everyday/i.test(fieldSpecificHint))) {
                     return 'dobDay';
@@ -291,7 +365,6 @@ object AutomationScripts {
                     if (/^(19\d\d|20\d\d)$/.test(cleanNumericText)) return 'dobYear';
                     if (/^(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)$/i.test(text)) return 'dobMonth';
 
-                    // Check segmented position among sibling triggers on the same horizontal row in the DOB container
                     if (dobContainer && tag !== 'input') {
                         var elRect = el.getBoundingClientRect();
                         var allTriggers = dobContainer.querySelectorAll('[class*="select"], [class*="drop"], [class*="picker"], button, [role="combobox"], [role="button"], [role="spinbutton"], input, select');
@@ -300,7 +373,7 @@ object AutomationScripts {
                             var sibT = allTriggers[lt];
                             if (sibT.querySelector && sibT.querySelector('button, [class*="select"], [class*="drop"], input, select')) continue;
                             var sibRect = sibT.getBoundingClientRect();
-                            if (leafTriggers.indexOf(sibT) < 0 && sibRect.width > 12 && Math.abs(sibRect.top - elRect.top) < 36) {
+                            if (leafTriggers.indexOf(sibT) < 0 && sibRect.width > 12 && Math.abs(sibRect.top - elRect.top) < 42) {
                                 leafTriggers.push(sibT);
                             }
                         }
@@ -312,16 +385,23 @@ object AutomationScripts {
                                 }
                             }
                             if (myIndex >= 0) {
-                                var lastIsYear = leafTriggers.some(function(t, idx) { return idx === 2 && /19\d\d|20\d\d|year/i.test(t.innerText || ''); });
-                                var firstIsYear = leafTriggers.some(function(t, idx) { return idx === 0 && /19\d\d|20\d\d|year/i.test(t.innerText || ''); });
-                                if (lastIsYear || (!firstIsYear && (myIndex === 0 || myIndex === 1 || myIndex === 2))) {
-                                    if (myIndex === 0) return 'dobDay';
-                                    if (myIndex === 1) return 'dobMonth';
+                                var firstTxt = (leafTriggers[0].innerText || leafTriggers[0].placeholder || '').toLowerCase();
+                                var lastTxt = (leafTriggers[2].innerText || leafTriggers[2].placeholder || '').toLowerCase();
+                                var firstIsMonth = /month|mm|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec/i.test(firstTxt);
+                                var firstIsYear = /19\d\d|20\d\d|year|yyyy/i.test(firstTxt);
+                                var lastIsYear = /19\d\d|20\d\d|year|yyyy/i.test(lastTxt);
+                                if (firstIsMonth) {
+                                    if (myIndex === 0) return 'dobMonth';
+                                    if (myIndex === 1) return 'dobDay';
                                     if (myIndex === 2) return 'dobYear';
                                 } else if (firstIsYear) {
                                     if (myIndex === 0) return 'dobYear';
                                     if (myIndex === 1) return 'dobMonth';
                                     if (myIndex === 2) return 'dobDay';
+                                } else if (lastIsYear || (myIndex >= 0 && myIndex <= 2)) {
+                                    if (myIndex === 0) return 'dobDay';
+                                    if (myIndex === 1) return 'dobMonth';
+                                    if (myIndex === 2) return 'dobYear';
                                 }
                             }
                         }
@@ -332,7 +412,6 @@ object AutomationScripts {
                         if (asNum > 31 && asNum >= 1900 && asNum <= 2099) return 'dobYear';
                         if (asNum > 12 && asNum <= 31) return 'dobDay';
                     }
-                    if (tag === 'input' && (type === 'date' || type === 'text')) return 'dob';
                     return 'dob';
                 }
 
@@ -347,14 +426,13 @@ object AutomationScripts {
                 }
 
                 if (type === 'tel' || ac.indexOf('tel') === 0 || /phone|mobile|cell|telephone|whatsapp|contact.*num/i.test(combined)) return 'phoneNumber';
-
                 if (ac === 'sex' || /gender|sex/i.test(combined)) return 'gender';
-                if (ac === 'given-name' || /first.*name|fname|given.*name|forename/i.test(combined)) return 'firstName';
-                if (ac === 'family-name' || /last.*name|lname|surname|family.*name/i.test(combined)) return 'lastName';
+                if (ac === 'given-name' || canField === 'firstname' || /first.*name|fname|given.*name|forename/i.test(combined)) return 'firstName';
+                if (ac === 'family-name' || canField === 'lastname' || /last.*name|lname|surname|family.*name/i.test(combined)) return 'lastName';
                 if (ac === 'name' || /full.*name|^name$|your.*name|display.*name/i.test(combined)) return 'fullName';
                 if (ac === 'postal-code' || /zip|postal|pincode|postcode/i.test(combined)) return 'zipCode';
                 if (ac === 'address-level2' || /city|town|locality/i.test(combined)) return 'city';
-                if (ac === 'address-level1' || /state|province|region/i.test(combined)) return 'state';
+                if (ac === 'address-level1' || /state|province|region|country/i.test(combined)) return 'state';
                 if (ac === 'address-line2' || /address.*2|line.*2|apt|suite|unit/i.test(combined)) return 'addressLine2';
                 if (ac === 'street-address' || ac === 'address-line1' || /address|street|addr/i.test(combined)) return 'address';
                 if (type === 'search' || /search|query|^q$/i.test(combined)) return 'username';
@@ -413,26 +491,46 @@ object AutomationScripts {
                 } catch (e) {}
             }
 
+            function resolveEventLeafTarget(e) {
+                if (!e) return null;
+                try {
+                    if (e.composedPath) {
+                        var path = e.composedPath();
+                        if (path && path.length > 0 && path[0] && path[0].nodeType === 1) {
+                            return path[0];
+                        }
+                    }
+                } catch (err) {}
+                return e.target;
+            }
+
             function resolveInteractiveTarget(rawTarget) {
                 if (!rawTarget || !rawTarget.tagName) return null;
                 if (rawTarget.closest && rawTarget.closest('.aura-hud')) return null;
 
+                var rootNode = getQueryRoot(rawTarget);
                 var labelEl = rawTarget.closest ? rawTarget.closest('label') : null;
                 var linkedInput = null;
                 if (labelEl) {
                     linkedInput = labelEl.querySelector('input, select, textarea') ||
-                                 (labelEl.htmlFor ? document.getElementById(labelEl.htmlFor) : null);
+                                 (labelEl.htmlFor ? ((rootNode.getElementById ? rootNode.getElementById(labelEl.htmlFor) : null) || document.getElementById(labelEl.htmlFor)) : null);
+                }
+
+                // If user tapped Apple's floating label (.form-textbox-label) or wrapper (.form-textbox), resolve the inner input/select
+                var textboxWrapper = rawTarget.closest ? rawTarget.closest('.form-textbox, idms-textbox, idms-dropdown, wc-birthday, .form-dropdown') : null;
+                if (textboxWrapper && !linkedInput) {
+                    linkedInput = textboxWrapper.querySelector('input, select, textarea, button, [role="button"], [role="combobox"]');
                 }
 
                 return linkedInput ||
-                    (rawTarget.closest ? rawTarget.closest('input, textarea, select, button, a, [class*="callingCode"], [class*="calling-code"], [class*="countryDropDown"], [class*="country-code"], [class*="countryCode"], [class*="dial-code"], [class*="dialCode"], [class*="birth"], [class*="dob"], [class*="birthday"], [class*="bday"], [class*="date-root"], [class*="date-picker"], [class*="datepicker"], [class*="hwid-"], .iti__selected-flag, .iti__selected-country, .iti__flag-container, .PhoneInputCountry, .selected-flag, .flag-dropdown, #countryList, [data-dial-code], [data-country-code], [data-datepicker], .MuiSelect-select, .ant-select-selector, .react-select__control, [role="button"], [role="checkbox"], [role="switch"], [role="radio"], [role="combobox"], [role="listbox"], [role="spinbutton"], [aria-haspopup], [contenteditable="true"], label') : null) ||
+                    (rawTarget.closest ? rawTarget.closest('input, textarea, select, button, a, [class*="callingCode"], [class*="calling-code"], [class*="countryDropDown"], [class*="country-code"], [class*="countryCode"], [class*="dial-code"], [class*="dialCode"], [class*="birth"], [class*="dob"], [class*="birthday"], [class*="bday"], [class*="date-root"], [class*="date-picker"], [class*="datepicker"], [class*="hwid-"], .iti__selected-flag, .iti__selected-country, .iti__flag-container, .PhoneInputCountry, .selected-flag, .flag-dropdown, #countryList, [data-dial-code], [data-country-code], [data-datepicker], .MuiSelect-select, .ant-select-selector, .react-select__control, .van-cell, .van-field, .weui-cell, .adm-list-item, [role="button"], [role="checkbox"], [role="switch"], [role="radio"], [role="combobox"], [role="listbox"], [role="spinbutton"], [aria-haspopup], [contenteditable="true"], label') : null) ||
                     rawTarget;
             }
 
             // Suppress soft keyboard on pointerdown / touchstart / focusin while in No-Type Recording mode
             function suppressKeyboardInRecordMode(e) {
                 if (!window._auraRecorderActive || window._auraPlaybackActive) return;
-                var target = resolveInteractiveTarget(e.target);
+                var target = resolveInteractiveTarget(resolveEventLeafTarget(e));
                 if (!target || !target.tagName) return;
                 var tag = target.tagName.toLowerCase();
                 var type = (target.type || '').toLowerCase();
@@ -450,13 +548,9 @@ object AutomationScripts {
                 }
             }
 
-            document.addEventListener('pointerdown', suppressKeyboardInRecordMode, true);
-            document.addEventListener('touchstart', suppressKeyboardInRecordMode, true);
-            document.addEventListener('focusin', suppressKeyboardInRecordMode, true);
-
             function reportElementCapture(e) {
                 if (!window._auraRecorderActive || window._auraPlaybackActive) return;
-                var interactive = resolveInteractiveTarget(e.target);
+                var interactive = resolveInteractiveTarget(resolveEventLeafTarget(e));
                 if (!interactive || !interactive.tagName) return;
 
                 var tag = interactive.tagName.toLowerCase();
@@ -466,7 +560,7 @@ object AutomationScripts {
 
                 // If user is clicking an option inside an already-open dropdown / bottom sheet right after grabbing the trigger,
                 // allow the option click to close the sheet without recording a duplicate noisy button step.
-                var insideOverlay = interactive.closest ? interactive.closest('[role="listbox"], [role="menu"], .iti__country-list, .MuiMenu-list, .MuiPopover-root, .ant-select-dropdown, .react-select__menu') : null;
+                var insideOverlay = interactive.closest ? interactive.closest('[role="listbox"], [role="menu"], .iti__country-list, .MuiMenu-list, .MuiPopover-root, .ant-select-dropdown, .react-select__menu, .van-popup, .weui-picker, .adm-popup') : null;
                 var isOptionRole = (role === 'option' || role === 'menuitem' || interactive.classList.contains('iti__country') || interactive.hasAttribute('data-dial-code'));
                 if ((insideOverlay || isOptionRole) &&
                     (now - window._auraLastCapturedTime) < 8000 &&
@@ -542,9 +636,9 @@ object AutomationScripts {
                         showGrabToastOnPage(interactive, '✓ Grabbed -> {{' + fieldKey + '}}', '#3B82F6');
                     }
                 } else if (tag === 'button' || role === 'button' || tag === 'a') {
-                    var btnTxt = (interactive.innerText || interactive.value || interactive.getAttribute('aria-label') || '').toLowerCase();
+                    var btnTxt = (interactive.innerText || interactive.value || interactive.getAttribute('aria-label') || interactive.id || '').toLowerCase();
                     var isNextOrLink = (tag === 'a') || /next|continue|proceed|step/i.test(btnTxt);
-                    if (!isNextOrLink && (type === 'submit' || /submit|sign.*up|register|create|login|log.*in|sign.*in|finish|send|confirm|verify/i.test(btnTxt))) {
+                    if (!isNextOrLink && (type === 'submit' || /submit|sign.*up|register|create|login|log.*in|sign.*in|sign-in|finish|send|confirm|verify/i.test(btnTxt))) {
                         action = 'SUBMIT';
                         try { e.preventDefault(); e.stopPropagation(); } catch (err) {}
                         showGrabToastOnPage(interactive, '✓ Grabbed Submit Button', '#10B981');
@@ -572,9 +666,29 @@ object AutomationScripts {
                 }
             }
 
-            document.addEventListener('click', function(e) {
-                reportElementCapture(e);
-            }, true);
+            function bindRecorderToRoot(root) {
+                if (!root || root._auraRecorderBound) return;
+                root._auraRecorderBound = true;
+                root.addEventListener('pointerdown', suppressKeyboardInRecordMode, true);
+                root.addEventListener('touchstart', suppressKeyboardInRecordMode, true);
+                root.addEventListener('focusin', suppressKeyboardInRecordMode, true);
+                root.addEventListener('click', reportElementCapture, true);
+                try {
+                    var all = root.querySelectorAll('*');
+                    for (var i = 0; i < all.length; i++) {
+                        var sr = all[i].shadowRoot || all[i]._auraShadowRoot;
+                        if (sr) bindRecorderToRoot(sr);
+                        if (all[i].tagName === 'IFRAME') {
+                            try {
+                                var idoc = all[i].contentDocument || (all[i].contentWindow && all[i].contentWindow.document);
+                                if (idoc) bindRecorderToRoot(idoc);
+                            } catch (ie) {}
+                        }
+                    }
+                } catch (e) {}
+            }
+
+            bindRecorderToRoot(document);
         })();
     """.trimIndent()
 
@@ -605,14 +719,40 @@ object AutomationScripts {
             var rawItems = [];
             var currentPageUrl = window.location.href || '';
 
+            try {
+                if (!Element.prototype._auraShadowPatched) {
+                    var origAttach = Element.prototype.attachShadow;
+                    if (origAttach) {
+                        Element.prototype.attachShadow = function(init) {
+                            var sr = origAttach.call(this, init);
+                            try { this._auraShadowRoot = sr; } catch (e) {}
+                            return sr;
+                        };
+                        Element.prototype._auraShadowPatched = true;
+                    }
+                }
+            } catch (e) {}
+
             function cssEscape(str) {
                 if (window.CSS && window.CSS.escape) return window.CSS.escape(str);
                 return String(str).replace(/([ !"#$%&'()*+,.\/:;<=>?@\[\\\]^`{|}~])/g, '\\$1');
             }
 
+            function getQueryRoot(targetEl) {
+                try {
+                    if (targetEl && typeof targetEl.getRootNode === 'function') {
+                        var rn = targetEl.getRootNode();
+                        if (rn && rn.querySelectorAll) return rn;
+                    }
+                    if (targetEl && targetEl.ownerDocument) return targetEl.ownerDocument;
+                } catch (e) {}
+                return document;
+            }
+
             function isUniqueSelector(sel, targetEl) {
                 try {
-                    var matches = document.querySelectorAll(sel);
+                    var root = getQueryRoot(targetEl);
+                    var matches = root.querySelectorAll(sel);
                     return matches.length === 1 && matches[0] === targetEl;
                 } catch (e) {
                     return false;
@@ -628,7 +768,7 @@ object AutomationScripts {
                     if (isUniqueSelector(idSel, el)) return idSel;
                 }
 
-                var testAttrs = ['data-testid', 'data-test', 'data-qa', 'data-cy', 'data-automation-id'];
+                var testAttrs = ['data-testid', 'data-test', 'data-qa', 'data-cy', 'data-automation-id', 'can-field'];
                 for (var t = 0; t < testAttrs.length; t++) {
                     var attr = testAttrs[t];
                     var val = el.getAttribute(attr);
@@ -663,9 +803,10 @@ object AutomationScripts {
                     if (isUniqueSelector(acSel, el)) return acSel;
                 }
 
+                var qRoot = getQueryRoot(el);
                 var path = [];
                 var curr = el;
-                while (curr && curr.nodeType === 1 && curr !== document.body && curr !== document.documentElement) {
+                while (curr && curr.nodeType === 1 && curr !== document.body && curr !== document.documentElement && curr !== qRoot) {
                     var seg = curr.tagName.toLowerCase();
                     if (curr.id) {
                         path.unshift('#' + cssEscape(curr.id));
@@ -694,14 +835,16 @@ object AutomationScripts {
             function getAssociatedLabelText(el) {
                 if (!el) return '';
                 var parts = [];
+                var qRoot = getQueryRoot(el);
                 try {
                     if (el.labels && el.labels.length > 0) {
                         for (var i = 0; i < el.labels.length; i++) {
                             parts.push(el.labels[i].innerText || el.labels[i].textContent || '');
                         }
                     }
-                    if (el.id) {
-                        var forLbl = document.querySelector('label[for="' + el.id.replace(/"/g, '\\"') + '"]');
+                    if (el.id && qRoot.querySelector) {
+                        var forLbl = qRoot.querySelector('label[for="' + el.id.replace(/"/g, '\\"') + '"]') ||
+                                     document.querySelector('label[for="' + el.id.replace(/"/g, '\\"') + '"]');
                         if (forLbl) parts.push(forLbl.innerText || forLbl.textContent || '');
                     }
                     var closestLbl = el.closest ? el.closest('label') : null;
@@ -710,28 +853,53 @@ object AutomationScripts {
                     if (ariaLabelledBy) {
                         var ids = ariaLabelledBy.split(/\s+/);
                         for (var j = 0; j < ids.length; j++) {
-                            var refEl = document.getElementById(ids[j]);
+                            var refEl = (qRoot.getElementById ? qRoot.getElementById(ids[j]) : null) || document.getElementById(ids[j]);
                             if (refEl) parts.push(refEl.innerText || refEl.textContent || '');
                         }
                     }
                     var prev = el.previousElementSibling;
                     if (prev && (prev.tagName === 'LABEL' || prev.tagName === 'SPAN' || prev.tagName === 'DIV')) {
                         var prevTxt = (prev.innerText || prev.textContent || '').trim();
-                        if (prevTxt.length < 60) parts.push(prevTxt);
+                        if (prevTxt.length < 70) parts.push(prevTxt);
                     }
-                    var fieldContainer = el.closest ? el.closest('.form-group, .field, .input-group, .form-field, .MuiFormControl-root, .ant-form-item, fieldset') : null;
+                    // Floating labels placed AFTER <input> (Apple Sign-In .form-textbox-label, Bootstrap form-floating, Material)
+                    var next = el.nextElementSibling;
+                    if (next && (next.tagName === 'LABEL' || next.tagName === 'SPAN' || next.tagName === 'DIV')) {
+                        var nextTxt = (next.innerText || next.textContent || '').trim();
+                        if (nextTxt.length > 0 && nextTxt.length < 70) parts.push(nextTxt);
+                    }
+                    var fieldContainer = el.closest ? el.closest('.form-textbox, .form-dropdown, .idms-textbox, .idms-dropdown, .form-group, .field, .input-group, .form-field, .MuiFormControl-root, .ant-form-item, .van-cell, .weui-cell, .adm-list-item, fieldset') : null;
                     if (fieldContainer) {
-                        var containerLbl = fieldContainer.querySelector('label, legend, .label, .form-label, .MuiFormLabel-root');
-                        if (containerLbl) parts.push(containerLbl.innerText || containerLbl.textContent || '');
+                        var containerLbls = fieldContainer.querySelectorAll('label, legend, .label, .form-label, .form-textbox-label, .form-dropdown-label, .MuiFormLabel-root, .van-field__label, .van-cell__title, .weui-label, .adm-list-item-content-prefix');
+                        for (var c = 0; c < containerLbls.length; c++) {
+                            var cTxt = (containerLbls[c].innerText || containerLbls[c].textContent || '').trim();
+                            if (cTxt.length > 0 && cTxt.length < 80) parts.push(cTxt);
+                        }
                     }
                 } catch (e) {}
                 return parts.join(' ').replace(/\s+/g, ' ').trim();
             }
 
+            function getDobContainerAndContext(el) {
+                var cur = el;
+                var depth = 0;
+                while (cur && cur !== document.body && cur !== document.documentElement && depth < 6) {
+                    var ownHint = ((cur.className && typeof cur.className === 'string' ? cur.className : '') + ' ' + (cur.id || '') + ' ' + (cur.getAttribute && (cur.getAttribute('aria-label') || cur.getAttribute('data-testid') || cur.getAttribute('can-field')) || '')).toLowerCase();
+                    var prevSibTxt = (cur.previousElementSibling ? (cur.previousElementSibling.innerText || cur.previousElementSibling.textContent || '') : '').trim();
+                    var innerTxt = (cur.innerText || cur.textContent || '').trim();
+                    var combinedTxt = (ownHint + ' ' + (prevSibTxt.length < 120 ? prevSibTxt : '') + ' ' + (innerTxt.length < 650 ? innerTxt : '')).toLowerCase();
+                    if (/date\s*of\s*birth|birth\s*date|birthday|\bdob\b|\bbday\b|born\s*on|year\s*of\s*birth|hwid.*birth|hwid.*date|wc-birthday/i.test(combinedTxt)) {
+                        return { container: cur, text: combinedTxt };
+                    }
+                    cur = cur.parentElement;
+                    depth++;
+                }
+                return null;
+            }
+
             function isCountryCodeTrigger(el, combined) {
                 if (!el) return false;
                 var tag = (el.tagName || '').toLowerCase();
-                // CRITICAL: An editable text/tel input is the PHONE NUMBER field, never a country code trigger!
                 if (tag === 'input' && !el.readOnly && el.type !== 'button' && el.type !== 'submit') return false;
                 var cls = (el.className && typeof el.className === 'string') ? el.className : '';
                 if (/callingCode|calling-code|countryDropDown|country-code|countryCode|dial-code|dialCode|phone-country|phoneprefix|iti__|PhoneInputCountry|selected-flag|flag-dropdown/i.test(cls)) return true;
@@ -740,9 +908,7 @@ object AutomationScripts {
                 if (/countrylist|country_code|country-code|countrycode|dialcode|dial_code|phone_country|calling_code|callingcode|phoneprefix/i.test(idAndName)) return true;
                 if (/country.*code|dial.*code|calling.*code|phone.*prefix|phone.*code|phone.*country|iti__selected-flag/i.test(combined)) return true;
                 var txt = (el.innerText || el.textContent || el.value || '').trim();
-                // Match e.g. +213(Algeria), +1, +44, etc.
                 if (txt.length <= 25 && /^\s*([^\w\s]{1,4}\s*)?([a-zA-Z]{2}\s*)?\+\d{1,4}/.test(txt)) return true;
-                var tag = (el.tagName || '').toLowerCase();
                 if (tag === 'select' && el.options && el.options.length > 3) {
                     var sampleOpts = '';
                     for (var i = 0; i < Math.min(el.options.length, 8); i++) {
@@ -771,15 +937,15 @@ object AutomationScripts {
                 if (hasPopup === 'listbox' || hasPopup === 'dialog' || hasPopup === 'menu' || hasPopup === 'true') return true;
                 if (el.hasAttribute('aria-expanded')) return true;
                 var cls = (el.className && typeof el.className === 'string') ? el.className : '';
-                if (/MuiSelect-select|ant-select-selector|react-select__control|v-select|el-select|select-trigger|dropdown-toggle|custom-select|picker-trigger|bottom-sheet-trigger|hwid-countryDropDown|hwid-select|hwid-drop/i.test(cls)) {
+                if (/MuiSelect-select|ant-select-selector|react-select__control|v-select|el-select|select-trigger|dropdown-toggle|custom-select|picker-trigger|bottom-sheet-trigger|hwid-countryDropDown|hwid-select|hwid-drop|form-dropdown|idms-dropdown|van-cell--clickable|weui-cell_access|adm-list-item/i.test(cls)) {
                     return true;
                 }
-                if (tag === 'input' && el.readOnly && /select|choose|pick|country|gender|state|month|day|year|category/i.test(combined)) {
+                if (tag === 'input' && el.readOnly && /select|choose|pick|country|region|gender|state|month|day|year|birth|dob|date|category/i.test(combined)) {
                     return true;
                 }
                 var txt = (el.innerText || el.textContent || el.placeholder || '').trim();
                 if ((tag === 'button' || role === 'button' || tag === 'div' || tag === 'span') &&
-                    (/^(select|choose|pick)\b/i.test(txt) || /\b(gender|sex|country|state|province|month|day|year)\b/i.test(combined)) &&
+                    (/^(select|choose|pick)\b/i.test(txt) || /\b(gender|sex|country|region|state|province|month|day|year|birthday|birth\s*date|date\s*of\s*birth)\b/i.test(combined)) &&
                     !/submit|sign.*up|register|login|log.*in|continue|next/i.test(txt)) {
                     return true;
                 }
@@ -792,12 +958,16 @@ object AutomationScripts {
                 var isBtnLike = (tag === 'button' || type === 'button' || el.getAttribute('role') === 'button' || tag === 'a');
                 if (!isBtnLike) return false;
                 if (type === 'submit') return false;
+                var elId = (el.id || '').toLowerCase();
+                if (elId === 'sign-in' || elId === 'continue-password' || elId === 'sign-in-cancel') {
+                    if (elId === 'sign-in-cancel') return true;
+                    return false;
+                }
 
-                // Ignore password show/hide eye toggles, clear input buttons, close/dismiss modals, and header/footer chrome
-                if (/show.*pass|hide.*pass|toggle.*pass|reveal.*pass|clear.*input|dismiss|close|cancel|cookie|skip.*to.*content|menu|navbar|navigation|theme|dark.*mode|language/i.test(combinedText)) {
+                if (/show.*pass|hide.*pass|toggle.*pass|reveal.*pass|clear.*input|dismiss|close|cancel|cookie|skip.*to.*content|menu|navbar|navigation|theme|dark.*mode|language|forgot.*password|iforgot/i.test(combinedText)) {
                     return true;
                 }
-                if (el.closest && el.closest('nav, header, footer, [role="navigation"], [role="banner"], [role="contentinfo"]')) {
+                if (el.closest && el.closest('nav, header, footer, #ac-globalnav, #globalnav, .ac-gn-content, [role="navigation"], [role="banner"], [role="contentinfo"]')) {
                     if (!/sign.*up|register|create.*account/i.test(combinedText)) {
                         return true;
                     }
@@ -808,25 +978,34 @@ object AutomationScripts {
             function classifySemanticType(el, tag, type, name, id, placeholder, text, ariaLabel, labelText, inputIndex) {
                 var ac = (el.autocomplete || '').toLowerCase();
                 var inputMode = (el.getAttribute('inputmode') || '').toLowerCase();
-                var combined = (name + ' ' + id + ' ' + placeholder + ' ' + text + ' ' + ariaLabel + ' ' + labelText + ' ' + ac).toLowerCase();
-                var fieldHint = (name + ' ' + id + ' ' + placeholder + ' ' + ariaLabel + ' ' + (text.length < 25 ? text : '') + ' ' + (el.className || '')).toLowerCase();
+                var canField = (el.getAttribute('can-field') || '').toLowerCase();
+                var combined = (name + ' ' + id + ' ' + placeholder + ' ' + text + ' ' + ariaLabel + ' ' + labelText + ' ' + ac + ' ' + canField).toLowerCase();
+                var fieldHint = (name + ' ' + id + ' ' + placeholder + ' ' + ariaLabel + ' ' + canField + ' ' + (text.length < 30 ? text : '') + ' ' + (el.className || '')).toLowerCase();
                 var isDropTrigger = isCustomDropdownTrigger(el, tag, combined);
 
                 if (type === 'file' || (tag === 'input' && /upload|resume|document|avatar|attachment|file|cv/i.test(combined))) {
                     return 'FILE_UPLOAD';
                 }
-                if (type === 'password' || ac === 'new-password' || ac === 'current-password' || ((tag === 'input') && /pass|pwd/i.test(combined))) {
+                if (type === 'password' || ac === 'new-password' || ac === 'current-password' || id === 'password_text_field' || canField === 'password' || ((tag === 'input') && /pass|pwd/i.test(combined))) {
                     if (/confirm|repeat|retype|re-enter|verify|match|again|pass.*2/i.test(combined)) {
                         return 'CONFIRM_PASSWORD';
                     }
                     return 'PASSWORD';
                 }
 
-                // 2. Phone input check: If editable input with phone placeholder or inside callingCodePhone container
+                // Apple Sign-In / Apple Account identifier field
+                if (id === 'account_name_text_field' || canField === 'accountName' || /apple\s*id|email\s*or\s*phone/i.test(combined)) {
+                    if (tag === 'input' || tag === 'textarea' || el.isContentEditable) {
+                        return 'EMAIL';
+                    }
+                }
+
                 if (tag === 'input' && !el.readOnly && el.type !== 'button' && el.type !== 'submit') {
                     var parentPhoneCont = el.closest ? el.closest('.hwid-callingCodePhone-root, [class*="callingCode"], .iti, .PhoneInput, .react-tel-input, .phone-input') : null;
                     if (type === 'tel' || /phone|mobile|cell|telephone|whatsapp|contact.*num/i.test(placeholder + ' ' + name + ' ' + id) || parentPhoneCont) {
-                        return 'PHONE';
+                        if (!/day|dd|month|mm|year|yyyy|birth|dob|bday/i.test(placeholder + ' ' + name + ' ' + id + ' ' + ariaLabel)) {
+                            return 'PHONE';
+                        }
                     }
                 }
 
@@ -840,20 +1019,15 @@ object AutomationScripts {
                     return 'USERNAME';
                 }
 
-                // IMPORTANT: Classify Split DOB (Day, Month, Year) and Full DOB BEFORE PHONE (type="tel"),
-                // because Google, Yahoo, and mobile forms use <input type="tel" id="day"|"year"> for birthday parts!
-                var ownInputHint = (name + ' ' + id + ' ' + placeholder + ' ' + ariaLabel + ' ' + ac).toLowerCase();
-                if (tag === 'input' && (type === 'date' || (/birthday|birthdate|date.?of.?birth|\bdob\b|datepicker|^bday$/i.test(ownInputHint) && !/\b(day|dd|month|mm|year|yyyy|yr|dob_day|dob_month|dob_year|birth_day|birth_month|birth_year|bday-day|bday-month|bday-year)\b/i.test(ownInputHint)))) {
+                var ownInputHint = (name + ' ' + id + ' ' + placeholder + ' ' + ariaLabel + ' ' + ac + ' ' + canField).toLowerCase();
+                if (tag === 'input' && (type === 'date' || (/birthday|birthdate|date.?of.?birth|\bdob\b|datepicker|^bday$|mm\/dd\/yyyy|dd\/mm\/yyyy|yyyy-mm-dd/i.test(ownInputHint + ' ' + labelText) && !/\b(day|dd|month|mm|year|yyyy|yr|dob_day|dob_month|dob_year|birth_day|birth_month|birth_year|bday-day|bday-month|bday-year)\b/i.test(ownInputHint)))) {
                     return 'DOB';
                 }
 
-                var dobContainer = el.closest ? el.closest('[class*="birth"], [class*="dob"], [class*="bday"], [class*="date-root"], [class*="date-wrapper"], .hwid-register-inputsContainer, .form-group, .field, .input-group, div') : null;
-                var dobContextText = '';
-                if (dobContainer) {
-                    var rawCTxt = (dobContainer.innerText || dobContainer.textContent || '').trim();
-                    if (rawCTxt.length < 250) dobContextText = rawCTxt.toLowerCase();
-                }
-                var isDobContext = /date\s*of\s*birth|birth\s*date|birthday|\bdob\b|hwid.*birth|hwid.*date/i.test(dobContextText + ' ' + combined);
+                var dobInfo = getDobContainerAndContext(el);
+                var dobContainer = dobInfo ? dobInfo.container : null;
+                var dobContextText = dobInfo ? dobInfo.text : '';
+                var isDobContext = !!dobInfo || /date\s*of\s*birth|birth\s*date|birthday|\bdob\b|hwid.*birth|hwid.*date/i.test(combined);
 
                 if (ac === 'bday-day' || /^(day|dd|birth_day|dob_day|bday_day|birthday_day|date_day)$/i.test(name) || /^(day|dd|birth_day|dob_day|bday-day)$/i.test(id) || /\b(birth[_-]day|dob[_-]?day|bday[_-]day|birthday[_-]day|select.*day|^day$|^dd$)\b/i.test(fieldHint) || (isDobContext && /\b(day|dd)\b/i.test(fieldHint) && !/birthday|today|everyday/i.test(fieldHint))) return 'DOB_DAY';
                 if (ac === 'bday-month' || /^(month|mm|birth_month|dob_month|bday_month|birthday_month|date_month)$/i.test(name) || /^(month|mm|birth_month|dob_month|bday-month)$/i.test(id) || /\b(birth[_-]month|dob[_-]?month|bday[_-]month|birthday[_-]month|select.*month|^month$|^mm$)\b/i.test(fieldHint) || (isDobContext && /\b(month|mm)\b/i.test(fieldHint))) return 'DOB_MONTH';
@@ -864,7 +1038,7 @@ object AutomationScripts {
                     if (/^(19\d\d|20\d\d)$/.test(cleanNumericText)) return 'DOB_YEAR';
                     if (/^(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)$/i.test(text)) return 'DOB_MONTH';
 
-                    if (dobContainer && tag !== 'input') {
+                    if (dobContainer) {
                         var elRect = el.getBoundingClientRect();
                         var allTriggers = dobContainer.querySelectorAll('[class*="select"], [class*="drop"], [class*="picker"], button, [role="combobox"], [role="button"], [role="spinbutton"], input, select');
                         var leafTriggers = [];
@@ -872,7 +1046,7 @@ object AutomationScripts {
                             var sibT = allTriggers[lt];
                             if (sibT.querySelector && sibT.querySelector('button, [class*="select"], [class*="drop"], input, select')) continue;
                             var sibRect = sibT.getBoundingClientRect();
-                            if (leafTriggers.indexOf(sibT) < 0 && sibRect.width > 12 && Math.abs(sibRect.top - elRect.top) < 36) {
+                            if (leafTriggers.indexOf(sibT) < 0 && sibRect.width > 12 && Math.abs(sibRect.top - elRect.top) < 42) {
                                 leafTriggers.push(sibT);
                             }
                         }
@@ -884,16 +1058,21 @@ object AutomationScripts {
                                 }
                             }
                             if (myIndex >= 0) {
-                                var lastIsYear = leafTriggers.some(function(t, idx) { return idx === 2 && /19\d\d|20\d\d|year/i.test(t.innerText || ''); });
-                                var firstIsYear = leafTriggers.some(function(t, idx) { return idx === 0 && /19\d\d|20\d\d|year/i.test(t.innerText || ''); });
-                                if (lastIsYear || (!firstIsYear && (myIndex === 0 || myIndex === 1 || myIndex === 2))) {
-                                    if (myIndex === 0) return 'DOB_DAY';
-                                    if (myIndex === 1) return 'DOB_MONTH';
+                                var firstTxt = (leafTriggers[0].innerText || leafTriggers[0].placeholder || leafTriggers[0].getAttribute('aria-label') || '').toLowerCase();
+                                var firstIsMonth = /month|mm|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec/i.test(firstTxt);
+                                var firstIsYear = /19\d\d|20\d\d|year|yyyy/i.test(firstTxt);
+                                if (firstIsMonth) {
+                                    if (myIndex === 0) return 'DOB_MONTH';
+                                    if (myIndex === 1) return 'DOB_DAY';
                                     if (myIndex === 2) return 'DOB_YEAR';
                                 } else if (firstIsYear) {
                                     if (myIndex === 0) return 'DOB_YEAR';
                                     if (myIndex === 1) return 'DOB_MONTH';
                                     if (myIndex === 2) return 'DOB_DAY';
+                                } else {
+                                    if (myIndex === 0) return 'DOB_DAY';
+                                    if (myIndex === 1) return 'DOB_MONTH';
+                                    if (myIndex === 2) return 'DOB_YEAR';
                                 }
                             }
                         }
@@ -904,7 +1083,6 @@ object AutomationScripts {
                         if (asNum > 31 && asNum >= 1900 && asNum <= 2099) return 'DOB_YEAR';
                         if (asNum > 12 && asNum <= 31) return 'DOB_DAY';
                     }
-                    if (tag === 'input' && (type === 'date' || type === 'text')) return 'DOB';
                     return 'DOB';
                 }
 
@@ -959,8 +1137,8 @@ object AutomationScripts {
                     return 'DROPDOWN';
                 }
                 if (tag === 'button' || type === 'submit' || type === 'button' || el.getAttribute('role') === 'button') {
+                    if (id === 'sign-in' || id === 'continue-password' || /continue|next|proceed|forward|step/i.test(combined)) return 'NEXT_BUTTON';
                     if (type === 'submit' || /submit|sign.*up|create.*account|register|finish|done|log.*in|sign.*in|send|save|apply|confirm|verify|join/i.test(combined)) return 'SUBMIT_BUTTON';
-                    if (/next|continue|proceed|forward|step/i.test(combined)) return 'NEXT_BUTTON';
                     return 'GENERIC_BUTTON';
                 }
                 if (tag === 'input' || tag === 'textarea' || el.isContentEditable) {
@@ -972,8 +1150,10 @@ object AutomationScripts {
                 return 'GENERIC_BUTTON';
             }
 
-            // Deep collector across main document, open Shadow DOMs, and accessible same-origin iframes
-            var candidateQuery = 'input, textarea, select, button, [role="button"], [role="combobox"], [role="listbox"], [role="spinbutton"], [role="checkbox"], [role="switch"], [role="radio"], [aria-haspopup="listbox"], [aria-haspopup="dialog"], [aria-haspopup="menu"], [aria-expanded], [contenteditable="true"], [class*="callingCode"], [class*="calling-code"], [class*="countryDropDown"], [class*="countryCode"], [class*="country-code"], [class*="dialCode"], [class*="dial-code"], [class*="birth"], [class*="dob"], [class*="birthday"], [class*="date-root"], [class*="date-picker"], [class*="datepicker"], [class*="hwid-"], [class*="select-trigger"], [class*="dropdown-trigger"], [class*="picker-trigger"], .iti__selected-flag, .iti__selected-country, .iti__flag-container, .PhoneInputCountry, .PhoneInputCountrySelect, .selected-flag, .flag-dropdown, #countryList, [data-dial-code], [data-country-code], [data-datepicker], .MuiSelect-select, .ant-select-selector, .react-select__control, .dropzone';
+            // Deep collector across main document, open & closed Shadow DOMs, and accessible same-origin iframes
+            var candidateQuery = 'input, textarea, select, button, [role="button"], [role="combobox"], [role="listbox"], [role="spinbutton"], [role="checkbox"], [role="switch"], [role="radio"], [aria-haspopup="listbox"], [aria-haspopup="dialog"], [aria-haspopup="menu"], [aria-expanded], [contenteditable="true"], [can-field], [class*="callingCode"], [class*="calling-code"], [class*="countryDropDown"], [class*="countryCode"], [class*="country-code"], [class*="dialCode"], [class*="dial-code"], [class*="birth"], [class*="dob"], [class*="birthday"], [class*="date-root"], [class*="date-picker"], [class*="datepicker"], [class*="hwid-"], [class*="select-trigger"], [class*="dropdown-trigger"], [class*="picker-trigger"], .iti__selected-flag, .iti__selected-country, .iti__flag-container, .PhoneInputCountry, .PhoneInputCountrySelect, .selected-flag, .flag-dropdown, #countryList, [data-dial-code], [data-country-code], [data-datepicker], .MuiSelect-select, .ant-select-selector, .react-select__control, .van-cell--clickable, .weui-cell_access, .adm-list-item, .dropzone';
+
+            var crossOriginAuthIframes = [];
 
             function collectDeepElements(root, outList) {
                 if (!root) return;
@@ -985,15 +1165,25 @@ object AutomationScripts {
                     var allNodes = root.querySelectorAll('*');
                     for (var j = 0; j < allNodes.length; j++) {
                         var node = allNodes[j];
-                        if (node.shadowRoot) {
-                            collectDeepElements(node.shadowRoot, outList);
+                        var sr = node.shadowRoot || node._auraShadowRoot;
+                        if (sr) {
+                            collectDeepElements(sr, outList);
                         }
                         if (node.tagName === 'IFRAME') {
                             try {
-                                if (node.contentDocument) {
-                                    collectDeepElements(node.contentDocument, outList);
+                                var idoc = node.contentDocument || (node.contentWindow && node.contentWindow.document);
+                                if (idoc && idoc.body && idoc.body.children && idoc.body.children.length > 0) {
+                                    collectDeepElements(idoc, outList);
+                                } else {
+                                    var iframeSrc = node.getAttribute('src') || node.src || '';
+                                    var iframeId = node.id || '';
+                                    if (iframeId === 'aid-auth-widget-iFrame' || /idmsa\.apple\.com|appleauth|signin|login|auth|account|register|signup/i.test(iframeSrc + ' ' + iframeId + ' ' + (node.name || ''))) {
+                                        crossOriginAuthIframes.push(node);
+                                    }
                                 }
-                            } catch (iframeErr) {}
+                            } catch (iframeErr) {
+                                crossOriginAuthIframes.push(node);
+                            }
                         }
                     }
                 } catch (e) {}
@@ -1005,6 +1195,7 @@ object AutomationScripts {
             var seenSelectors = {};
             var seenRadioGroups = {};
             var textInputCounter = 0;
+            var hiddenOrderCounter = 0;
 
             function processCandidate(el, allowHiddenStepFields) {
                 if (!el || el.disabled) return;
@@ -1101,11 +1292,6 @@ object AutomationScripts {
                     el.setAttribute('inputmode', 'none');
                 }
 
-                // Priority for smart workflow ordering:
-                // 1 = Inputs, Dropdowns, Country Codes, DOB Pickers
-                // 2 = Checkboxes & Radios
-                // 3 = Next/Submit Buttons
-                // 4 = Generic Buttons
                 var orderPriority = 4;
                 if (isInput) orderPriority = 1;
                 else if (semantic === 'CHECKBOX' || semantic === 'CHECKBOX_TERMS' || semantic === 'RADIO_OPTION') orderPriority = 2;
@@ -1123,6 +1309,12 @@ object AutomationScripts {
                     }
                 }
 
+                var computedTop = rect.top || 0;
+                if (allowHiddenStepFields && rect.width < 4 && rect.height < 4) {
+                    hiddenOrderCounter++;
+                    computedTop = 10000 + hiddenOrderCounter;
+                }
+
                 rawItems.push({
                     tagName: tag,
                     type: type,
@@ -1137,7 +1329,7 @@ object AutomationScripts {
                     semanticType: semantic,
                     detectedOptions: options,
                     _priority: orderPriority,
-                    _top: rect.top || 0
+                    _top: computedTop
                 });
             }
 
@@ -1146,32 +1338,36 @@ object AutomationScripts {
                 processCandidate(el, false);
             });
 
-            // Dedicated pass for custom segmented Date of Birth containers (e.g. Huawei ID 28 ▼, 10 ▼, 2006 ▼)
-            var dobRoots = document.querySelectorAll('[class*="birth"], [class*="dob"], [class*="bday"], [class*="date-root"], [class*="date-wrapper"], .hwid-register-inputsContainer, .form-group, .field, .input-group, div');
+            // Dedicated pass for custom segmented Date of Birth & Single Bottom-Sheet Birthday triggers
+            var dobRoots = document.querySelectorAll('wc-birthday, [class*="birth"], [class*="dob"], [class*="bday"], [class*="date-root"], [class*="date-wrapper"], .hwid-register-inputsContainer, .form-group, .field, .input-group, .van-cell, .weui-cell, .adm-list-item, div');
             for (var dr = 0; dr < dobRoots.length; dr++) {
                 var dobRoot = dobRoots[dr];
-                var rootTxt = (dobRoot.innerText || dobRoot.textContent || '').trim();
-                if (!/date\s*of\s*birth|birth\s*date|birthday|\bdob\b/i.test(rootTxt)) continue;
-                if (rootTxt.length > 250) continue;
-                var dobTriggers = dobRoot.querySelectorAll('[class*="select"], [class*="drop"], [class*="picker"], [class*="item"], [class*="box"], button, [role="combobox"], [role="button"], [role="spinbutton"], div, span');
+                var prevSib = dobRoot.previousElementSibling;
+                var prevSibTxt = prevSib ? (prevSib.innerText || prevSib.textContent || '').trim() : '';
+                var rootTxt = ((dobRoot.innerText || dobRoot.textContent || '') + ' ' + (prevSibTxt.length < 100 ? prevSibTxt : '')).trim();
+                if (!/date\s*of\s*birth|birth\s*date|birthday|\bdob\b/i.test(rootTxt + ' ' + (dobRoot.className || '') + ' ' + (dobRoot.id || ''))) continue;
+                if (rootTxt.length > 650) continue;
+                var dobTriggers = dobRoot.querySelectorAll('input, select, [class*="select"], [class*="drop"], [class*="picker"], [class*="item"], [class*="box"], button, [role="combobox"], [role="button"], [role="spinbutton"], div, span');
                 var leafDob = [];
                 for (var dt = 0; dt < dobTriggers.length; dt++) {
                     var candTr = dobTriggers[dt];
-                    if (candTr.querySelector && candTr.querySelector('button, [class*="select"], [class*="drop"], [class*="picker"]')) continue;
+                    if (candTr.querySelector && candTr.querySelector('input, select, button, [class*="select"], [class*="drop"], [class*="picker"]')) continue;
                     var r = candTr.getBoundingClientRect();
                     if (r.width < 10 || r.height < 10) continue;
                     var tTxt = (candTr.innerText || candTr.textContent || '').trim();
-                    if (/date\s*of\s*birth|birthday/i.test(tTxt)) continue;
+                    if (/^(date\s*of\s*birth|birthday|birth\s*date):?$/i.test(tTxt)) continue;
                     leafDob.push(candTr);
                 }
                 if (leafDob.length >= 3) {
                     for (var ld = 0; ld < leafDob.length; ld++) {
                         processCandidate(leafDob[ld], false);
                     }
+                } else if (leafDob.length === 1) {
+                    processCandidate(leafDob[0], false);
                 }
             }
 
-            // Dedicated pass for Phone / Calling Code containers (e.g. .hwid-callingCodePhone-root, .iti)
+            // Dedicated pass for Phone / Calling Code containers
             var phoneContainers = document.querySelectorAll('.hwid-callingCodePhone-root, [class*="callingCode"], [class*="calling-code"], .iti, .PhoneInput, .react-tel-input, .phone-input');
             for (var pc = 0; pc < phoneContainers.length; pc++) {
                 var pCont = phoneContainers[pc];
@@ -1181,15 +1377,92 @@ object AutomationScripts {
                 if (codeTrig && codeTrig !== phoneInp) processCandidate(codeTrig, false);
             }
 
-            // Pass 2: Multi-step wizard / delayed reveal fallback if fewer than 2 inputs were visible
+            // Pass 2: Always check for deferred / collapsed password or 2-step wizard fields (e.g., Apple Sign-In #password_text_field)
+            var hasPasswordField = rawItems.some(function(item) { return item.semanticType === 'PASSWORD'; });
             var foundInputCount = rawItems.filter(function(item) { return item.isInput; }).length;
-            if (foundInputCount < 2) {
+            if (!hasPasswordField || foundInputCount < 2) {
                 elements.forEach(function(el) {
                     processCandidate(el, true);
                 });
             }
 
-            // Sort elements into logical execution order: Inputs/Selects/DOB/Country (top-to-bottom) -> Checkboxes/Radios -> Submit/Next buttons
+            // Cross-origin Auth Iframe Handler (e.g. Apple Sign-In #aid-auth-widget-iFrame on appleid.apple.com / account.apple.com / icloud.com)
+            if (rawItems.filter(function(item) { return item.isInput; }).length === 0 && crossOriginAuthIframes.length > 0) {
+                var authFrame = crossOriginAuthIframes[0];
+                var authSrc = authFrame.getAttribute('src') || authFrame.src || '';
+                if (authSrc && window.AuraAutomation && window.AuraAutomation.onAuthIframeDetected) {
+                    try { window.AuraAutomation.onAuthIframeDetected(authSrc); } catch (e) {}
+                }
+                var isAppleAuth = /apple\.com|icloud\.com|appleauth/i.test(currentPageUrl + ' ' + authSrc + ' ' + (authFrame.id || ''));
+                if (isAppleAuth) {
+                    var targetAuthUrl = authSrc || currentPageUrl;
+                    rawItems.push({
+                        tagName: 'input',
+                        type: 'text',
+                        nameAttr: 'accountName',
+                        idAttr: 'account_name_text_field',
+                        placeholder: 'Email or Phone Number',
+                        text: 'Email or Phone Number',
+                        selector: '#account_name_text_field',
+                        pageUrl: targetAuthUrl,
+                        isInput: true,
+                        isButton: false,
+                        semanticType: 'EMAIL',
+                        detectedOptions: [],
+                        _priority: 1,
+                        _top: 100
+                    });
+                    rawItems.push({
+                        tagName: 'input',
+                        type: 'password',
+                        nameAttr: 'password',
+                        idAttr: 'password_text_field',
+                        placeholder: 'Password',
+                        text: 'Password',
+                        selector: '#password_text_field',
+                        pageUrl: targetAuthUrl,
+                        isInput: true,
+                        isButton: false,
+                        semanticType: 'PASSWORD',
+                        detectedOptions: [],
+                        _priority: 1,
+                        _top: 200
+                    });
+                    rawItems.push({
+                        tagName: 'input',
+                        type: 'checkbox',
+                        nameAttr: 'rememberMe',
+                        idAttr: 'remember-me',
+                        placeholder: 'Keep me signed in',
+                        text: 'Keep me signed in',
+                        selector: '#remember-me',
+                        pageUrl: targetAuthUrl,
+                        isInput: false,
+                        isButton: false,
+                        semanticType: 'CHECKBOX',
+                        detectedOptions: [],
+                        _priority: 2,
+                        _top: 300
+                    });
+                    rawItems.push({
+                        tagName: 'button',
+                        type: 'submit',
+                        nameAttr: '',
+                        idAttr: 'sign-in',
+                        placeholder: 'Sign In / Continue',
+                        text: 'Sign In',
+                        selector: '#sign-in',
+                        pageUrl: targetAuthUrl,
+                        isInput: false,
+                        isButton: true,
+                        semanticType: 'SUBMIT_BUTTON',
+                        detectedOptions: [],
+                        _priority: 3,
+                        _top: 400
+                    });
+                }
+            }
+
             rawItems.sort(function(a, b) {
                 if (a._priority !== b._priority) return a._priority - b._priority;
                 return a._top - b._top;
@@ -1232,20 +1505,22 @@ object AutomationScripts {
             window._auraPlaybackActive = true;
             window._auraRecorderActive = false;
             function queryDeep(root, sel) {
-                if (!sel) return null;
+                if (!sel || !root) return null;
                 try {
                     var found = root.querySelector(sel);
                     if (found) return found;
                     var all = root.querySelectorAll('*');
                     for (var i = 0; i < all.length; i++) {
-                        if (all[i].shadowRoot) {
-                            var sub = queryDeep(all[i].shadowRoot, sel);
+                        var sr = all[i].shadowRoot || all[i]._auraShadowRoot;
+                        if (sr) {
+                            var sub = queryDeep(sr, sel);
                             if (sub) return sub;
                         }
                         if (all[i].tagName === 'IFRAME') {
                             try {
-                                if (all[i].contentDocument) {
-                                    var iframeSub = queryDeep(all[i].contentDocument, sel);
+                                var idoc = all[i].contentDocument || (all[i].contentWindow && all[i].contentWindow.document);
+                                if (idoc) {
+                                    var iframeSub = queryDeep(idoc, sel);
                                     if (iframeSub) return iframeSub;
                                 }
                             } catch (ie) {}
@@ -1254,16 +1529,49 @@ object AutomationScripts {
                 } catch (e) {}
                 return null;
             }
+            function collectAllDeepCandidates(root, outArr) {
+                if (!root) return;
+                try {
+                    var list = root.querySelectorAll('input, textarea, select, button, [role="button"], [role="combobox"], [role="listbox"], [role="checkbox"], [role="radio"], [aria-haspopup], [can-field], .iti__selected-flag, .PhoneInputCountry, [data-dial-code], .van-cell, .weui-cell, .adm-list-item, a, label');
+                    for (var i = 0; i < list.length; i++) outArr.push(list[i]);
+                    var all = root.querySelectorAll('*');
+                    for (var j = 0; j < all.length; j++) {
+                        var sr = all[j].shadowRoot || all[j]._auraShadowRoot;
+                        if (sr) collectAllDeepCandidates(sr, outArr);
+                        if (all[j].tagName === 'IFRAME') {
+                            try {
+                                var idoc = all[j].contentDocument || (all[j].contentWindow && all[j].contentWindow.document);
+                                if (idoc) collectAllDeepCandidates(idoc, outArr);
+                            } catch (ie) {}
+                        }
+                    }
+                } catch (e) {}
+            }
             var el = queryDeep(document, '$escapedSelector');
             if (!el && '$escapedHint') {
                 var hint = '$escapedHint';
-                var candidates = document.querySelectorAll('input, textarea, select, button, [role="button"], [role="combobox"], [role="listbox"], [role="checkbox"], [role="radio"], [aria-haspopup], .iti__selected-flag, .PhoneInputCountry, [data-dial-code], a, label');
+                var candidates = [];
+                collectAllDeepCandidates(document, candidates);
                 for (var c = 0; c < candidates.length; c++) {
                     var cand = candidates[c];
-                    var blob = ((cand.name || '') + ' ' + (cand.id || '') + ' ' + (cand.placeholder || '') + ' ' + (cand.getAttribute('aria-label') || '') + ' ' + (cand.innerText || cand.value || '')).toLowerCase();
+                    var nextSibTxt = (cand.nextElementSibling ? (cand.nextElementSibling.innerText || cand.nextElementSibling.textContent || '') : '').trim();
+                    var blob = ((cand.name || '') + ' ' + (cand.id || '') + ' ' + (cand.placeholder || '') + ' ' + (cand.getAttribute('aria-label') || '') + ' ' + (cand.getAttribute('can-field') || '') + ' ' + (cand.innerText || cand.value || '') + ' ' + nextSibTxt).toLowerCase();
                     if (blob.indexOf(hint) >= 0) {
                         el = cand;
                         break;
+                    }
+                }
+            }
+            if (!el) {
+                var authIframe = document.querySelector('#aid-auth-widget-iFrame, iframe[src*="idmsa.apple.com"], iframe[src*="appleauth"]');
+                if (authIframe) {
+                    var aSrc = authIframe.getAttribute('src') || authIframe.src || '';
+                    if (aSrc && aSrc.indexOf('http') === 0) {
+                        if (window.AuraAutomation && window.AuraAutomation.onAuthIframeDetected) {
+                            try { window.AuraAutomation.onAuthIframeDetected(aSrc); } catch (e) {}
+                        } else {
+                            try { window.location.href = aSrc; } catch (e) {}
+                        }
                     }
                 }
             }
@@ -1273,6 +1581,12 @@ object AutomationScripts {
                     if (p.hasAttribute && p.hasAttribute('hidden')) {
                         p.removeAttribute('hidden');
                     }
+                    if (p.getAttribute && p.getAttribute('aria-hidden') === 'true') {
+                        p.setAttribute('aria-hidden', 'false');
+                    }
+                    if (p.classList) {
+                        p.classList.remove('hide', 'hidden', 'collapsed', 'is-hidden');
+                    }
                     try {
                         var st = window.getComputedStyle(p);
                         if (st && st.display === 'none') {
@@ -1280,6 +1594,13 @@ object AutomationScripts {
                         }
                         if (st && st.visibility === 'hidden') {
                             p.style.visibility = 'visible';
+                        }
+                        if (st && parseFloat(st.opacity) === 0 && p !== el) {
+                            p.style.opacity = '1';
+                        }
+                        if (st && (st.maxHeight === '0px' || st.height === '0px')) {
+                            p.style.maxHeight = 'none';
+                            p.style.height = 'auto';
                         }
                     } catch (e) {}
                     p = p.parentElement;
@@ -1298,7 +1619,7 @@ object AutomationScripts {
      */
     private fun jsOverlayAndPickerHelpers(): String {
         return """
-            function isNodeVisible(node) {
+            function isNodeVisible(node, allowOffscreenInScrollable) {
                 if (!node || node.nodeType !== 1) return false;
                 if (node.closest && node.closest('.aura-hud')) return false;
                 try {
@@ -1310,24 +1631,80 @@ object AutomationScripts {
                         cur = cur.parentElement;
                     }
                     var r = node.getBoundingClientRect();
-                    return r.width > 4 && r.height > 4;
+                    if (r.width <= 3 || r.height <= 3) return false;
+                    if (!allowOffscreenInScrollable) {
+                        if (r.bottom < -40 || r.top > window.innerHeight + 40) return false;
+                    }
+                    return true;
                 } catch (e) {
                     return false;
                 }
             }
 
-            function dispatchHumanTap(targetEl) {
+            function scrollNodeIntoScrollableAncestorsSync(targetEl) {
                 if (!targetEl) return;
                 try {
-                    targetEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                    targetEl.scrollIntoView({ block: 'center', inline: 'nearest' });
+                } catch (e) {
+                    try { targetEl.scrollIntoView(false); } catch (e2) {}
+                }
+                try {
+                    var cur = targetEl.parentElement;
+                    while (cur && cur !== document.body && cur !== document.documentElement) {
+                        var st = window.getComputedStyle(cur);
+                        var ovY = st ? st.overflowY : '';
+                        if ((ovY === 'auto' || ovY === 'scroll' || ovY === 'overlay' || cur.scrollHeight > cur.clientHeight + 8) && cur.clientHeight > 20) {
+                            var cRect = cur.getBoundingClientRect();
+                            var tRect = targetEl.getBoundingClientRect();
+                            var offsetTopInContainer = (tRect.top - cRect.top) + cur.scrollTop;
+                            var desiredScrollTop = offsetTopInContainer - (cur.clientHeight / 2) + (tRect.height / 2);
+                            cur.scrollTop = Math.max(0, desiredScrollTop);
+                            cur.dispatchEvent(new Event('scroll', { bubbles: true }));
+                        }
+                        cur = cur.parentElement;
+                    }
                 } catch (e) {}
+            }
+
+            function dispatchHumanTap(targetEl) {
+                if (!targetEl) return;
+                scrollNodeIntoScrollableAncestorsSync(targetEl);
                 if (targetEl.tagName && (targetEl.tagName.toLowerCase() === 'input' || targetEl.tagName.toLowerCase() === 'textarea')) {
                     targetEl.setAttribute('inputmode', 'none');
                 }
                 var rect = targetEl.getBoundingClientRect();
-                var cx = rect.left + Math.max(4, Math.min(rect.width - 4, rect.width / 2));
-                var cy = rect.top + Math.max(4, Math.min(rect.height - 4, rect.height / 2));
-                var evtInit = { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy, button: 0, buttons: 1 };
+                var cx = Math.round(rect.left + Math.max(4, Math.min(rect.width - 4, rect.width / 2)));
+                var cy = Math.round(rect.top + Math.max(4, Math.min(rect.height - 4, rect.height / 2)));
+                var evtInit = { bubbles: true, cancelable: true, composed: true, view: window, clientX: cx, clientY: cy, screenX: cx, screenY: cy, button: 0, buttons: 1 };
+
+                // 1. Dispatch mobile TouchEvents (many mobile bottom-sheet & wheel pickers listen to touchstart/touchend)
+                try {
+                    if (typeof Touch !== 'undefined' && typeof TouchEvent !== 'undefined') {
+                        var touchObj = new Touch({
+                            identifier: Date.now() % 10000,
+                            target: targetEl,
+                            clientX: cx,
+                            clientY: cy,
+                            screenX: cx,
+                            screenY: cy,
+                            pageX: cx + (window.pageXOffset || 0),
+                            pageY: cy + (window.pageYOffset || 0),
+                            radiusX: 4,
+                            radiusY: 4,
+                            force: 1
+                        });
+                        targetEl.dispatchEvent(new TouchEvent('touchstart', {
+                            bubbles: true, cancelable: true, composed: true,
+                            touches: [touchObj], targetTouches: [touchObj], changedTouches: [touchObj]
+                        }));
+                        targetEl.dispatchEvent(new TouchEvent('touchend', {
+                            bubbles: true, cancelable: true, composed: true,
+                            touches: [], targetTouches: [], changedTouches: [touchObj]
+                        }));
+                    }
+                } catch (te) {}
+
+                // 2. Dispatch PointerEvents and MouseEvents
                 ['pointerover', 'mouseover', 'pointerdown', 'mousedown', 'pointerup', 'mouseup'].forEach(function(evtName) {
                     try {
                         var ev = (evtName.indexOf('pointer') === 0 && typeof PointerEvent !== 'undefined')
@@ -1338,6 +1715,7 @@ object AutomationScripts {
                         try { targetEl.dispatchEvent(new Event(evtName, { bubbles: true, cancelable: true })); } catch (e2) {}
                     }
                 });
+
                 if (typeof targetEl.click === 'function') {
                     try { targetEl.click(); } catch (e) {}
                 } else {
@@ -1351,9 +1729,7 @@ object AutomationScripts {
 
             function openDropdownOrSheetTrigger(triggerEl) {
                 if (!triggerEl) return;
-                try {
-                    triggerEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                } catch (e) {}
+                scrollNodeIntoScrollableAncestorsSync(triggerEl);
                 if (triggerEl.tagName && (triggerEl.tagName.toLowerCase() === 'input' || triggerEl.tagName.toLowerCase() === 'textarea')) {
                     triggerEl.setAttribute('inputmode', 'none');
                 }
@@ -1363,21 +1739,19 @@ object AutomationScripts {
                 } catch (e) {}
                 dispatchHumanTap(triggerEl);
 
-                // Also tap inner or wrapper interactive trigger for MUI / AntD / Radix / React-Select / PhoneInput
                 var innerTrigger = triggerEl.querySelector
-                    ? triggerEl.querySelector('[role="combobox"], [role="button"], [aria-haspopup], .MuiSelect-select, .ant-select-selector, .react-select__control, .iti__selected-flag, button, input')
+                    ? triggerEl.querySelector('[role="combobox"], [role="button"], [aria-haspopup], .MuiSelect-select, .ant-select-selector, .react-select__control, .iti__selected-flag, .van-cell__value, .weui-cell__bd, button, input')
                     : null;
                 if (innerTrigger && innerTrigger !== triggerEl) {
                     dispatchHumanTap(innerTrigger);
                 }
                 var wrapperTrigger = triggerEl.closest
-                    ? triggerEl.closest('[role="combobox"], [aria-haspopup], .MuiInputBase-root, .ant-select, .react-select__control, .iti__flag-container')
+                    ? triggerEl.closest('[role="combobox"], [aria-haspopup], .MuiInputBase-root, .ant-select, .react-select__control, .iti__flag-container, .van-cell, .weui-cell, .adm-list-item, .form-dropdown')
                     : null;
                 if (wrapperTrigger && wrapperTrigger !== triggerEl) {
                     dispatchHumanTap(wrapperTrigger);
                 }
 
-                // Dispatch ArrowDown / Enter for ARIA comboboxes that open on keyboard navigation
                 try {
                     triggerEl.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', code: 'ArrowDown', keyCode: 40, which: 40, bubbles: true }));
                 } catch (e) {}
@@ -1414,7 +1788,24 @@ object AutomationScripts {
                 var seen = [];
                 function addOverlay(node) {
                     if (!node || seen.indexOf(node) >= 0) return;
-                    if (!isNodeVisible(node)) return;
+                    if (!isNodeVisible(node, false)) return;
+                    // If node is a full-screen 100vh backdrop wrapper, prefer its inner dialog/sheet panel if present
+                    var r = node.getBoundingClientRect();
+                    if (r.height >= window.innerHeight * 0.96 && r.width >= window.innerWidth * 0.96 && node.children && node.children.length > 0) {
+                        var foundPanel = false;
+                        for (var c = 0; c < node.children.length; c++) {
+                            var ch = node.children[c];
+                            if (!isNodeVisible(ch, false)) continue;
+                            var cr = ch.getBoundingClientRect();
+                            var chTxt = (ch.innerText || ch.textContent || '').trim();
+                            if (cr.width >= 100 && cr.height >= 40 && cr.height < window.innerHeight * 0.96 && chTxt.length > 0) {
+                                seen.push(ch);
+                                results.push(ch);
+                                foundPanel = true;
+                            }
+                        }
+                        if (foundPanel) return;
+                    }
                     for (var s = 0; s < seen.length; s++) {
                         if (seen[s].contains && seen[s].contains(node)) return;
                     }
@@ -1470,6 +1861,13 @@ object AutomationScripts {
                     '.ant-calendar-picker-container',
                     '.adm-popup',
                     '.adm-picker',
+                    '.adm-center-popup',
+                    '.van-popup',
+                    '.van-picker',
+                    '.van-action-sheet',
+                    '.weui-picker',
+                    '.weui-actionsheet',
+                    '.weui-half-screen-dialog',
                     '[data-radix-popper-content-wrapper]',
                     '[data-radix-menu-content]',
                     '[data-radix-select-viewport]',
@@ -1509,6 +1907,9 @@ object AutomationScripts {
                     '.duet-date__dialog',
                     '.picker-modal',
                     '.wheel-picker',
+                    '.hwid-dialog-root',
+                    '.hwid-popup',
+                    '.hwid-list-popup',
                     'ion-modal',
                     'ion-action-sheet',
                     'ion-picker',
@@ -1547,13 +1948,14 @@ object AutomationScripts {
                     if (triggerEl && (node === triggerEl || (node.contains(triggerEl) && node.getAttribute('role') !== 'dialog'))) continue;
                     try {
                         var st = window.getComputedStyle(node);
-                        if ((st.position === 'fixed' || st.position === 'absolute') && isNodeVisible(node)) {
-                            var zVal = parseInt(st.zIndex, 10) || 0;
-                            var nodeHint = ((node.className && typeof node.className === 'string' ? node.className : '') + ' ' + (node.id || '') + ' ' + (node.getAttribute('role') || '')).toLowerCase();
-                            var isPopupLike = zVal >= 10 || /modal|sheet|drawer|popup|popover|dropdown|picker|calendar|menu|listbox|dialog|overlay|portal|select|options/i.test(nodeHint);
-                            if (!isPopupLike) continue;
-                            var rect = node.getBoundingClientRect();
-                            if (rect.width >= 100 && rect.height >= 40 && rect.height <= window.innerHeight * 0.96) {
+                        var rect = node.getBoundingClientRect();
+                        if (rect.width < 90 || rect.height < 36) continue;
+                        var nodeHint = ((node.className && typeof node.className === 'string' ? node.className : '') + ' ' + (node.id || '') + ' ' + (node.getAttribute('role') || '')).toLowerCase();
+                        var zVal = parseInt(st.zIndex, 10) || 0;
+                        var isAnchoredAtBottom = (rect.bottom >= window.innerHeight - 60 && rect.top >= window.innerHeight * 0.15 && rect.width >= window.innerWidth * 0.7);
+                        if ((st.position === 'fixed' || st.position === 'absolute') && isNodeVisible(node, false)) {
+                            var isPopupLike = zVal >= 10 || isAnchoredAtBottom || /modal|sheet|drawer|popup|popover|dropdown|picker|calendar|menu|listbox|dialog|overlay|portal|select|options|wheel/i.test(nodeHint);
+                            if (isPopupLike) {
                                 addOverlay(node);
                             }
                         }
@@ -1576,13 +1978,13 @@ object AutomationScripts {
                 var seenOpts = [];
                 function pushOpt(node) {
                     if (!node || node === triggerEl || seenOpts.indexOf(node) >= 0) return;
-                    if (!isNodeVisible(node)) return;
+                    if (!isNodeVisible(node, true)) return;
                     if (node.disabled || node.getAttribute('aria-disabled') === 'true') return;
                     seenOpts.push(node);
                     optionList.push(node);
                 }
 
-                var itemQuery = '[role="option"], [role="menuitem"], [role="menuitemradio"], [data-value], [data-val], [data-option], [data-code], [data-dial-code], [data-country-code], li, .dropdown-item, .select-option, .option, .item, .list-item, .menu-item, .sheet-item, .picker-item, .wheel-item, .MuiMenuItem-root, .MuiAutocomplete-option, .ant-select-item-option, .adm-picker-column-item, .el-select-dropdown__item, .iti__country, .country, .country-item, .react-select__option';
+                var itemQuery = '[role="option"], [role="menuitem"], [role="menuitemradio"], [data-value], [data-val], [data-option], [data-code], [data-dial-code], [data-country-code], li, .dropdown-item, .select-option, .option, .item, .list-item, .menu-item, .sheet-item, .picker-item, .wheel-item, .van-picker-column__item, .van-action-sheet__item, .weui-picker__item, .weui-actionsheet__cell, .adm-picker-column-item, .MuiMenuItem-root, .MuiAutocomplete-option, .ant-select-item-option, .el-select-dropdown__item, .iti__country, .country, .country-item, .react-select__option, .hwid-list-item';
 
                 for (var i = 0; i < overlays.length; i++) {
                     var ov = overlays[i];
@@ -1590,7 +1992,7 @@ object AutomationScripts {
                     for (var j = 0; j < stdItems.length; j++) {
                         pushOpt(stdItems[j]);
                     }
-                    // For mobile bottom sheets built with button or div rows without role="option"
+                    // For mobile bottom sheets & wheel pickers built with button/div/span rows without role="option"
                     var rowCandidates = ov.querySelectorAll('button, a, label, div, span');
                     for (var r = 0; r < rowCandidates.length; r++) {
                         var cand = rowCandidates[r];
@@ -1599,17 +2001,27 @@ object AutomationScripts {
                         var childButtons = cand.querySelectorAll ? cand.querySelectorAll('button, [role="option"], li') : [];
                         if (childButtons.length > 0) continue;
                         var rect = cand.getBoundingClientRect();
-                        if (rect.width < 24 || rect.height < 16 || rect.height > 96) continue;
+                        if (rect.width < 22 || rect.height < 14 || rect.height > 96) continue;
                         var txt = (cand.innerText || cand.textContent || '').trim().replace(/\s+/g, ' ');
                         if (!txt || txt.length > 85) continue;
                         if (/^(done|confirm|apply|ok|set|save|cancel|close|dismiss|back|×|✕)$/i.test(txt)) continue;
+                        var hasChildSameText = false;
+                        if (cand.children) {
+                            for (var ch = 0; ch < cand.children.length; ch++) {
+                                var cTxt = (cand.children[ch].innerText || cand.children[ch].textContent || '').trim().replace(/\s+/g, ' ');
+                                if (cTxt === txt) { hasChildSameText = true; break; }
+                            }
+                        }
+                        if (hasChildSameText) continue;
                         var tag = cand.tagName.toLowerCase();
                         var st = window.getComputedStyle(cand);
+                        var isSiblingGroupItem = (cand.parentElement && cand.parentElement.children && cand.parentElement.children.length >= 2);
                         var isClickableRow = (tag === 'button' || tag === 'a' || tag === 'label' ||
                             cand.getAttribute('role') === 'button' ||
                             st.cursor === 'pointer' ||
                             cand.onclick != null ||
-                            (cand.className && typeof cand.className === 'string' && /item|option|row|choice|entry|cell|country|select/i.test(cand.className)));
+                            isSiblingGroupItem ||
+                            (cand.className && typeof cand.className === 'string' && /item|option|row|choice|entry|cell|country|select|wheel|picker/i.test(cand.className)));
                         if (isClickableRow) {
                             pushOpt(cand);
                         }
@@ -1619,27 +2031,37 @@ object AutomationScripts {
             }
 
             function clickBottomSheetConfirmIfPresent(overlays, clickedOpt) {
-                setTimeout(function() {
+                function tryClickConfirm() {
                     try {
-                        var searchRoots = (overlays && overlays.length > 0) ? overlays : [document];
+                        var searchRoots = (overlays && overlays.length > 0) ? overlays.slice() : [];
+                        searchRoots.push(document);
                         for (var i = 0; i < searchRoots.length; i++) {
                             var root = searchRoots[i];
                             if (!root || !root.querySelectorAll) continue;
+                            var explicitConfirm = root.querySelectorAll('.van-picker__confirm, .weui-picker__action[data-action="select"], .adm-picker-header-button:last-child, .picker-confirm, .btn-confirm, [data-action="confirm"]');
+                            for (var e = 0; e < explicitConfirm.length; e++) {
+                                if (isNodeVisible(explicitConfirm[e], false)) {
+                                    dispatchHumanTap(explicitConfirm[e]);
+                                    return true;
+                                }
+                            }
                             var btns = root.querySelectorAll('button, [role="button"], a, span, div');
                             for (var j = 0; j < btns.length; j++) {
                                 var b = btns[j];
-                                if (b === clickedOpt || !isNodeVisible(b)) continue;
+                                if (b === clickedOpt || !isNodeVisible(b, false)) continue;
                                 var r = b.getBoundingClientRect();
-                                if (r.width < 24 || r.height < 18 || r.height > 80) continue;
+                                if (r.width < 24 || r.height < 16 || r.height > 84) continue;
                                 var txt = (b.innerText || b.textContent || b.value || b.getAttribute('aria-label') || '').trim();
-                                if (/^(done|confirm|apply|ok|set|select|choose|save)$/i.test(txt)) {
+                                if (/^(done|confirm|apply|ok|set|select|choose|save|complete|确定|完成|确认)$/i.test(txt)) {
                                     dispatchHumanTap(b);
-                                    return;
+                                    return true;
                                 }
                             }
                         }
                     } catch (e) {}
-                }, 95);
+                    return false;
+                }
+                setTimeout(tryClickConfirm, 80);
             }
 
             var MONTH_TABLE = [
@@ -1686,7 +2108,6 @@ object AutomationScripts {
                 var list = [];
                 if (t) list.push(t);
 
-                // Check if this is a month target or month field
                 var isMonthField = /month|bday-month|dobmonth/i.test(h);
                 for (var m = 0; m < MONTH_TABLE.length; m++) {
                     var mo = MONTH_TABLE[m];
@@ -1694,13 +2115,11 @@ object AutomationScripts {
                         list.push(mo.full, mo.short, mo.pad, mo.str);
                         break;
                     }
-                    // Even if hint doesn't say month, if target is "01".."12", add month names as secondary synonyms
                     if (t === mo.pad || t === mo.str) {
                         list.push(mo.pad, mo.str, mo.full, mo.short);
                     }
                 }
 
-                // Numeric unpadded / padded synonyms (e.g., "05" <-> "5", "14" <-> "14")
                 if (/^\d{1,4}$/.test(t)) {
                     var asInt = parseInt(t, 10);
                     if (!isNaN(asInt)) {
@@ -1711,7 +2130,6 @@ object AutomationScripts {
                     }
                 }
 
-                // Gender synonyms
                 if (t === 'male' || t === 'm' || t === 'man') {
                     list.push('male', 'm', 'man', 'boy', 'masculine', 'mr');
                 } else if (t === 'female' || t === 'f' || t === 'woman') {
@@ -1729,10 +2147,6 @@ object AutomationScripts {
                 if (!optText && !optVal) return -1;
                 if (isPlaceholderOrCloseText(optText) && (!optVal || isPlaceholderOrCloseText(optVal))) return -1;
 
-                // 0-Indexed vs 1-Indexed Month Protection:
-                // If the option text contains an explicit month name (e.g., "January".."December")
-                // and our target resolves to a month (e.g., "05" / "May"), match strictly by month identity
-                // so `<option value="5">June</option>` on a 0-indexed select never matches target "05" (May).
                 var targetMonthObj = resolveTargetMonthObject(target, hintStr || '');
                 if (!targetMonthObj) {
                     for (var sm = 0; sm < synonyms.length; sm++) {
@@ -1749,18 +2163,18 @@ object AutomationScripts {
                     return -1;
                 }
 
-                if (target && (optText === target || optVal === target)) return 100;
+                var strippedNumText = optText.replace(/[年月日日号\.]/g, '').trim();
+                if (target && (optText === target || optVal === target || strippedNumText === target)) return 100;
 
                 for (var s = 0; s < synonyms.length; s++) {
                     var syn = synonyms[s];
                     if (!syn) continue;
-                    if (optText === syn || optVal === syn) return 92 - Math.min(s, 6);
+                    if (optText === syn || optVal === syn || strippedNumText === syn) return 92 - Math.min(s, 6);
                 }
 
-                // Numeric exact match (e.g. "05" vs "5")
                 if (/^\d{1,4}$/.test(target)) {
                     var tNum = parseInt(target, 10);
-                    var textMatchNum = /^\d{1,4}$/.test(optText) ? parseInt(optText, 10) : NaN;
+                    var textMatchNum = /^\d{1,4}$/.test(strippedNumText) ? parseInt(strippedNumText, 10) : NaN;
                     var valMatchNum = /^\d{1,4}$/.test(optVal) ? parseInt(optVal, 10) : NaN;
                     if (textMatchNum === tNum || valMatchNum === tNum) return 85;
                 }
@@ -1776,7 +2190,103 @@ object AutomationScripts {
                     }
                 }
 
-                return 10; // Valid non-placeholder option fallback
+                return 10;
+            }
+
+            function findWheelColumnsInOverlay(ov) {
+                if (!ov || !ov.querySelectorAll) return [];
+                var explicitCols = ov.querySelectorAll('.picker-column, .wheel-column, .adm-picker-column, .van-picker-column, .weui-picker__group, .mui-picker, .picker-slot, [class*="picker-column"], [class*="wheel-col"]');
+                if (explicitCols.length >= 2) {
+                    var arr = [];
+                    for (var i = 0; i < explicitCols.length; i++) arr.push(explicitCols[i]);
+                    return arr;
+                }
+                // Heuristic: find 2 or 3 side-by-side list containers (ul or div) inside ov that each have >= 10 child items
+                var candidates = ov.querySelectorAll('ul, div');
+                var colGroups = [];
+                for (var c = 0; c < candidates.length; c++) {
+                    var cand = candidates[c];
+                    if (!cand.children || cand.children.length < 10 || cand.children.length > 150) continue;
+                    var r = cand.getBoundingClientRect();
+                    if (r.width < 30 || r.height < 60) continue;
+                    // Check that children are option-like items (short text)
+                    var sampleTxt = (cand.children[0].innerText || cand.children[0].textContent || '').trim();
+                    if (sampleTxt.length > 20) continue;
+                    colGroups.push(cand);
+                }
+                if (colGroups.length >= 2 && colGroups.length <= 4) {
+                    return colGroups;
+                }
+                return [];
+            }
+
+            function classifyAndSelectWheelColumns(ov, dayPad, monthPad, yearStr) {
+                var cols = findWheelColumnsInOverlay(ov);
+                if (cols.length < 2) return false;
+
+                var colMeta = [];
+                for (var i = 0; i < cols.length; i++) {
+                    var col = cols[i];
+                    var opts = collectClickableOptionsFromOverlays([col], null);
+                    var maxNumeric = 0;
+                    var hasYear = false;
+                    var hasMonthName = false;
+                    for (var j = 0; j < opts.length; j++) {
+                        var t = (opts[j].innerText || opts[j].textContent || '').replace(/[年月日]/g, '').trim();
+                        if (/^(19\d\d|20\d\d)$/.test(t)) hasYear = true;
+                        if (detectMonthNumFromText(t) > 0) hasMonthName = true;
+                        var n = parseInt(t, 10);
+                        if (!isNaN(n) && n < 100 && n > maxNumeric) maxNumeric = n;
+                    }
+                    var role = 'unknown';
+                    if (hasYear) role = 'year';
+                    else if (hasMonthName || (maxNumeric >= 10 && maxNumeric <= 12)) role = 'month';
+                    else if (maxNumeric >= 28 && maxNumeric <= 31) role = 'day';
+                    colMeta.push({ col: col, opts: opts, role: role });
+                }
+
+                // Resolve any remaining unknown column role by elimination
+                var usedRoles = {};
+                for (var k = 0; k < colMeta.length; k++) {
+                    if (colMeta[k].role !== 'unknown') usedRoles[colMeta[k].role] = true;
+                }
+                for (var u = 0; u < colMeta.length; u++) {
+                    if (colMeta[u].role === 'unknown') {
+                        if (!usedRoles['month']) { colMeta[u].role = 'month'; usedRoles['month'] = true; }
+                        else if (!usedRoles['day']) { colMeta[u].role = 'day'; usedRoles['day'] = true; }
+                        else if (!usedRoles['year']) { colMeta[u].role = 'year'; usedRoles['year'] = true; }
+                    }
+                }
+
+                var tappedAny = false;
+                for (var m = 0; m < colMeta.length; m++) {
+                    var cm = colMeta[m];
+                    var targetVal = dayPad;
+                    var hintVal = 'dobDay';
+                    if (cm.role === 'year') { targetVal = yearStr; hintVal = 'dobYear'; }
+                    else if (cm.role === 'month') { targetVal = monthPad; hintVal = 'dobMonth'; }
+
+                    var syns = buildTargetSynonyms(targetVal, hintVal);
+                    var bestOpt = null;
+                    var bestSc = -1;
+                    for (var o = 0; o < cm.opts.length; o++) {
+                        var item = cm.opts[o];
+                        var sc = scoreOptionCandidate(item.innerText || item.textContent || '', item.getAttribute('data-value') || '', targetVal, syns, hintVal);
+                        if (sc > bestSc) {
+                            bestSc = sc;
+                            bestOpt = item;
+                        }
+                    }
+                    if (bestOpt) {
+                        scrollNodeIntoScrollableAncestorsSync(bestOpt);
+                        dispatchHumanTap(bestOpt);
+                        tappedAny = true;
+                    }
+                }
+                if (tappedAny) {
+                    clickBottomSheetConfirmIfPresent([ov], null);
+                }
+                return tappedAny;
             }
 
             function selectBestOptionOnNativeSelect(selectEl, rawTarget, hintStr) {
@@ -1786,7 +2296,6 @@ object AutomationScripts {
                 var bestIdx = -1;
                 var bestScore = -1;
 
-                // Detect if this select is a 0-indexed numeric month select (options 0..11 with no month names)
                 var isZeroIndexedMonthSelect = false;
                 var targetMonth = resolveTargetMonthObject(target, hintStr);
                 if (targetMonth) {
@@ -1961,6 +2470,26 @@ object AutomationScripts {
                 if (el.tagName.toLowerCase() !== 'input' && el.tagName.toLowerCase() !== 'textarea' && !el.isContentEditable) {
                     var innerInput = el.querySelector('input, textarea, [contenteditable="true"]');
                     if (innerInput) el = innerInput;
+                }
+
+                // Handle 2-step deferred password fields (e.g. Apple Sign-In #password_text_field where #sign-in arrow button must be clicked after entering email)
+                var isPasswordTarget = ((el.type || '').toLowerCase() === 'password' || /password/i.test((el.id || '') + ' ' + (el.name || '') + ' ' + '$escapedSelector'));
+                if (isPasswordTarget && !window._auraStep1ContinueClicked) {
+                    var step1Btn = document.querySelector('#sign-in:not([disabled]), button#sign-in, [id="sign-in"][role="button"]');
+                    if (step1Btn) {
+                        var btnRect = step1Btn.getBoundingClientRect();
+                        var elRect = el.getBoundingClientRect();
+                        if (btnRect.width > 4 && btnRect.height > 4 && (elRect.height < 10 || !el.value)) {
+                            window._auraStep1ContinueClicked = true;
+                            try {
+                                ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach(function(evt) {
+                                    step1Btn.dispatchEvent(new MouseEvent(evt, { bubbles: true, cancelable: true, view: window }));
+                                });
+                                if (typeof step1Btn.click === 'function') step1Btn.click();
+                            } catch (e) {}
+                            return 'PENDING:REVEALING_STEP2_PASSWORD';
+                        }
+                    }
                 }
 
                 // Suppress Android soft keyboard before any focus/input events
@@ -2980,41 +3509,9 @@ object AutomationScripts {
                         window._auraDateYearSelected = true;
                     }
 
-                    // B. Mobile Bottom-Sheet Wheel / Scroll Columns (2 or 3 columns for Year / Month / Day)
-                    var wheelCols = ov.querySelectorAll('.picker-column, .wheel-column, .adm-picker-column, .van-picker-column');
-                    if (wheelCols.length >= 2) {
-                        var tappedWheel = false;
-                        for (var wc = 0; wc < wheelCols.length; wc++) {
-                            var colText = (wheelCols[wc].innerText || '').toLowerCase();
-                            var colTarget = dayPad;
-                            var colHint = 'dobDay';
-                            if (/199\d|200\d/.test(colText)) {
-                                colTarget = yearStr;
-                                colHint = 'dobYear';
-                            } else if (/jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec/i.test(colText)) {
-                                colTarget = monthPad;
-                                colHint = 'dobMonth';
-                            }
-                            var colOpts = collectClickableOptionsFromOverlays([wheelCols[wc]], el);
-                            var colSyns = buildTargetSynonyms(colTarget, colHint);
-                            var bestColOpt = null;
-                            var bestColSc = -1;
-                            for (var co = 0; co < colOpts.length; co++) {
-                                var sc = scoreOptionCandidate(colOpts[co].innerText || '', colOpts[co].getAttribute('data-value') || '', colTarget, colSyns, colHint);
-                                if (sc > bestColSc) {
-                                    bestColSc = sc;
-                                    bestColOpt = colOpts[co];
-                                }
-                            }
-                            if (bestColOpt) {
-                                dispatchHumanTap(bestColOpt);
-                                tappedWheel = true;
-                            }
-                        }
-                        if (tappedWheel) {
-                            clickBottomSheetConfirmIfPresent([ov], null);
-                            return 'DONE';
-                        }
+                    // B. Mobile Bottom-Sheet Wheel / Scroll Columns (2 or 3 columns for Year / Month / Day across Vant, WeUI, AntD Mobile, MUI, Ion, and custom wheels)
+                    if (classifyAndSelectWheelColumns(ov, dayPad, monthPad, yearStr)) {
+                        return 'DONE';
                     }
 
                     // C. Multi-Stage Calendar Grid Views (Decades -> Years -> Months -> Days)

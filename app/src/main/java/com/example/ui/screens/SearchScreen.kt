@@ -235,6 +235,7 @@ fun SearchScreen(
                         }
                     },
                     textStyle = TextStyle(
+                        fontFamily = com.example.ui.theme.VarelaRoundFontFamily,
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Normal,
                         color = MaterialTheme.colorScheme.onSurface
