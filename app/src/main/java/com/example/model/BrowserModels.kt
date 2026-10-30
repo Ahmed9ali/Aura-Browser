@@ -50,8 +50,11 @@ data class HistoryItem(
 
 enum class SuggestionType {
     PERSONALIZED,
+    SWITCH_TO_TAB,
+    BOOKMARK,
     DOMAIN,
     HISTORY,
+    SEARCH_AUTOCOMPLETE,
     TRENDING,
     DISCOVERY
 }
@@ -62,7 +65,10 @@ data class SearchSuggestion(
     val type: SuggestionType,
     val subtitle: String? = null,
     val targetUrl: String? = null,
-    val category: String? = null
+    val category: String? = null,
+    val relevanceScore: Int = 0,
+    val reasonBadge: String? = null,
+    val tabId: String? = null
 )
 
 enum class SearchEngine(

@@ -41,6 +41,7 @@ data class BrowserUiState(
     val searchQuery: String = "",
     val selectedCategory: String? = null,
     val suggestions: List<SearchSuggestion> = emptyList(),
+    val personalizedRecommendations: List<SearchSuggestion> = emptyList(),
     val isLoading: Boolean = false,
     val loadProgress: Int = 0,
     val canGoBack: Boolean = false,
@@ -174,12 +175,31 @@ class BrowserViewModel(
 
         val activeTab = tabs.find { it.id == activeTabId } ?: tabs.firstOrNull()
 
-        val suggestions = suggestionsEngine.getSuggestions(
-            query = searchQuery,
-            history = history,
-            bookmarks = bookmarks,
-            selectedCategory = selectedCategory
-        )
+        val suggestions = if (settings.suggestionsEnabled) {
+            suggestionsEngine.getSuggestions(
+                query = searchQuery,
+                history = history,
+                bookmarks = bookmarks,
+                selectedCategory = selectedCategory,
+                tabs = tabs,
+                searchEngine = settings.searchEngine
+            )
+        } else {
+            emptyList()
+        }
+
+        val personalizedRecommendations = if (settings.suggestionsEnabled) {
+            suggestionsEngine.getPersonalizedRecommendations(
+                query = searchQuery,
+                history = history,
+                bookmarks = bookmarks,
+                tabs = tabs,
+                selectedCategory = selectedCategory,
+                limit = 5
+            )
+        } else {
+            emptyList()
+        }
 
         BrowserUiState(
             currentScreen = screen,
@@ -195,6 +215,7 @@ class BrowserViewModel(
             searchQuery = searchQuery,
             selectedCategory = selectedCategory,
             suggestions = suggestions,
+            personalizedRecommendations = personalizedRecommendations,
             isLoading = isLoading,
             loadProgress = loadProgress,
             canGoBack = canGoBack,
@@ -430,9 +451,6 @@ class BrowserViewModel(
     // Search and Suggestion Engine Handlers
     fun updateSearchQuery(query: String) {
         _searchQuery.value = query
-        if (query.isNotEmpty()) {
-            _selectedCategory.value = null
-        }
     }
 
     fun selectCategory(category: String) {
@@ -440,7 +458,6 @@ class BrowserViewModel(
             _selectedCategory.value = null
         } else {
             _selectedCategory.value = category
-            _searchQuery.value = ""
         }
     }
 
@@ -459,6 +476,11 @@ class BrowserViewModel(
     }
 
     fun selectSuggestion(suggestion: SearchSuggestion) {
+        if (suggestion.type == com.example.model.SuggestionType.SWITCH_TO_TAB && suggestion.tabId != null) {
+            _searchQuery.value = ""
+            selectTab(suggestion.tabId)
+            return
+        }
         if (suggestion.targetUrl != null) {
             loadUrl(suggestion.targetUrl, initialTitle = suggestion.title.ifBlank { null })
         } else {
@@ -475,9 +497,13 @@ class BrowserViewModel(
             return
         }
 
+        val currentActiveUrl = repository.tabs.value.find { it.id == repository.activeTabId.value }?.url
         repository.updateActiveTab(title = initialTitle, url = target)
         _searchQuery.value = ""
         _currentScreen.value = NavScreen.WEB_PAGE
+        if (currentActiveUrl == target) {
+            _reloadTrigger.tryEmit(Unit)
+        }
     }
 
     fun reloadActiveTab() {

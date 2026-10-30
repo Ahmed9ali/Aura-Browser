@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -29,7 +30,9 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.DriveFileMove
 import androidx.compose.material.icons.outlined.CleaningServices
@@ -52,10 +55,13 @@ import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Folder
 import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material.icons.rounded.FolderSpecial
+import androidx.compose.material.icons.rounded.GridView
 import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.MoreVert
+import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.SortByAlpha
 import androidx.compose.material.icons.rounded.Tab
+import androidx.compose.material.icons.rounded.ViewModule
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -76,10 +82,15 @@ import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -90,6 +101,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
@@ -98,6 +110,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlin.math.abs
 import com.example.model.BrowserTab
 import com.example.model.TabGroup
 import com.example.ui.theme.ExpressiveCardShape
@@ -111,6 +124,12 @@ import java.net.URI
 private enum class TabsTopMode {
     TABS,
     GROUP_TABS
+}
+
+private enum class TabGridDensity {
+    AUTO,
+    STANDARD_2_COL,
+    COMPACT_3_COL
 }
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class, ExperimentalMaterial3Api::class)
@@ -145,10 +164,38 @@ fun TabsScreen(
     modifier: Modifier = Modifier
 ) {
     var topMode by rememberSaveable { mutableStateOf(TabsTopMode.TABS) }
+    var gridDensity by rememberSaveable { mutableStateOf(TabGridDensity.AUTO) }
+    var tabSearchQuery by rememberSaveable { mutableStateOf("") }
     var isSelectionMode by rememberSaveable { mutableStateOf(false) }
     var selectedTabIds by remember { mutableStateOf(setOf<String>()) }
     var showBottomMoreMenu by remember { mutableStateOf(false) }
     var showGroupSelectedDialog by remember { mutableStateOf(false) }
+    val mainGridState = rememberLazyGridState()
+
+    val isCompactGrid = when (gridDensity) {
+        TabGridDensity.AUTO -> tabs.size >= 8
+        TabGridDensity.COMPACT_3_COL -> true
+        TabGridDensity.STANDARD_2_COL -> false
+    }
+
+    val gridColumns = remember(gridDensity, isCompactGrid) {
+        when (gridDensity) {
+            TabGridDensity.STANDARD_2_COL -> GridCells.Fixed(2)
+            TabGridDensity.COMPACT_3_COL -> GridCells.Fixed(3)
+            TabGridDensity.AUTO -> GridCells.Adaptive(minSize = if (isCompactGrid) 114.dp else 156.dp)
+        }
+    }
+
+    val filteredTabs = remember(tabs, tabSearchQuery) {
+        if (tabSearchQuery.isBlank()) {
+            tabs
+        } else {
+            val q = tabSearchQuery.trim().lowercase()
+            tabs.filter { tab ->
+                tab.title.lowercase().contains(q) || tab.url.lowercase().contains(q)
+            }
+        }
+    }
 
     // Keep selectedTabIds valid when tabs close
     val validSelectedTabIds = remember(selectedTabIds, tabs) {
@@ -196,6 +243,51 @@ fun TabsScreen(
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = 10.dp)
                 ) {
+                    // Left-side Grid Density Toggle + Tab Counter Pill for efficient multi-tab viewing
+                    Surface(
+                        shape = ExpressivePillShape,
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        border = BorderStroke(
+                            1.dp,
+                            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
+                        ),
+                        modifier = Modifier
+                            .align(Alignment.CenterStart)
+                            .clip(ExpressivePillShape)
+                            .clickable {
+                                gridDensity = when (gridDensity) {
+                                    TabGridDensity.AUTO -> TabGridDensity.COMPACT_3_COL
+                                    TabGridDensity.COMPACT_3_COL -> TabGridDensity.STANDARD_2_COL
+                                    TabGridDensity.STANDARD_2_COL -> TabGridDensity.AUTO
+                                }
+                            }
+                            .testTag("btn_toggle_grid_density")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (isCompactGrid) Icons.Rounded.ViewModule else Icons.Rounded.GridView,
+                                contentDescription = "Toggle Grid Density",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = when (gridDensity) {
+                                    TabGridDensity.AUTO -> "${tabs.size}"
+                                    TabGridDensity.COMPACT_3_COL -> "3×"
+                                    TabGridDensity.STANDARD_2_COL -> "2×"
+                                },
+                                style = MaterialTheme.typography.labelMedium.copy(
+                                    fontWeight = FontWeight.Bold
+                                ),
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
+
                     // Centered 2-Icon Switcher: Tab icon and Group Tab icon
                     Surface(
                         shape = ExpressivePillShape,
@@ -409,26 +501,107 @@ fun TabsScreen(
                 }
             }
 
-            // Below the Top App Bar: 2-Column Grid View of Tab Cards or Group Tabs
+            // Quick Filter Bar when many tabs are open in Tabs mode
+            AnimatedVisibility(
+                visible = topMode == TabsTopMode.TABS && (tabs.size >= 6 || tabSearchQuery.isNotBlank()),
+                enter = expandVertically(MaterialTheme.motionScheme.defaultSpatialSpec()) + fadeIn(),
+                exit = shrinkVertically(MaterialTheme.motionScheme.defaultSpatialSpec()) + fadeOut()
+            ) {
+                Surface(
+                    color = MaterialTheme.colorScheme.surface,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Surface(
+                            shape = ExpressivePillShape,
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            border = BorderStroke(
+                                1.dp,
+                                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
+                            ),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 7.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Search,
+                                    contentDescription = "Filter open tabs",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Box(modifier = Modifier.weight(1f)) {
+                                    if (tabSearchQuery.isEmpty()) {
+                                        Text(
+                                            text = "Filter ${tabs.size} open tabs...",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                    BasicTextField(
+                                        value = tabSearchQuery,
+                                        onValueChange = { tabSearchQuery = it },
+                                        singleLine = true,
+                                        textStyle = MaterialTheme.typography.bodySmall.copy(
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            fontWeight = FontWeight.Medium
+                                        ),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .testTag("input_filter_tabs")
+                                    )
+                                }
+                                if (tabSearchQuery.isNotEmpty()) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Close,
+                                        contentDescription = "Clear tab filter",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier
+                                            .size(16.dp)
+                                            .clickable { tabSearchQuery = "" }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Below the Top App Bar: Space-Efficient LazyVerticalGrid of Tab Preview Cards or Group Tabs
             LazyVerticalGrid(
-                columns = GridCells.Fixed(2),
+                state = mainGridState,
+                columns = gridColumns,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(1f),
+                    .weight(1f)
+                    .testTag("tabs_lazy_vertical_grid"),
                 contentPadding = PaddingValues(
-                    start = 14.dp,
-                    end = 14.dp,
-                    top = 14.dp,
-                    bottom = 96.dp // Space for bottom-left FAB + 3 dots
+                    start = if (isCompactGrid) 10.dp else 14.dp,
+                    end = if (isCompactGrid) 10.dp else 14.dp,
+                    top = 12.dp,
+                    bottom = 16.dp
                 ),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                horizontalArrangement = Arrangement.spacedBy(if (isCompactGrid) 8.dp else 12.dp),
+                verticalArrangement = Arrangement.spacedBy(if (isCompactGrid) 8.dp else 12.dp)
             ) {
                 when (topMode) {
                     TabsTopMode.TABS -> {
                         items(
-                            items = tabs,
-                            key = { tab -> "tab_grid_${tab.id}" }
+                            items = filteredTabs,
+                            key = { tab -> "tab_grid_${tab.id}" },
+                            contentType = { "tab_preview_card" }
                         ) { tab ->
                             val assignedGroup = tabGroups.find { it.id == tab.groupId }
                             val groupColor = assignedGroup?.let { parseHexColor(it.colorHex) }
@@ -440,6 +613,7 @@ fun TabsScreen(
                                 isActive = tab.id == activeTab?.id,
                                 folderName = assignedGroup?.name,
                                 accentColor = groupColor,
+                                isCompact = isCompactGrid,
                                 isSelectionMode = isSelectionMode,
                                 isSelected = isSelectedForBatch,
                                 onSelect = {
@@ -454,7 +628,8 @@ fun TabsScreen(
                                     }
                                 },
                                 onClose = { onCloseTab(tab.id) },
-                                onMove = { onOpenMoveTabDialog(tab) }
+                                onMove = { onOpenMoveTabDialog(tab) },
+                                modifier = Modifier.animateItem()
                             )
                         }
                     }
@@ -557,190 +732,222 @@ fun TabsScreen(
                     }
                 }
             }
-        }
 
-        // Bottom Bar: Add Tab FAB at Center, 3-Dots Button at Right Side
-        Box(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .padding(horizontal = 24.dp, vertical = 20.dp)
-        ) {
-            // Add Tab FAB Icon at Center
-            FloatingActionButton(
-                onClick = { onOpenNewTab(null) },
-                shape = ExpressiveSquircleShape,
-                containerColor = MaterialTheme.colorScheme.primaryContainer,
-                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 4.dp),
+            // Bottom Navigation Bar for Tab Screen: ONLY Add (+) in Center and 3-Dots on Right Side
+            Surface(
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 4.dp,
+                shadowElevation = 10.dp,
                 modifier = Modifier
-                    .align(Alignment.Center)
-                    .size(56.dp)
-                    .testTag("btn_new_tab")
+                    .fillMaxWidth()
+                    .testTag("bottom_nav_bar")
             ) {
-                Icon(
-                    imageVector = Icons.Rounded.Add,
-                    contentDescription = "Add Tab",
-                    modifier = Modifier.size(26.dp)
-                )
-            }
-
-            // 3-Dots Menu Button at Right Side
-            Box(
-                modifier = Modifier.align(Alignment.CenterEnd)
-            ) {
-                Surface(
-                    shape = CircleShape,
-                    color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                    tonalElevation = 4.dp,
-                    shadowElevation = 3.dp,
-                    border = BorderStroke(
-                        1.dp,
-                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
-                    ),
+                Column(
                     modifier = Modifier
-                        .size(48.dp)
-                        .clip(CircleShape)
-                        .clickable { showBottomMoreMenu = true }
-                        .testTag("btn_tabs_more_menu")
+                        .fillMaxWidth()
+                        .navigationBarsPadding()
                 ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = Icons.Rounded.MoreVert,
-                            contentDescription = "More Tab Options",
-                            tint = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.size(22.dp)
-                        )
-                    }
-                }
-
-                DropdownMenu(
-                    expanded = showBottomMoreMenu,
-                    onDismissRequest = { showBottomMoreMenu = false },
-                    offset = DpOffset(x = 0.dp, y = (-8).dp),
-                    shape = ExpressiveSquircleShape,
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
-                ) {
-                        DropdownMenuItem(
-                            text = {
-                                Text(
-                                    text = "Close all tabs",
-                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
-                                )
-                            },
-                            leadingIcon = {
+                    HorizontalDivider(
+                        thickness = 0.5.dp,
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(68.dp)
+                            .padding(horizontal = 24.dp, vertical = 8.dp)
+                    ) {
+                        // Center: Add (+) Icon in Bottom Navigation
+                        Surface(
+                            shape = ExpressivePillShape,
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            tonalElevation = 2.dp,
+                            border = BorderStroke(
+                                1.dp,
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.28f)
+                            ),
+                            modifier = Modifier
+                                .align(Alignment.Center)
+                                .size(width = 68.dp, height = 46.dp)
+                                .clip(ExpressivePillShape)
+                                .clickable { onOpenNewTab(null) }
+                                .testTag("btn_new_tab")
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
                                 Icon(
-                                    imageVector = Icons.Outlined.DeleteSweep,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.error
+                                    imageVector = Icons.Rounded.Add,
+                                    contentDescription = "Add Tab",
+                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    modifier = Modifier.size(26.dp)
                                 )
-                            },
-                            onClick = {
-                                showBottomMoreMenu = false
-                                isSelectionMode = false
-                                selectedTabIds = emptySet()
-                                onCloseAllTabs()
-                            },
-                            modifier = Modifier.testTag("menu_close_all_tabs")
-                        )
+                            }
+                        }
 
-                        DropdownMenuItem(
-                            text = {
-                                Text(
-                                    text = if (isSelectionMode) "Exit select tab" else "Select tab",
-                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
-                                )
-                            },
-                            leadingIcon = {
-                                Icon(
-                                    imageVector = Icons.Rounded.Checklist,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary
-                                )
-                            },
-                            onClick = {
-                                showBottomMoreMenu = false
-                                isSelectionMode = !isSelectionMode
-                                if (!isSelectionMode) {
-                                    selectedTabIds = emptySet()
+                        // Right Side: 3-Dots Icon in Bottom Navigation
+                        Box(
+                            modifier = Modifier.align(Alignment.CenterEnd)
+                        ) {
+                            Surface(
+                                shape = ExpressivePillShape,
+                                color = if (showBottomMoreMenu) {
+                                    MaterialTheme.colorScheme.secondaryContainer
+                                } else {
+                                    MaterialTheme.colorScheme.surfaceContainerHigh
+                                },
+                                border = BorderStroke(
+                                    1.dp,
+                                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
+                                ),
+                                modifier = Modifier
+                                    .size(width = 52.dp, height = 46.dp)
+                                    .clip(ExpressivePillShape)
+                                    .clickable { showBottomMoreMenu = true }
+                                    .testTag("btn_tabs_more_menu")
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.MoreVert,
+                                        contentDescription = "More Tab Options",
+                                        tint = if (showBottomMoreMenu) {
+                                            MaterialTheme.colorScheme.onSecondaryContainer
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurface
+                                        },
+                                        modifier = Modifier.size(22.dp)
+                                    )
                                 }
-                            },
-                            modifier = Modifier.testTag("menu_select_tab")
-                        )
+                            }
 
-                        DropdownMenuItem(
-                            text = {
-                                Text(
-                                    text = "Clear data",
-                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
+                            DropdownMenu(
+                                expanded = showBottomMoreMenu,
+                                onDismissRequest = { showBottomMoreMenu = false },
+                                offset = DpOffset(x = 0.dp, y = (-8).dp),
+                                shape = ExpressiveSquircleShape,
+                                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                            ) {
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = "Close all tabs",
+                                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
+                                        )
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = Icons.Outlined.DeleteSweep,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.error
+                                        )
+                                    },
+                                    onClick = {
+                                        showBottomMoreMenu = false
+                                        isSelectionMode = false
+                                        selectedTabIds = emptySet()
+                                        onCloseAllTabs()
+                                    },
+                                    modifier = Modifier.testTag("menu_close_all_tabs")
                                 )
-                            },
-                            leadingIcon = {
-                                Icon(
-                                    imageVector = Icons.Outlined.CleaningServices,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.secondary
-                                )
-                            },
-                            onClick = {
-                                showBottomMoreMenu = false
-                                isSelectionMode = false
-                                selectedTabIds = emptySet()
-                                onClearBrowsingData()
-                            },
-                            modifier = Modifier.testTag("menu_clear_data")
-                        )
 
-                        HorizontalDivider(
-                            modifier = Modifier.padding(vertical = 4.dp),
-                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
-                        )
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = if (isSelectionMode) "Exit select tab" else "Select tab",
+                                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
+                                        )
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = Icons.Rounded.Checklist,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary
+                                        )
+                                    },
+                                    onClick = {
+                                        showBottomMoreMenu = false
+                                        isSelectionMode = !isSelectionMode
+                                        if (!isSelectionMode) {
+                                            selectedTabIds = emptySet()
+                                        }
+                                    },
+                                    modifier = Modifier.testTag("menu_select_tab")
+                                )
 
-                        DropdownMenuItem(
-                            text = {
-                                Text(
-                                    text = "Group tabs by name",
-                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = "Clear data",
+                                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
+                                        )
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = Icons.Outlined.CleaningServices,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.secondary
+                                        )
+                                    },
+                                    onClick = {
+                                        showBottomMoreMenu = false
+                                        isSelectionMode = false
+                                        selectedTabIds = emptySet()
+                                        onClearBrowsingData()
+                                    },
+                                    modifier = Modifier.testTag("menu_clear_data")
                                 )
-                            },
-                            leadingIcon = {
-                                Icon(
-                                    imageVector = Icons.Rounded.SortByAlpha,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary
-                                )
-                            },
-                            onClick = {
-                                showBottomMoreMenu = false
-                                topMode = TabsTopMode.GROUP_TABS
-                            },
-                            modifier = Modifier.testTag("menu_group_by_name")
-                        )
 
-                        DropdownMenuItem(
-                            text = {
-                                Text(
-                                    text = "New tab group",
-                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
+                                HorizontalDivider(
+                                    modifier = Modifier.padding(vertical = 4.dp),
+                                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
                                 )
-                            },
-                            leadingIcon = {
-                                Icon(
-                                    imageVector = Icons.Rounded.CreateNewFolder,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary
+
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = "Group tabs by name",
+                                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
+                                        )
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = Icons.Rounded.SortByAlpha,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary
+                                        )
+                                    },
+                                    onClick = {
+                                        showBottomMoreMenu = false
+                                        topMode = TabsTopMode.GROUP_TABS
+                                    },
+                                    modifier = Modifier.testTag("menu_group_by_name")
                                 )
-                            },
-                            onClick = {
-                                showBottomMoreMenu = false
-                                onOpenCreateGroupDialog()
-                            },
-                            modifier = Modifier.testTag("menu_new_group")
-                        )
+
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = "New tab group",
+                                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
+                                        )
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = Icons.Rounded.CreateNewFolder,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary
+                                        )
+                                    },
+                                    onClick = {
+                                        showBottomMoreMenu = false
+                                        onOpenCreateGroupDialog()
+                                    },
+                                    modifier = Modifier.testTag("menu_new_group")
+                                )
+                            }
+                        }
                     }
                 }
             }
         }
+    }
 
     if (showCreateGroupDialog) {
         CreateGroupDialog(
@@ -823,18 +1030,38 @@ private fun TabGroupCard(
 ) {
     val groupColor = parseHexColor(group.colorHex)
     val morphShape = if (group.isCollapsed) ExpressiveSquircleShape else ExpressiveCardShape
+    var groupFilterQuery by rememberSaveable(group.id) { mutableStateOf("") }
+    var isDenseThreeColumn by rememberSaveable(group.id) { mutableStateOf(groupTabs.size >= 12) }
+
+    val filteredGroupTabs = remember(groupTabs, groupFilterQuery) {
+        val q = groupFilterQuery.trim().lowercase()
+        if (q.isEmpty()) {
+            groupTabs
+        } else {
+            groupTabs.filter { tab ->
+                tab.title.lowercase().contains(q) || tab.url.lowercase().contains(q)
+            }
+        }
+    }
+
+    val containsActiveTab = remember(groupTabs, activeTabId) {
+        activeTabId != null && groupTabs.any { it.id == activeTabId }
+    }
 
     Card(
         shape = morphShape,
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow
         ),
-        border = BorderStroke(1.5.dp, groupColor.copy(alpha = 0.35f)),
+        border = BorderStroke(
+            width = if (containsActiveTab) 2.dp else 1.5.dp,
+            color = groupColor.copy(alpha = if (containsActiveTab) 0.65f else 0.35f)
+        ),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
-            // Group Header (Organized by Name)
+            // Group Header (Formatted & Compact)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -847,7 +1074,7 @@ private fun TabGroupCard(
                         )
                     )
                     .clickable(onClick = onToggleCollapse)
-                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Surface(
@@ -867,20 +1094,36 @@ private fun TabGroupCard(
                 Spacer(modifier = Modifier.width(10.dp))
 
                 Column(modifier = Modifier.weight(1f)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = group.name,
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        if (containsActiveTab) {
+                            Surface(
+                                shape = CircleShape,
+                                color = groupColor,
+                                modifier = Modifier.size(7.dp)
+                            ) {}
+                        }
+                    }
                     Text(
-                        text = group.name,
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.onSurface,
+                        text = if (isAutoNameGroup) {
+                            "Organized by name • Compact group view"
+                        } else {
+                            "Bounded group • ${groupTabs.size} ${if (groupTabs.size == 1) "tab" else "tabs"}"
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    if (isAutoNameGroup) {
-                        Text(
-                            text = "Organized by name",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
                 }
 
                 Surface(
@@ -889,17 +1132,17 @@ private fun TabGroupCard(
                     modifier = Modifier.padding(end = 6.dp)
                 ) {
                     Text(
-                        text = "${groupTabs.size} ${if (groupTabs.size == 1) "tab" else "tabs"}",
-                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                        text = "${groupTabs.size}",
+                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.ExtraBold),
                         color = groupColor,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 3.dp)
                     )
                 }
 
                 FilledTonalIconButton(
                     onClick = onAddTabToGroup,
                     modifier = Modifier
-                        .size(32.dp)
+                        .size(30.dp)
                         .testTag("btn_add_tab_to_${group.name.lowercase().replace(" ", "_")}"),
                     colors = IconButtonDefaults.filledTonalIconButtonColors(
                         containerColor = groupColor.copy(alpha = 0.15f),
@@ -909,7 +1152,7 @@ private fun TabGroupCard(
                     Icon(
                         imageVector = Icons.Rounded.Add,
                         contentDescription = "Add tab to ${group.name}",
-                        modifier = Modifier.size(16.dp)
+                        modifier = Modifier.size(15.dp)
                     )
                 }
 
@@ -917,13 +1160,13 @@ private fun TabGroupCard(
 
                 IconButton(
                     onClick = onDeleteGroup,
-                    modifier = Modifier.size(32.dp)
+                    modifier = Modifier.size(30.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Outlined.DeleteOutline,
                         contentDescription = "Delete group ${group.name}",
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(18.dp)
+                        modifier = Modifier.size(17.dp)
                     )
                 }
 
@@ -931,11 +1174,74 @@ private fun TabGroupCard(
                     imageVector = if (group.isCollapsed) Icons.Rounded.ExpandMore else Icons.Rounded.ExpandLess,
                     contentDescription = if (group.isCollapsed) "Expand" else "Collapse",
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(22.dp)
+                    modifier = Modifier.size(20.dp)
                 )
             }
 
-            // Collapsible 2-Column Grid of Tabs inside Group (Sorted Alphabetically by Name)
+            // Collapsed Summary Strip: shows a compact 1-line preview of tabs without increasing length
+            if (group.isCollapsed && groupTabs.isNotEmpty()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(onClick = onToggleCollapse)
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    val previewSlice = groupTabs.take(3)
+                    previewSlice.forEach { tab ->
+                        val isTabActive = tab.id == activeTabId
+                        Surface(
+                            shape = ExpressivePillShape,
+                            color = if (isTabActive) {
+                                groupColor.copy(alpha = 0.2f)
+                            } else {
+                                MaterialTheme.colorScheme.surfaceContainerHigh
+                            },
+                            border = BorderStroke(
+                                0.5.dp,
+                                if (isTabActive) groupColor else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                            ),
+                            modifier = Modifier.weight(1f, fill = false)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (tab.url.startsWith("aura://")) Icons.Rounded.AutoAwesome else Icons.Rounded.Language,
+                                    contentDescription = null,
+                                    tint = groupColor,
+                                    modifier = Modifier.size(11.dp)
+                                )
+                                Text(
+                                    text = extractTabDisplayName(tab),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    }
+                    if (groupTabs.size > 3) {
+                        Surface(
+                            shape = ExpressivePillShape,
+                            color = groupColor.copy(alpha = 0.14f)
+                        ) {
+                            Text(
+                                text = "+${groupTabs.size - 3} more",
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                color = groupColor,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Expanded Bounded-Height Formatted Grid for 100s of Tabs
             AnimatedVisibility(
                 visible = !group.isCollapsed,
                 enter = expandVertically(MaterialTheme.motionScheme.defaultSpatialSpec()) +
@@ -946,14 +1252,14 @@ private fun TabGroupCard(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                        .padding(horizontal = 10.dp, vertical = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     if (groupTabs.isEmpty()) {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(vertical = 12.dp),
+                                .padding(vertical = 10.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
@@ -963,29 +1269,176 @@ private fun TabGroupCard(
                             )
                         }
                     } else {
-                        groupTabs.chunked(2).forEach { rowTabs ->
+                        // Compact Group Toolbar (Filter + 2x/3x Density Switcher + Fixed-Height Indicator)
+                        if (groupTabs.size > 4 || groupFilterQuery.isNotEmpty()) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                rowTabs.forEach { tab ->
-                                    Box(modifier = Modifier.weight(1f)) {
-                                        GridTabCard(
-                                            tab = tab,
-                                            isActive = tab.id == activeTabId,
-                                            folderName = group.name,
-                                            accentColor = groupColor,
-                                            isSelectionMode = isSelectionMode,
-                                            isSelected = tab.id in selectedTabIds,
-                                            onSelect = { onSelectTab(tab.id) },
-                                            onClose = { onCloseTab(tab.id) },
-                                            onMove = { onMoveTab(tab) }
+                                Surface(
+                                    shape = ExpressivePillShape,
+                                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                    border = BorderStroke(
+                                        0.8.dp,
+                                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
+                                    ),
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(34.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .padding(horizontal = 10.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.Search,
+                                            contentDescription = null,
+                                            tint = groupColor,
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Box(
+                                            modifier = Modifier.weight(1f),
+                                            contentAlignment = Alignment.CenterStart
+                                        ) {
+                                            if (groupFilterQuery.isEmpty()) {
+                                                Text(
+                                                    text = "Filter ${groupTabs.size} tabs in ${group.name}...",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+                                            BasicTextField(
+                                                value = groupFilterQuery,
+                                                onValueChange = { groupFilterQuery = it },
+                                                singleLine = true,
+                                                textStyle = MaterialTheme.typography.labelMedium.copy(
+                                                    color = MaterialTheme.colorScheme.onSurface
+                                                ),
+                                                modifier = Modifier.fillMaxWidth()
+                                            )
+                                        }
+                                        if (groupFilterQuery.isNotEmpty()) {
+                                            Icon(
+                                                imageVector = Icons.Rounded.Close,
+                                                contentDescription = "Clear group filter",
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier
+                                                    .size(15.dp)
+                                                    .clickable { groupFilterQuery = "" }
+                                            )
+                                        }
+                                    }
+                                }
+
+                                // Density Toggle (2-column compact vs 3-column ultra-dense for 100s of tabs)
+                                Surface(
+                                    shape = ExpressivePillShape,
+                                    color = groupColor.copy(alpha = 0.14f),
+                                    border = BorderStroke(0.8.dp, groupColor.copy(alpha = 0.35f)),
+                                    modifier = Modifier
+                                        .height(34.dp)
+                                        .clip(ExpressivePillShape)
+                                        .clickable { isDenseThreeColumn = !isDenseThreeColumn }
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 10.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = if (isDenseThreeColumn) Icons.Rounded.ViewModule else Icons.Rounded.GridView,
+                                            contentDescription = "Toggle group grid density",
+                                            tint = groupColor,
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                        Text(
+                                            text = if (isDenseThreeColumn) "3×" else "2×",
+                                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                            color = groupColor
                                         )
                                     }
                                 }
-                                if (rowTabs.size == 1) {
-                                    Spacer(modifier = Modifier.weight(1f))
+                            }
+                        }
+
+                        val columnsCount = if (isDenseThreeColumn) 3 else 2
+                        val itemHeight = if (isDenseThreeColumn) 48.dp else 56.dp
+                        val rowSpacing = 6.dp
+                        val rowCount = (filteredGroupTabs.size + columnsCount - 1) / columnsCount
+                        val naturalHeight = if (rowCount == 0) {
+                            44.dp
+                        } else {
+                            (itemHeight * rowCount) + (rowSpacing * (rowCount - 1))
+                        }
+                        // Strict maximum height cap (228.dp) so even 100s of tabs NEVER increase the group card length
+                        val boundedGridHeight = naturalHeight.coerceAtMost(228.dp)
+
+                        if (filteredGroupTabs.isEmpty()) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(44.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "No matching tabs in ${group.name}",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        } else {
+                            LazyVerticalGrid(
+                                columns = GridCells.Fixed(columnsCount),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(boundedGridHeight),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalArrangement = Arrangement.spacedBy(rowSpacing)
+                            ) {
+                                items(
+                                    items = filteredGroupTabs,
+                                    key = { tab -> "group_${group.id}_tab_${tab.id}" }
+                                ) { tab ->
+                                    GroupFormattedTabTile(
+                                        tab = tab,
+                                        isActive = tab.id == activeTabId,
+                                        accentColor = groupColor,
+                                        isDense = isDenseThreeColumn,
+                                        isSelectionMode = isSelectionMode,
+                                        isSelected = tab.id in selectedTabIds,
+                                        onSelect = { onSelectTab(tab.id) },
+                                        onClose = { onCloseTab(tab.id) },
+                                        onMove = { onMoveTab(tab) }
+                                    )
                                 }
+                            }
+                        }
+
+                        // Compact footer indicator when group has more rows than visible height
+                        if (filteredGroupTabs.size > columnsCount * 4) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 4.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "${filteredGroupTabs.size} tabs formatted in fixed-height container",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    text = "Scroll inside group ↕",
+                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = groupColor
+                                )
                             }
                         }
                     }
@@ -997,13 +1450,13 @@ private fun TabGroupCard(
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class, ExperimentalFoundationApi::class)
 @Composable
-private fun GridTabCard(
+private fun GroupFormattedTabTile(
     tab: BrowserTab,
     isActive: Boolean,
-    folderName: String?,
     accentColor: Color,
-    isSelectionMode: Boolean = false,
-    isSelected: Boolean = false,
+    isDense: Boolean,
+    isSelectionMode: Boolean,
+    isSelected: Boolean,
     onSelect: () -> Unit,
     onClose: () -> Unit,
     onMove: () -> Unit
@@ -1011,10 +1464,192 @@ private fun GridTabCard(
     val haptics = LocalHapticFeedback.current
     val domain = remember(tab.url) {
         if (tab.url.startsWith("aura://")) "Aura Home"
+        else runCatching {
+            URI(tab.url).host?.removePrefix("www.") ?: tab.url
+        }.getOrDefault(tab.url)
+    }
+
+    val containerColor by animateColorAsState(
+        targetValue = when {
+            isSelectionMode && isSelected -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
+            isActive -> accentColor.copy(alpha = 0.16f)
+            else -> MaterialTheme.colorScheme.surfaceContainerHigh
+        },
+        animationSpec = MaterialTheme.motionScheme.defaultEffectsSpec(),
+        label = "group_tile_bg"
+    )
+
+    val borderStroke = when {
+        isSelectionMode && isSelected -> BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary)
+        isActive -> BorderStroke(1.5.dp, accentColor)
+        else -> BorderStroke(0.8.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+    }
+
+    Surface(
+        shape = ExpressiveChipShape,
+        color = containerColor,
+        border = borderStroke,
+        tonalElevation = if (isActive) 3.dp else 1.dp,
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(if (isDense) 48.dp else 56.dp)
+            .clip(ExpressiveChipShape)
+            .combinedClickable(
+                onClick = onSelect,
+                onLongClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onMove()
+                }
+            )
+            .testTag("tab_card_${tab.id}")
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = if (isDense) 6.dp else 8.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            if (isSelectionMode) {
+                Icon(
+                    imageVector = if (isSelected) Icons.Rounded.CheckBox else Icons.Rounded.CheckBoxOutlineBlank,
+                    contentDescription = if (isSelected) "Selected" else "Not selected",
+                    tint = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(5.dp))
+            } else {
+                Surface(
+                    shape = CircleShape,
+                    color = if (isActive) accentColor else accentColor.copy(alpha = 0.15f),
+                    modifier = Modifier.size(if (isDense) 20.dp else 24.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = if (tab.url.startsWith("aura://")) {
+                                Icons.Rounded.AutoAwesome
+                            } else {
+                                Icons.Rounded.Language
+                            },
+                            contentDescription = null,
+                            tint = if (isActive) Color.White else accentColor,
+                            modifier = Modifier.size(if (isDense) 11.dp else 13.dp)
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.width(6.dp))
+            }
+
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.Center
+            ) {
+                Text(
+                    text = tab.title.ifBlank { domain },
+                    style = MaterialTheme.typography.labelMedium.copy(
+                        fontWeight = if (isActive) FontWeight.Bold else FontWeight.SemiBold,
+                        fontSize = if (isDense) 11.sp else 12.sp
+                    ),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                if (!isDense) {
+                    Text(
+                        text = domain,
+                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                        color = if (isActive) accentColor else MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+
+            if (!isDense) {
+                IconButton(
+                    onClick = onMove,
+                    modifier = Modifier
+                        .size(22.dp)
+                        .testTag("btn_move_tab_${tab.id}")
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Rounded.DriveFileMove,
+                        contentDescription = "Move Tab to Group",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(13.dp)
+                    )
+                }
+            }
+
+            IconButton(
+                onClick = onClose,
+                modifier = Modifier
+                    .size(22.dp)
+                    .testTag("btn_close_tab_${tab.id}")
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.Close,
+                    contentDescription = "Close Tab",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(13.dp)
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class, ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
+@Composable
+private fun GridTabCard(
+    tab: BrowserTab,
+    isActive: Boolean,
+    folderName: String?,
+    accentColor: Color,
+    isCompact: Boolean = false,
+    isSelectionMode: Boolean = false,
+    isSelected: Boolean = false,
+    onSelect: () -> Unit,
+    onClose: () -> Unit,
+    onMove: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val haptics = LocalHapticFeedback.current
+    val cardHeight = if (isCompact) 138.dp else 174.dp
+    val domain = remember(tab.url) {
+        if (tab.url.startsWith("aura://")) "Aura Home"
         else try {
             URI(tab.url).host?.removePrefix("www.") ?: tab.url
         } catch (_: Exception) {
             tab.url
+        }
+    }
+
+    val dismissState = key(tab.id) {
+        rememberSwipeToDismissBoxState(
+            confirmValueChange = { value ->
+                if (!isSelectionMode && (value == SwipeToDismissBoxValue.StartToEnd || value == SwipeToDismissBoxValue.EndToStart)) {
+                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onClose()
+                    true
+                } else {
+                    false
+                }
+            },
+            positionalThreshold = { totalDistance -> totalDistance * 0.36f }
+        )
+    }
+
+    var hasTriggeredThresholdHaptic by remember(tab.id) { mutableStateOf(false) }
+    LaunchedEffect(dismissState.targetValue, isSelectionMode) {
+        if (isSelectionMode) {
+            hasTriggeredThresholdHaptic = false
+            return@LaunchedEffect
+        }
+        val crossedThreshold = dismissState.targetValue != SwipeToDismissBoxValue.Settled
+        if (crossedThreshold && !hasTriggeredThresholdHaptic) {
+            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            hasTriggeredThresholdHaptic = true
+        } else if (!crossedThreshold && hasTriggeredThresholdHaptic) {
+            hasTriggeredThresholdHaptic = false
         }
     }
 
@@ -1040,130 +1675,145 @@ private fun GridTabCard(
         label = "grid_tab_scale"
     )
 
-    Surface(
-        shape = ExpressiveSquircleShape,
-        color = containerColor,
-        border = borderStroke,
-        tonalElevation = if (isActive) 4.dp else 1.dp,
-        modifier = Modifier
+    val isPastThreshold = dismissState.targetValue != SwipeToDismissBoxValue.Settled
+    val dismissBgColor by animateColorAsState(
+        targetValue = when {
+            dismissState.dismissDirection == SwipeToDismissBoxValue.Settled -> Color.Transparent
+            isPastThreshold -> MaterialTheme.colorScheme.error
+            else -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.85f)
+        },
+        animationSpec = MaterialTheme.motionScheme.defaultEffectsSpec(),
+        label = "swipe_dismiss_bg"
+    )
+    val dismissContentColor by animateColorAsState(
+        targetValue = if (isPastThreshold) {
+            MaterialTheme.colorScheme.onError
+        } else {
+            MaterialTheme.colorScheme.onErrorContainer
+        },
+        animationSpec = MaterialTheme.motionScheme.defaultEffectsSpec(),
+        label = "swipe_dismiss_content"
+    )
+    val dismissIconScale by animateFloatAsState(
+        targetValue = if (isPastThreshold) 1.16f else 0.9f,
+        animationSpec = MaterialTheme.motionScheme.fastSpatialSpec(),
+        label = "swipe_dismiss_icon_scale"
+    )
+
+    SwipeToDismissBox(
+        state = dismissState,
+        enableDismissFromStartToEnd = !isSelectionMode,
+        enableDismissFromEndToStart = !isSelectionMode,
+        modifier = modifier
             .fillMaxWidth()
-            .height(190.dp)
-            .scale(scale)
-            .clip(ExpressiveSquircleShape)
-            .combinedClickable(
-                onClick = onSelect,
-                onLongClick = {
-                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                    onMove()
+            .testTag("swipe_tab_card_${tab.id}"),
+        backgroundContent = {
+            val direction = dismissState.dismissDirection
+            if (direction != SwipeToDismissBoxValue.Settled) {
+                val alignment = when (direction) {
+                    SwipeToDismissBoxValue.StartToEnd -> Alignment.CenterStart
+                    SwipeToDismissBoxValue.EndToStart -> Alignment.CenterEnd
+                    SwipeToDismissBoxValue.Settled -> Alignment.Center
                 }
-            )
-            .testTag("tab_card_${tab.id}")
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(8.dp)
-        ) {
-            // Card Top Header: Favicon + Tab Title + Close Button (or Selection Checkbox)
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 4.dp, vertical = 2.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                if (isSelectionMode) {
-                    Icon(
-                        imageVector = if (isSelected) Icons.Rounded.CheckBox else Icons.Rounded.CheckBoxOutlineBlank,
-                        contentDescription = if (isSelected) "Selected" else "Not selected",
-                        tint = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier
-                            .padding(end = 6.dp)
-                            .size(18.dp)
-                    )
-                } else {
-                    Surface(
-                        shape = CircleShape,
-                        color = if (isActive) accentColor else MaterialTheme.colorScheme.secondaryContainer,
-                        modifier = Modifier.size(22.dp)
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = if (tab.url.startsWith("aura://")) {
-                                    Icons.Rounded.AutoAwesome
-                                } else {
-                                    Icons.Rounded.Language
-                                },
-                                contentDescription = null,
-                                tint = if (isActive) Color.White else MaterialTheme.colorScheme.onSecondaryContainer,
-                                modifier = Modifier.size(13.dp)
-                            )
-                        }
-                    }
-                    Spacer(modifier = Modifier.width(6.dp))
-                }
-
-                Text(
-                    text = tab.title.ifBlank { "Untitled" },
-                    style = MaterialTheme.typography.labelLarge.copy(
-                        fontWeight = if (isActive) FontWeight.Bold else FontWeight.SemiBold
-                    ),
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f)
-                )
-
-                IconButton(
-                    onClick = onClose,
-                    modifier = Modifier
-                        .size(26.dp)
-                        .testTag("btn_close_tab_${tab.id}")
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.Close,
-                        contentDescription = "Close Tab",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(15.dp)
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(6.dp))
-
-            // Webpage Preview Area inside Grid Card
-            Surface(
-                shape = ExpressiveTileShape,
-                color = MaterialTheme.colorScheme.surface,
-                border = BorderStroke(
-                    0.5.dp,
-                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
-                ),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
-            ) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(
-                            Brush.verticalGradient(
-                                colors = listOf(
-                                    accentColor.copy(alpha = if (isActive) 0.12f else 0.05f),
-                                    MaterialTheme.colorScheme.surface
-                                )
-                            )
+                        .height(cardHeight)
+                        .clip(ExpressiveSquircleShape)
+                        .background(dismissBgColor)
+                        .border(
+                            width = 1.dp,
+                            color = MaterialTheme.colorScheme.error.copy(alpha = if (isPastThreshold) 0.9f else 0.35f),
+                            shape = ExpressiveSquircleShape
                         )
-                        .padding(10.dp)
+                        .padding(horizontal = if (isCompact) 10.dp else 16.dp),
+                    contentAlignment = alignment
                 ) {
-                    // Center Domain & Page Preview
                     Column(
-                        modifier = Modifier.align(Alignment.Center),
-                        horizontalAlignment = Alignment.CenterHorizontally
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                        modifier = Modifier.scale(dismissIconScale)
                     ) {
                         Surface(
-                            shape = ExpressiveChipShape,
-                            color = accentColor.copy(alpha = 0.14f),
-                            modifier = Modifier.size(36.dp)
+                            shape = CircleShape,
+                            color = dismissContentColor.copy(alpha = 0.16f),
+                            modifier = Modifier.size(if (isCompact) 30.dp else 38.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Outlined.DeleteOutline,
+                                    contentDescription = "Swipe to close tab",
+                                    tint = dismissContentColor,
+                                    modifier = Modifier.size(if (isCompact) 16.dp else 20.dp)
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "Close",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontWeight = FontWeight.Bold
+                            ),
+                            color = dismissContentColor
+                        )
+                    }
+                }
+            }
+        }
+    ) {
+        Surface(
+            shape = ExpressiveSquircleShape,
+            color = containerColor,
+            border = borderStroke,
+            tonalElevation = if (isActive) 4.dp else 1.dp,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(cardHeight)
+                .graphicsLayer {
+                    val rawOffset = runCatching { dismissState.requireOffset() }.getOrDefault(0f)
+                    val dragFraction = (abs(rawOffset) / 260f).coerceIn(0f, 1f)
+                    val dynamicScale = scale * (1f - dragFraction * 0.05f)
+                    scaleX = dynamicScale
+                    scaleY = dynamicScale
+                    rotationZ = (rawOffset / 48f).coerceIn(-6.5f, 6.5f)
+                    alpha = 1f - (dragFraction * 0.25f)
+                }
+                .clip(ExpressiveSquircleShape)
+                .combinedClickable(
+                    onClick = onSelect,
+                    onLongClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onMove()
+                    }
+                )
+                .testTag("tab_card_${tab.id}")
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(if (isCompact) 6.dp else 8.dp)
+            ) {
+                // Card Top Header: Favicon + Tab Title + Close Button (or Selection Checkbox)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 2.dp, vertical = 1.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (isSelectionMode) {
+                        Icon(
+                            imageVector = if (isSelected) Icons.Rounded.CheckBox else Icons.Rounded.CheckBoxOutlineBlank,
+                            contentDescription = if (isSelected) "Selected" else "Not selected",
+                            tint = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier
+                                .padding(end = 4.dp)
+                                .size(if (isCompact) 16.dp else 18.dp)
+                        )
+                    } else {
+                        Surface(
+                            shape = CircleShape,
+                            color = if (isActive) accentColor else MaterialTheme.colorScheme.secondaryContainer,
+                            modifier = Modifier.size(if (isCompact) 18.dp else 22.dp)
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(
@@ -1173,32 +1823,113 @@ private fun GridTabCard(
                                         Icons.Rounded.Language
                                     },
                                     contentDescription = null,
-                                    tint = accentColor,
-                                    modifier = Modifier.size(20.dp)
+                                    tint = if (isActive) Color.White else MaterialTheme.colorScheme.onSecondaryContainer,
+                                    modifier = Modifier.size(if (isCompact) 11.dp else 13.dp)
                                 )
                             }
                         }
+                        Spacer(modifier = Modifier.width(if (isCompact) 4.dp else 6.dp))
+                    }
 
-                        Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = tab.title.ifBlank { "Untitled" },
+                        style = (if (isCompact) MaterialTheme.typography.labelMedium else MaterialTheme.typography.labelLarge).copy(
+                            fontWeight = if (isActive) FontWeight.Bold else FontWeight.SemiBold
+                        ),
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
 
-                        Text(
-                            text = domain,
-                            style = MaterialTheme.typography.labelMedium.copy(
-                                fontWeight = FontWeight.Bold
-                            ),
-                            color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-
-                        Text(
-                            text = tab.previewSnippet.ifBlank { tab.url },
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                    IconButton(
+                        onClick = onClose,
+                        modifier = Modifier
+                            .size(if (isCompact) 22.dp else 26.dp)
+                            .testTag("btn_close_tab_${tab.id}")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Close,
+                            contentDescription = "Close Tab",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(if (isCompact) 13.dp else 15.dp)
                         )
                     }
+                }
+
+                Spacer(modifier = Modifier.height(if (isCompact) 4.dp else 6.dp))
+
+                // Webpage Preview Area inside Grid Card
+                Surface(
+                    shape = ExpressiveTileShape,
+                    color = MaterialTheme.colorScheme.surface,
+                    border = BorderStroke(
+                        0.5.dp,
+                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                Brush.verticalGradient(
+                                    colors = listOf(
+                                        accentColor.copy(alpha = if (isActive) 0.12f else 0.05f),
+                                        MaterialTheme.colorScheme.surface
+                                    )
+                                )
+                            )
+                            .padding(if (isCompact) 6.dp else 10.dp)
+                    ) {
+                        // Center Domain & Page Preview
+                        Column(
+                            modifier = Modifier.align(Alignment.Center),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Surface(
+                                shape = ExpressiveChipShape,
+                                color = accentColor.copy(alpha = 0.14f),
+                                modifier = Modifier.size(if (isCompact) 26.dp else 34.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = if (tab.url.startsWith("aura://")) {
+                                            Icons.Rounded.AutoAwesome
+                                        } else {
+                                            Icons.Rounded.Language
+                                        },
+                                        contentDescription = null,
+                                        tint = accentColor,
+                                        modifier = Modifier.size(if (isCompact) 14.dp else 18.dp)
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(if (isCompact) 3.dp else 5.dp))
+
+                            Text(
+                                text = domain,
+                                style = (if (isCompact) MaterialTheme.typography.labelSmall else MaterialTheme.typography.labelMedium).copy(
+                                    fontWeight = FontWeight.Bold
+                                ),
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+
+                            if (!isCompact) {
+                                Text(
+                                    text = tab.previewSnippet.ifBlank { tab.url },
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
 
                     // Bottom bar inside preview: Active / Group badge + Move button
                     Row(
@@ -1273,6 +2004,7 @@ private fun GridTabCard(
                     }
                 }
             }
+        }
         }
     }
 }

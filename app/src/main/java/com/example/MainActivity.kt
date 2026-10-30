@@ -173,32 +173,34 @@ fun BrowserApp(
             }
         },
         bottomBar = {
-            BrowserBottomBar(
-                currentScreen = uiState.currentScreen,
-                tabCount = uiState.tabs.size,
-                isCurrentPageBookmarked = isBookmarked,
-                isMoreActive = uiState.showMoreSheet,
-                onNavigate = { screen ->
-                    if (screen == NavScreen.HOME && activeTab != null && !activeTab.url.startsWith("aura://")) {
-                        viewModel.loadUrl("aura://home")
-                    } else {
-                        viewModel.navigateTo(screen)
-                    }
-                },
-                onBookmarkPress = {
-                    if (uiState.currentScreen == NavScreen.WEB_PAGE && activeTab != null && !activeTab.url.startsWith("aura://")) {
-                        viewModel.toggleBookmarkCurrentTab()
-                    } else {
+            if (uiState.currentScreen != NavScreen.TAB) {
+                BrowserBottomBar(
+                    currentScreen = uiState.currentScreen,
+                    tabCount = uiState.tabs.size,
+                    isCurrentPageBookmarked = isBookmarked,
+                    isMoreActive = uiState.showMoreSheet,
+                    onNavigate = { screen ->
+                        if (screen == NavScreen.HOME && activeTab != null && !activeTab.url.startsWith("aura://")) {
+                            viewModel.loadUrl("aura://home")
+                        } else {
+                            viewModel.navigateTo(screen)
+                        }
+                    },
+                    onBookmarkPress = {
+                        if (uiState.currentScreen == NavScreen.WEB_PAGE && activeTab != null && !activeTab.url.startsWith("aura://")) {
+                            viewModel.toggleBookmarkCurrentTab()
+                        } else {
+                            viewModel.navigateTo(NavScreen.BOOKMARK)
+                        }
+                    },
+                    onBookmarkHold = {
                         viewModel.navigateTo(NavScreen.BOOKMARK)
+                    },
+                    onMoreClick = {
+                        viewModel.setShowMoreSheet(true)
                     }
-                },
-                onBookmarkHold = {
-                    viewModel.navigateTo(NavScreen.BOOKMARK)
-                },
-                onMoreClick = {
-                    viewModel.setShowMoreSheet(true)
-                }
-            )
+                )
+            }
         },
         snackbarHost = {
             SnackbarHost(
@@ -251,6 +253,8 @@ fun BrowserApp(
                         SearchScreen(
                             query = uiState.searchQuery,
                             suggestions = uiState.suggestions,
+                            personalizedRecommendations = uiState.personalizedRecommendations,
+                            suggestionsEnabled = uiState.settings.suggestionsEnabled,
                             discoveryCategories = viewModel.discoveryCategories,
                             selectedCategory = uiState.selectedCategory,
                             currentSearchEngine = uiState.settings.searchEngine,

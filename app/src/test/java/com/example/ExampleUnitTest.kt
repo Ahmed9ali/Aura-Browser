@@ -796,5 +796,140 @@ class ExampleUnitTest {
         assertEquals(expectedFont, typography.labelMedium.fontFamily)
         assertEquals(expectedFont, typography.labelSmall.fontFamily)
     }
+
+    @Test
+    fun testPersonalizedContentRecommendationsAndSmartSearchService() {
+        // 1. Seed user browsing activity and bookmarks to establish interest profile
+        repository.recordVisit("https://kotlinlang.org/docs", "Kotlin Coroutines Guide")
+        repository.recordVisit("https://kotlinlang.org/docs", "Kotlin Coroutines Guide")
+        repository.recordVisit("https://github.com/JetBrains/kotlin", "JetBrains Kotlin Repository")
+        repository.addBookmark(
+            title = "Android Jetpack Compose Documentation",
+            url = "https://developer.android.com/jetpack/compose",
+            folder = "Development"
+        )
+        val openTabId = repository.openNewTab(
+            url = "https://news.ycombinator.com",
+            title = "Hacker News - Tech & Startups"
+        )
+
+        val history = repository.history.value
+        val bookmarks = repository.bookmarks.value
+        val openTabs = repository.tabs.value
+
+        // 2. Verify personalized content recommendations appear as user types in the address bar
+        val typedRecommendations = suggestionsEngine.getPersonalizedRecommendations(
+            query = "kotlin",
+            history = history,
+            bookmarks = bookmarks,
+            tabs = openTabs,
+            selectedCategory = null
+        )
+        assertTrue(
+            "Typing 'kotlin' should return personalized content recommendations",
+            typedRecommendations.isNotEmpty()
+        )
+        assertTrue(
+            "Personalized recommendations should include PERSONALIZED or BOOKMARK items with reasonBadge",
+            typedRecommendations.any {
+                (it.type == SuggestionType.PERSONALIZED || it.type == SuggestionType.BOOKMARK || it.type == SuggestionType.HISTORY) &&
+                    !it.reasonBadge.isNullOrBlank()
+            }
+        )
+        assertTrue(
+            "Personalized recommendations should match the typed query 'kotlin'",
+            typedRecommendations.any {
+                it.title.contains("Kotlin", ignoreCase = true) ||
+                    (it.targetUrl?.contains("kotlin", ignoreCase = true) == true)
+            }
+        )
+
+        // 3. Verify open-tab match surfaces SWITCH_TO_TAB suggestion when typing 'hacker'
+        val tabSuggestions = suggestionsEngine.getSuggestions(
+            query = "hacker",
+            history = history,
+            bookmarks = bookmarks,
+            tabs = openTabs,
+            searchEngine = SearchEngine.GOOGLE
+        )
+        val switchTabSuggestion = tabSuggestions.firstOrNull { it.type == SuggestionType.SWITCH_TO_TAB }
+        assertNotNull("Typing 'hacker' should suggest switching to the open Hacker News tab", switchTabSuggestion)
+        assertEquals(openTabId, switchTabSuggestion?.tabId)
+
+        // 4. Verify live search autocomplete suggestions respect the selected search engine
+        val braveSuggestions = suggestionsEngine.getSuggestions(
+            query = "compose",
+            history = history,
+            bookmarks = bookmarks,
+            tabs = openTabs,
+            searchEngine = SearchEngine.BRAVE
+        )
+        val autocompleteItem = braveSuggestions.firstOrNull { it.type == SuggestionType.SEARCH_AUTOCOMPLETE }
+        assertNotNull("Should include live search autocomplete completions", autocompleteItem)
+        assertTrue(
+            "Autocomplete subtitle/badge should reflect selected Brave search engine",
+            autocompleteItem!!.subtitle?.contains("Brave", ignoreCase = true) == true ||
+                autocompleteItem.reasonBadge?.contains("Brave", ignoreCase = true) == true
+        )
+    }
+
+    @Test
+    fun testCustomWebViewAndAllSearchEnginesLoadReliably() {
+        // 1. Verify search query extraction works across Google, DuckDuckGo, Bing, and Brave
+        assertEquals(
+            "jetpack compose",
+            com.example.devtools.RealHtmlPageLoader.extractSearchQueryIfSearchUrl("https://www.google.com/search?q=jetpack+compose")
+        )
+        assertEquals(
+            "apple sign in",
+            com.example.devtools.RealHtmlPageLoader.extractSearchQueryIfSearchUrl("https://duckduckgo.com/?q=apple+sign+in")
+        )
+        assertEquals(
+            "kotlin coroutines",
+            com.example.devtools.RealHtmlPageLoader.extractSearchQueryIfSearchUrl("https://www.bing.com/search?q=kotlin+coroutines")
+        )
+        assertEquals(
+            "browser automation",
+            com.example.devtools.RealHtmlPageLoader.extractSearchQueryIfSearchUrl("https://search.brave.com/search?q=browser+automation")
+        )
+
+        // 2. Verify loading search results across all search engines succeeds with interactive search box and result cards
+        val engines = listOf(
+            "https://www.google.com/search?q=kotlin+android",
+            "https://duckduckgo.com/?q=kotlin+android",
+            "https://www.bing.com/search?q=kotlin+android",
+            "https://search.brave.com/search?q=kotlin+android"
+        )
+        engines.forEach { searchUrl ->
+            val result = com.example.devtools.RealHtmlPageLoader.loadWebPage(searchUrl, isDesktopMode = false)
+            assertTrue("Search URL $searchUrl must load successfully", result.isSuccess)
+            val loaded = result.getOrThrow()
+            assertTrue("Loaded search page should contain DOM nodes", loaded.domNodes.isNotEmpty())
+            assertTrue(
+                "Loaded search page should have an interactive #search-input",
+                loaded.domNodes.any { it.id == "search-input" && it.tagName == "input" }
+            )
+            assertTrue(
+                "Loaded search page should have clickable search result cards",
+                loaded.domNodes.any { it.className == "search-result-card" && !it.href.isNullOrBlank() }
+            )
+        }
+
+        // 3. Verify loading Search Engine Homepages (e.g. https://www.google.com, https://duckduckgo.com) renders interactive portal
+        val googleHome = com.example.devtools.RealHtmlPageLoader.loadWebPage("https://www.google.com", isDesktopMode = false)
+        assertTrue(googleHome.isSuccess)
+        val googleNodes = googleHome.getOrThrow().domNodes
+        assertTrue(googleNodes.any { it.id == "search-input" })
+        assertTrue(googleNodes.any { it.className == "search-result-card" })
+
+        // 4. Verify loading SPA / Auth websites (e.g. Apple Sign-In) synthesizes interactive form fields without failing
+        val appleSignIn = com.example.devtools.RealHtmlPageLoader.loadWebPage("https://account.apple.com/sign-in", isDesktopMode = false)
+        assertTrue(appleSignIn.isSuccess)
+        val appleNodes = appleSignIn.getOrThrow().domNodes
+        assertTrue("Apple Sign-In should include email input", appleNodes.any { it.id == "account_name_text_field" })
+        assertTrue("Apple Sign-In should include birthday picker", appleNodes.any { it.tagName == "dob" })
+        assertTrue("Apple Sign-In should include country code selector", appleNodes.any { it.tagName == "select" })
+    }
 }
+
 
