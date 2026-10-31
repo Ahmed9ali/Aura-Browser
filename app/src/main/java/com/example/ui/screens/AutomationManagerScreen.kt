@@ -1,11 +1,8 @@
 package com.example.ui.screens
 
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -15,6 +12,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -30,14 +28,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckBox
-import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Code
-import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FileUpload
@@ -53,8 +50,6 @@ import androidx.compose.material.icons.filled.RadioButtonChecked
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.SmartToy
-import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -66,7 +61,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -79,6 +73,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -87,12 +83,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -101,7 +94,6 @@ import com.example.model.AutomationActionType
 import com.example.model.AutomationDataGenerator
 import com.example.model.AutomationExecutionState
 import com.example.model.AutomationScript
-import com.example.model.AutomationStatus
 import com.example.model.AutomationStep
 import com.example.model.DataExhaustionPolicy
 import com.example.model.DataIterationOrder
@@ -110,12 +102,14 @@ import com.example.ui.components.StepEditDialog
 import java.util.UUID
 
 /**
- * Modern, simplified, easy-to-use Automation Studio.
+ * Clean Material 3 Automation screen.
  *
- * Tab 0: "Workflow" - Plain-English visual steps, 1-click test run, quick settings
- * Tab 1: "Library & Templates" - Ready-made 1-click templates + saved workflows
- * Tab 2: "My Data" - Simple 1-by-1 batch data cards with easy paste & file upload
- * Tab 3: "Logs" - Clean execution logs
+ * Main Screen Tabs:
+ * - Tab 0: "Templates" - Properly formatted clickable Saved Scripts & Starter Templates. Clicking any card opens its Workflow detail screen.
+ * - Tab 1: "My Data" - Data Sheet management with first-class support for Birthday / Date of Birth ('dob', e.g. '04 May 2001').
+ *
+ * Opened Script Workflow View:
+ * - Shows the selected script's workflow steps, flow settings, and the Run button inside the script.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -138,7 +132,10 @@ fun AutomationManagerScreen(
     onNavigateBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var selectedTab by remember { mutableIntStateOf(0) } // 0: Workflow, 1: Library & Templates, 2: My Data, 3: Logs
+    // 0: Templates, 1: My Data
+    var selectedTab by remember { mutableIntStateOf(0) }
+    var isWorkflowDetailOpen by remember { mutableStateOf(false) }
+
     var showFlowSettingsDialog by remember { mutableStateOf(false) }
     var showNewScriptDialog by remember { mutableStateOf(false) }
     var showNewDataSheetDialog by remember { mutableStateOf(false) }
@@ -147,18 +144,23 @@ fun AutomationManagerScreen(
     var showAddStepDialog by remember { mutableStateOf(false) }
     var showRenameScriptDialog by remember { mutableStateOf(false) }
 
+    if (isWorkflowDetailOpen) {
+        BackHandler {
+            isWorkflowDetailOpen = false
+        }
+    }
+
     val availableFieldKeys = remember(dataSheets) {
         val standard = listOf(
             "email", "username", "password", "confirmPassword", "phoneNumber",
             "firstName", "lastName", "fullName", "countryCode", "gender",
-            "dob", "address", "city", "state", "zipCode", "fileName"
+            "dob", "dobDay", "dobMonth", "dobYear", "address", "city", "state", "zipCode", "fileName"
         )
         val custom = dataSheets.flatMap { it.fields.keys }
         (standard + custom).distinct()
     }
 
     val emerald = Color(0xFF10B981)
-    val indigo = Color(0xFF6366F1)
 
     Column(
         modifier = modifier
@@ -166,114 +168,84 @@ fun AutomationManagerScreen(
             .background(MaterialTheme.colorScheme.background)
             .testTag("automation_manager_screen")
     ) {
-        val distinctStudioPageCount = remember(currentScript.steps) {
-            currentScript.steps.mapNotNull {
-                it.pageUrl.trim().trimEnd('/').lowercase().takeIf { u -> u.isNotBlank() && !u.startsWith("aura://") }
-            }.distinct().size.coerceAtLeast(if (currentScript.steps.isNotEmpty()) 1 else 0)
-        }
-
-        // Professional Automation Studio App Bar
-        com.example.ui.components.AuraSubScreenTopBar(
-            title = "Automation Studio",
-            subtitle = if (distinctStudioPageCount > 1) {
-                "${currentScript.steps.size} steps across $distinctStudioPageCount pages (Starts Page 1)"
-            } else {
-                "${currentScript.steps.size} steps • ${if (currentScript.targetWebsite == "*") "Any website" else currentScript.targetWebsite}"
-            },
-            icon = Icons.Default.SmartToy,
-            accentColor = indigo,
-            onNavigateBack = onNavigateBack,
-            backButtonTestTag = "btn_manager_back",
-            actions = {
-                Button(
-                    onClick = onRunScript,
-                    colors = ButtonDefaults.buttonColors(containerColor = emerald),
-                    shape = com.example.ui.theme.ExpressivePillShape,
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                    modifier = Modifier.testTag("btn_manager_run_script")
-                ) {
-                    Icon(
-                        Icons.Default.PlayArrow,
-                        contentDescription = "Run",
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = "Run Flow",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            },
-            bottomContent = {
-                // Modern 4-Tab Navigation Bar
-                PrimaryTabRow(
-                    selectedTabIndex = selectedTab,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Tab(
-                        selected = selectedTab == 0,
-                        onClick = { selectedTab = 0 },
-                        text = {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Icon(Icons.Default.Code, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Text("Workflow (${currentScript.steps.size})", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        if (isWorkflowDetailOpen) {
+            // Opened Script Workflow Detail App Bar (Run button is inside the opened script)
+            Surface(
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 2.dp,
+                shadowElevation = 2.dp
+            ) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    TopAppBar(
+                        windowInsets = WindowInsets(0, 0, 0, 0),
+                        title = {
+                            Column {
+                                Text(
+                                    text = currentScript.name,
+                                    style = MaterialTheme.typography.titleMedium.copy(
+                                        fontWeight = FontWeight.Bold
+                                    ),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = "${currentScript.steps.size} steps • ${if (currentScript.targetWebsite == "*") "All websites" else currentScript.targetWebsite}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
                             }
-                        }
-                    )
-                    Tab(
-                        selected = selectedTab == 1,
-                        onClick = { selectedTab = 1 },
-                        text = {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        },
+                        navigationIcon = {
+                            IconButton(
+                                onClick = { isWorkflowDetailOpen = false },
+                                modifier = Modifier.testTag("btn_manager_back")
                             ) {
-                                Icon(Icons.Default.LibraryBooks, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Text("Templates (${savedScripts.size})", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                    contentDescription = "Back to Templates"
+                                )
                             }
-                        }
-                    )
-                    Tab(
-                        selected = selectedTab == 2,
-                        onClick = { selectedTab = 2 },
-                        text = {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        },
+                        actions = {
+                            Button(
+                                onClick = onRunScript,
+                                colors = ButtonDefaults.buttonColors(containerColor = emerald),
+                                shape = RoundedCornerShape(12.dp),
+                                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+                                modifier = Modifier
+                                    .padding(end = 8.dp)
+                                    .testTag("btn_manager_run_script")
                             ) {
-                                Icon(Icons.Default.ListAlt, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Text("My Data (${dataSheets.size})", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                Icon(
+                                    Icons.Default.PlayArrow,
+                                    contentDescription = "Run Script",
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "Run",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
                             }
-                        }
+                        },
+                        colors = TopAppBarDefaults.topAppBarColors(
+                            containerColor = MaterialTheme.colorScheme.surface,
+                            titleContentColor = MaterialTheme.colorScheme.onSurface
+                        )
                     )
-                    Tab(
-                        selected = selectedTab == 3,
-                        onClick = { selectedTab = 3 },
-                        text = {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Icon(Icons.Default.Terminal, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Text("Logs", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                            }
-                        }
-                    )
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                 }
             }
-        )
 
-        // Tab Content
-        Box(modifier = Modifier.weight(1f)) {
-            when (selectedTab) {
-                0 -> EasyWorkflowTab(
+            Box(modifier = Modifier.weight(1f)) {
+                EasyWorkflowTab(
                     currentScript = currentScript,
                     dataSheets = dataSheets,
                     executionState = executionState,
+                    onRunScript = onRunScript,
                     onOpenSettings = { showFlowSettingsDialog = true },
                     onRenameScript = { showRenameScriptDialog = true },
                     onEditStep = { stepToEdit = it },
@@ -282,34 +254,112 @@ fun AutomationManagerScreen(
                     onAddStep = { showAddStepDialog = true },
                     onAddNavigate = { showAddNavigateDialog = true },
                     onClearAll = onClearAllSteps,
-                    onGoToTemplates = { selectedTab = 1 }
+                    onBackToTemplates = { isWorkflowDetailOpen = false }
                 )
-                1 -> EasyLibraryAndTemplatesTab(
-                    currentScript = currentScript,
-                    savedScripts = savedScripts,
-                    dataSheets = dataSheets,
-                    onSelectScript = { script ->
-                        onSelectScript(script)
-                        selectedTab = 0 // Switch to workflow
-                    },
-                    onLoadTemplate = { template ->
-                        onSaveScript(template)
-                        onSelectScript(template)
-                        selectedTab = 0 // Switch to workflow
-                    },
-                    onDeleteScript = onDeleteScript,
-                    onOpenNewScript = { showNewScriptDialog = true }
-                )
-                2 -> EasyMyDataTab(
-                    dataSheets = dataSheets,
-                    onSaveDataSheet = onSaveDataSheet,
-                    onDeleteDataSheet = onDeleteDataSheet,
-                    onOpenNewDataSheet = { showNewDataSheetDialog = true }
-                )
-                3 -> EasyLogsTab(
-                    logMessages = executionState.logMessages,
-                    executionStatus = executionState.status
-                )
+            }
+        } else {
+            // Clean Material App Bar Layout: only Back button and "Automation" title (no Run button, no 0 steps text, no bot icon)
+            Surface(
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 1.dp
+            ) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    TopAppBar(
+                        windowInsets = WindowInsets(0, 0, 0, 0),
+                        title = {
+                            Text(
+                                text = "Automation",
+                                style = MaterialTheme.typography.titleLarge.copy(
+                                    fontWeight = FontWeight.Bold
+                                )
+                            )
+                        },
+                        navigationIcon = {
+                            IconButton(
+                                onClick = onNavigateBack,
+                                modifier = Modifier.testTag("btn_manager_back")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                    contentDescription = "Back"
+                                )
+                            }
+                        },
+                        colors = TopAppBarDefaults.topAppBarColors(
+                            containerColor = MaterialTheme.colorScheme.surface,
+                            titleContentColor = MaterialTheme.colorScheme.onSurface
+                        )
+                    )
+
+                    // Clean 2-Tab Navigation Bar: Templates and My Data (Workflow and Logs tabs removed)
+                    PrimaryTabRow(
+                        selectedTabIndex = selectedTab,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Tab(
+                            selected = selectedTab == 0,
+                            onClick = { selectedTab = 0 },
+                            modifier = Modifier.testTag("tab_automation_templates"),
+                            text = {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Icon(Icons.Default.LibraryBooks, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Text("Templates", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                                }
+                            }
+                        )
+                        Tab(
+                            selected = selectedTab == 1,
+                            onClick = { selectedTab = 1 },
+                            modifier = Modifier.testTag("tab_automation_my_data"),
+                            text = {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Icon(Icons.Default.ListAlt, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Text("My Data", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                                }
+                            }
+                        )
+                    }
+                }
+            }
+
+            // Main Tab Content
+            Box(modifier = Modifier.weight(1f)) {
+                when (selectedTab) {
+                    0 -> EasyLibraryAndTemplatesTab(
+                        currentScript = currentScript,
+                        savedScripts = savedScripts,
+                        dataSheets = dataSheets,
+                        onSelectScript = { script ->
+                            val linkedScript = if (script.dataSheetId == null && dataSheets.isNotEmpty()) {
+                                script.copy(dataSheetId = dataSheets.first().id)
+                            } else script
+                            onSelectScript(linkedScript)
+                            isWorkflowDetailOpen = true
+                        },
+                        onLoadTemplate = { template ->
+                            val linkedTemplate = if (template.dataSheetId == null && dataSheets.isNotEmpty()) {
+                                template.copy(dataSheetId = dataSheets.first().id)
+                            } else template
+                            onSaveScript(linkedTemplate)
+                            onSelectScript(linkedTemplate)
+                            isWorkflowDetailOpen = true
+                        },
+                        onDeleteScript = onDeleteScript,
+                        onOpenNewScript = { showNewScriptDialog = true }
+                    )
+                    1 -> EasyMyDataTab(
+                        dataSheets = dataSheets,
+                        onSaveDataSheet = onSaveDataSheet,
+                        onDeleteDataSheet = onDeleteDataSheet,
+                        onOpenNewDataSheet = { showNewDataSheetDialog = true }
+                    )
+                }
             }
         }
     }
@@ -358,7 +408,7 @@ fun AutomationManagerScreen(
         )
     }
 
-    // Flow Settings Dialog (Simple & uncluttered modal)
+    // Flow Settings Dialog
     if (showFlowSettingsDialog) {
         FlowSettingsDialog(
             script = currentScript,
@@ -394,7 +444,7 @@ fun AutomationManagerScreen(
                     id = UUID.randomUUID().toString(),
                     name = name,
                     targetWebsite = web.ifBlank { "*" },
-                    dataSheetId = sheetId,
+                    dataSheetId = sheetId ?: dataSheets.firstOrNull()?.id,
                     iterationOrder = order,
                     exhaustionPolicy = policy,
                     repeatCount = 4
@@ -402,7 +452,7 @@ fun AutomationManagerScreen(
                 onSaveScript(newScript)
                 onSelectScript(newScript)
                 showNewScriptDialog = false
-                selectedTab = 0
+                isWorkflowDetailOpen = true
             }
         )
     }
@@ -424,7 +474,8 @@ fun AutomationManagerScreen(
                         ),
                         "username" to listOf("user_01", "user_02", "user_03", "user_04"),
                         "password" to listOf("Pass#1001!", "Pass#1002!", "Pass#1003!", "Pass#1004!"),
-                        "phoneNumber" to listOf("5550191001", "5550191002", "5550191003", "5550191004")
+                        "phoneNumber" to listOf("5550191001", "5550191002", "5550191003", "5550191004"),
+                        "dob" to listOf("04 May 2001")
                     ),
                     iterationOrder = order,
                     exhaustionPolicy = policy
@@ -437,14 +488,15 @@ fun AutomationManagerScreen(
 }
 
 /**
- * TAB 0: Easy Workflow
- * Clean, visual timeline of steps + quick settings bar
+ * Opened Script Workflow View
+ * Shows the selected script's metadata, Run button inside the script card, and formatted step cards.
  */
 @Composable
 private fun EasyWorkflowTab(
     currentScript: AutomationScript,
     dataSheets: List<DataSheet>,
     executionState: AutomationExecutionState,
+    onRunScript: () -> Unit,
     onOpenSettings: () -> Unit,
     onRenameScript: () -> Unit,
     onEditStep: (AutomationStep) -> Unit,
@@ -453,29 +505,32 @@ private fun EasyWorkflowTab(
     onAddStep: () -> Unit,
     onAddNavigate: () -> Unit,
     onClearAll: () -> Unit,
-    onGoToTemplates: () -> Unit
+    onBackToTemplates: () -> Unit
 ) {
     val emerald = Color(0xFF10B981)
-    val activeSheet = dataSheets.firstOrNull { it.id == currentScript.dataSheetId }
+    val activeSheet = dataSheets.firstOrNull { it.id == currentScript.dataSheetId } ?: dataSheets.firstOrNull()
 
     LazyColumn(
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
-        modifier = Modifier.fillMaxSize()
+        modifier = Modifier
+            .fillMaxSize()
+            .testTag("workflow_detail_view")
     ) {
-        // Hero Flow Summary Card
+        // Script Header & Controls Card (with Run Script button inside)
         item {
             Card(
-                shape = RoundedCornerShape(16.dp),
+                shape = RoundedCornerShape(18.dp),
                 colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                    containerColor = MaterialTheme.colorScheme.surface
                 ),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(
                     modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -489,7 +544,7 @@ private fun EasyWorkflowTab(
                             ) {
                                 Text(
                                     text = currentScript.name,
-                                    fontSize = 16.sp,
+                                    fontSize = 17.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.onSurface,
                                     maxLines = 1,
@@ -497,36 +552,26 @@ private fun EasyWorkflowTab(
                                 )
                                 IconButton(
                                     onClick = onRenameScript,
-                                    modifier = Modifier.size(24.dp)
+                                    modifier = Modifier.size(26.dp)
                                 ) {
                                     Icon(
                                         Icons.Default.Edit,
-                                        contentDescription = "Rename",
+                                        contentDescription = "Rename Script",
                                         tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(15.dp)
+                                        modifier = Modifier.size(16.dp)
                                     )
                                 }
                             }
 
                             Text(
-                                text = if (currentScript.targetWebsite == "*") "Runs on: All websites" else "Runs on: ${currentScript.targetWebsite}",
+                                text = if (currentScript.targetWebsite == "*") "Target: All websites" else "Target: ${currentScript.targetWebsite}",
                                 fontSize = 12.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-
-                        OutlinedButton(
-                            onClick = onOpenSettings,
-                            shape = RoundedCornerShape(10.dp),
-                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
-                        ) {
-                            Icon(Icons.Default.Settings, contentDescription = null, modifier = Modifier.size(15.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Flow Settings", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                        }
                     }
 
-                    // Quick Status Chips
+                    // Metadata Badges
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         modifier = Modifier.fillMaxWidth()
@@ -539,10 +584,10 @@ private fun EasyWorkflowTab(
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
                             ) {
-                                Icon(Icons.Default.Refresh, contentDescription = null, tint = emerald, modifier = Modifier.size(12.dp))
-                                Text("${currentScript.repeatCount}x Runs (1-by-1)", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = emerald)
+                                Icon(Icons.Default.Refresh, contentDescription = null, tint = emerald, modifier = Modifier.size(13.dp))
+                                Text("${currentScript.repeatCount}x Runs", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = emerald)
                             }
                         }
 
@@ -554,9 +599,9 @@ private fun EasyWorkflowTab(
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
                             ) {
-                                Icon(Icons.Default.ListAlt, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(12.dp))
+                                Icon(Icons.Default.ListAlt, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(13.dp))
                                 Text(
                                     text = activeSheet?.let { "Data: ${it.name}" } ?: "Data: Default Random",
                                     fontSize = 11.sp,
@@ -566,11 +611,42 @@ private fun EasyWorkflowTab(
                             }
                         }
                     }
+
+                    // Primary Actions Inside the Script: Run Script & Flow Settings
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Button(
+                            onClick = onRunScript,
+                            colors = ButtonDefaults.buttonColors(containerColor = emerald),
+                            shape = RoundedCornerShape(12.dp),
+                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("btn_inside_script_run")
+                        ) {
+                            Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Run Script", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        OutlinedButton(
+                            onClick = onOpenSettings,
+                            shape = RoundedCornerShape(12.dp),
+                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Default.Settings, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Flow Settings", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
                 }
             }
         }
 
-        // Action Toolbar: + Step, + Navigate, Clear
+        // Action Toolbar: + Add Step, + Navigate, Clear
         item {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -578,21 +654,24 @@ private fun EasyWorkflowTab(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(
-                    text = "Steps Sequence (${currentScript.steps.size})",
-                    fontSize = 14.sp,
+                    text = "Workflow Steps (${currentScript.steps.size})",
+                    fontSize = 15.sp,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface
                 )
 
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
                     Button(
                         onClick = onAddStep,
                         shape = RoundedCornerShape(10.dp),
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
                     ) {
                         Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("+ Add Step", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text("Add Step", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
 
                     OutlinedButton(
@@ -601,8 +680,8 @@ private fun EasyWorkflowTab(
                         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
                     ) {
                         Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, modifier = Modifier.size(13.dp))
-                        Spacer(modifier = Modifier.width(3.dp))
-                        Text("+ Navigate", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Navigate", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                     }
 
                     if (currentScript.steps.isNotEmpty()) {
@@ -610,20 +689,25 @@ private fun EasyWorkflowTab(
                             onClick = onClearAll,
                             modifier = Modifier.size(34.dp)
                         ) {
-                            Icon(Icons.Default.Clear, contentDescription = "Clear All", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(18.dp))
+                            Icon(
+                                Icons.Default.Clear,
+                                contentDescription = "Clear All",
+                                tint = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.size(18.dp)
+                            )
                         }
                     }
                 }
             }
         }
 
-        // Empty State or List of Step Cards
+        // Empty State or Formatted Step Cards
         if (currentScript.steps.isEmpty()) {
             item {
                 Card(
                     shape = RoundedCornerShape(16.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(
@@ -631,57 +715,55 @@ private fun EasyWorkflowTab(
                             .fillMaxWidth()
                             .padding(28.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(14.dp)
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         Surface(
                             shape = CircleShape,
                             color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
-                            modifier = Modifier.size(56.dp)
+                            modifier = Modifier.size(52.dp)
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(
                                     Icons.Default.AutoAwesome,
                                     contentDescription = null,
                                     tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(28.dp)
+                                    modifier = Modifier.size(26.dp)
                                 )
                             }
                         }
 
                         Text(
-                            text = "No steps in this workflow yet",
+                            text = "No steps in this script yet",
                             fontSize = 15.sp,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onSurface
                         )
 
                         Text(
-                            text = "Add steps manually or choose a 1-click starter template to automate form filling, searches, or multi-page tasks.",
+                            text = "Add steps manually or go back to Templates to pick a starter workflow.",
                             fontSize = 12.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(horizontal = 16.dp),
+                            modifier = Modifier.padding(horizontal = 12.dp),
                             lineHeight = 16.sp
                         )
 
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             Button(
-                                onClick = onGoToTemplates,
-                                shape = RoundedCornerShape(10.dp),
-                                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
-                            ) {
-                                Icon(Icons.Default.LibraryBooks, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Browse Templates", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                            }
-
-                            OutlinedButton(
                                 onClick = onAddStep,
                                 shape = RoundedCornerShape(10.dp),
                                 contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
                             ) {
                                 Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("Add Custom Step", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                Text("Add Step", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+
+                            OutlinedButton(
+                                onClick = onBackToTemplates,
+                                shape = RoundedCornerShape(10.dp),
+                                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp)
+                            ) {
+                                Text("Back to Templates", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                             }
                         }
                     }
@@ -704,7 +786,7 @@ private fun EasyWorkflowTab(
 }
 
 /**
- * Human-readable step card with friendly icons and clear badges
+ * Formatted step card with clear icon badge, description, data binding pill, and actions.
  */
 @Composable
 private fun EasyStepCard(
@@ -726,16 +808,17 @@ private fun EasyStepCard(
         AutomationActionType.WAIT -> Triple(Icons.Default.HourglassBottom, Color(0xFF64748B), "Wait / Delay")
         AutomationActionType.SELECT_DROPDOWN -> Triple(Icons.Default.KeyboardArrowDown, Color(0xFFD946EF), "Choose Option")
         AutomationActionType.SELECT_COUNTRY_CODE -> Triple(Icons.Default.Language, Color(0xFF10B981), "Select Country")
-        AutomationActionType.SELECT_DATE -> Triple(Icons.Default.ListAlt, Color(0xFF0284C7), "Select Date")
+        AutomationActionType.SELECT_DATE -> Triple(Icons.Default.ListAlt, Color(0xFF0284C7), "Select Birthday / Date")
         AutomationActionType.UPLOAD_FILE -> Triple(Icons.Default.FileUpload, Color(0xFFF59E0B), "Upload File")
         AutomationActionType.CLEAR -> Triple(Icons.Default.Clear, Color(0xFFEF4444), "Clear Input")
         AutomationActionType.SCROLL -> Triple(Icons.Default.KeyboardArrowDown, Color(0xFF6366F1), "Scroll Page")
     }
 
     Card(
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onEdit() }
@@ -750,11 +833,10 @@ private fun EasyStepCard(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 modifier = Modifier.weight(1f)
             ) {
-                // Step Number & Icon Avatar
                 Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = color.copy(alpha = 0.15f),
-                    modifier = Modifier.size(42.dp)
+                    shape = RoundedCornerShape(12.dp),
+                    color = color.copy(alpha = 0.14f),
+                    modifier = Modifier.size(44.dp)
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
@@ -766,7 +848,7 @@ private fun EasyStepCard(
                     }
                 }
 
-                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -785,21 +867,20 @@ private fun EasyStepCard(
                                 text = "${step.delayMs}ms",
                                 fontSize = 9.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
                             )
                         }
                     }
 
                     Text(
                         text = step.elementDescription.ifBlank { step.selector },
-                        fontSize = 13.sp,
+                        fontSize = 14.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurface,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
 
-                    // Data Binding or Value Badge
                     if (!step.variableKey.isNullOrBlank() || step.value.isNotBlank()) {
                         Surface(
                             shape = RoundedCornerShape(6.dp),
@@ -807,7 +888,7 @@ private fun EasyStepCard(
                         ) {
                             Text(
                                 text = if (!step.variableKey.isNullOrBlank()) {
-                                    "Fills: '${step.variableKey}' from My Data (1-by-1)"
+                                    "Fills '${step.variableKey}' from Data Sheet"
                                 } else {
                                     "Value: ${step.value}"
                                 },
@@ -821,7 +902,6 @@ private fun EasyStepCard(
                 }
             }
 
-            // Quick Actions: Reorder, Edit, Delete
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(2.dp)
@@ -848,8 +928,8 @@ private fun EasyStepCard(
 }
 
 /**
- * TAB 1: Library & Ready-Made Templates
- * Gives users 1-tap automations they can use immediately without complex setup!
+ * TAB 0: Templates & Saved Scripts
+ * Properly formatted Material 3 cards. Clicking any script or template card opens its Workflow detail screen.
  */
 @Composable
 private fun EasyLibraryAndTemplatesTab(
@@ -872,6 +952,7 @@ private fun EasyLibraryAndTemplatesTab(
                     AutomationStep(actionType = AutomationActionType.INPUT, selector = "input[type='email'], #email", elementDescription = "Email Address", variableKey = "email", delayMs = 600L),
                     AutomationStep(actionType = AutomationActionType.INPUT, selector = "input[name='username'], #username", elementDescription = "Username", variableKey = "username", delayMs = 600L),
                     AutomationStep(actionType = AutomationActionType.INPUT, selector = "input[type='password'], #password", elementDescription = "Password", variableKey = "password", delayMs = 600L),
+                    AutomationStep(actionType = AutomationActionType.SELECT_DATE, selector = "input[type='date'], input[name*='dob'], input[name*='birth'], [data-datepicker]", elementDescription = "Birthday / Date of Birth", variableKey = "dob", delayMs = 700L),
                     AutomationStep(actionType = AutomationActionType.CHECKBOX, selector = "input[type='checkbox']", elementDescription = "Agree to Terms", delayMs = 500L),
                     AutomationStep(actionType = AutomationActionType.SUBMIT, selector = "button[type='submit'], input[type='submit']", elementDescription = "Submit Form", delayMs = 1200L)
                 )
@@ -904,148 +985,332 @@ private fun EasyLibraryAndTemplatesTab(
         )
     }
 
+    val scriptsToDisplay = remember(savedScripts, currentScript) {
+        if (savedScripts.isEmpty()) {
+            listOf(currentScript)
+        } else if (savedScripts.none { it.id == currentScript.id } && currentScript.steps.isNotEmpty()) {
+            listOf(currentScript) + savedScripts
+        } else {
+            savedScripts
+        }
+    }
+
     LazyColumn(
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
         modifier = Modifier.fillMaxSize()
     ) {
-        // Ready-to-Use 1-Click Starter Templates
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
-                    Text("1-Click Starter Templates", fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                }
-
-                Text(
-                    "Select a pre-built automation recipe to jump-start your flow with zero manual configuration:",
-                    fontSize = 11.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-
-                templates.forEach { template ->
-                    Card(
-                        shape = RoundedCornerShape(14.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            modifier = Modifier.padding(14.dp)
-                        ) {
-                            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Text(template.name, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                                Text(
-                                    text = "${template.steps.size} steps • Target: ${template.targetWebsite} • ${template.repeatCount}x runs",
-                                    fontSize = 11.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-
-                            Button(
-                                onClick = { onLoadTemplate(template) },
-                                shape = RoundedCornerShape(8.dp),
-                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
-                            ) {
-                                Text("Use Template", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        item { HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)) }
-
-        // Saved Custom Scripts
+        // Section 1: Your Scripts (Clickable -> Opens Workflow)
         item {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Column {
-                    Text("Your Saved Workflows", fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                    Text("${savedScripts.size} saved scripts in storage", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = "Your Scripts",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "Tap any script card to open its workflow and run it",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
 
                 Button(
                     onClick = onOpenNewScript,
-                    shape = RoundedCornerShape(8.dp),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                    shape = RoundedCornerShape(10.dp),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                    modifier = Modifier.testTag("btn_new_script")
                 ) {
-                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp))
+                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("New Script", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Text("New Script", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
 
-        items(savedScripts) { script ->
+        itemsIndexed(scriptsToDisplay, key = { _, s -> s.id }) { index, script ->
             val isCurrent = script.id == currentScript.id
             Card(
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(
-                    containerColor = if (isCurrent) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f) else MaterialTheme.colorScheme.surface
+                    containerColor = if (isCurrent) {
+                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.28f)
+                    } else {
+                        MaterialTheme.colorScheme.surface
+                    }
                 ),
+                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
                 border = BorderStroke(
-                    1.dp,
-                    if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
+                    width = 1.dp,
+                    color = if (isCurrent) {
+                        MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
+                    } else {
+                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)
+                    }
                 ),
                 modifier = Modifier
                     .fillMaxWidth()
+                    .testTag("script_card_$index")
                     .clickable { onSelectScript(script) }
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween,
-                    modifier = Modifier.padding(14.dp)
+                    modifier = Modifier.padding(16.dp)
                 ) {
-                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text(script.name, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                            if (isCurrent) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                            modifier = Modifier.size(44.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.Code,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                        }
+
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text(
+                                    text = script.name,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                if (isCurrent) {
+                                    Surface(
+                                        shape = RoundedCornerShape(6.dp),
+                                        color = MaterialTheme.colorScheme.primary
+                                    ) {
+                                        Text(
+                                            text = "Active",
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onPrimary,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+                            }
+
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
                                 Surface(
-                                    shape = RoundedCornerShape(4.dp),
-                                    color = MaterialTheme.colorScheme.primary
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = MaterialTheme.colorScheme.surfaceVariant
                                 ) {
-                                    Text("Active", fontSize = 9.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp))
+                                    Text(
+                                        text = "${script.steps.size} steps",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                                    )
+                                }
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = MaterialTheme.colorScheme.surfaceVariant
+                                ) {
+                                    Text(
+                                        text = if (script.targetWebsite == "*") "All sites" else script.targetWebsite,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                                    )
+                                }
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = MaterialTheme.colorScheme.surfaceVariant
+                                ) {
+                                    Text(
+                                        text = "${script.repeatCount}x runs",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                                    )
                                 }
                             }
                         }
-
-                        Text(
-                            text = "${script.steps.size} steps • ${if (script.targetWebsite == "*") "All sites" else script.targetWebsite} • ${script.repeatCount}x runs",
-                            fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
                     }
 
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        if (!isCurrent) {
-                            OutlinedButton(
-                                onClick = { onSelectScript(script) },
-                                shape = RoundedCornerShape(8.dp),
-                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
-                            ) {
-                                Text("Load", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                            }
-                        }
-
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
                         if (savedScripts.size > 1) {
                             IconButton(
                                 onClick = { onDeleteScript(script.id) },
-                                modifier = Modifier.size(32.dp)
+                                modifier = Modifier.size(34.dp)
                             ) {
-                                Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp))
+                                Icon(
+                                    Icons.Default.Delete,
+                                    contentDescription = "Delete Script",
+                                    tint = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                            contentDescription = "Open Workflow",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        }
+
+        item {
+            HorizontalDivider(
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                modifier = Modifier.padding(vertical = 4.dp)
+            )
+        }
+
+        // Section 2: Starter Templates (Clickable -> Opens Workflow)
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Icon(
+                        Icons.Default.AutoAwesome,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Text(
+                        text = "Starter Templates",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+                Text(
+                    text = "Tap any template below to open its workflow and customize or run it:",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+
+        itemsIndexed(templates) { index, template ->
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("template_card_$index")
+                    .clickable { onLoadTemplate(template) }
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier.padding(16.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.secondaryContainer,
+                            modifier = Modifier.size(44.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.AutoAwesome,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                text = template.name,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = MaterialTheme.colorScheme.surfaceVariant
+                                ) {
+                                    Text(
+                                        text = "${template.steps.size} steps",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                                    )
+                                }
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = MaterialTheme.colorScheme.surfaceVariant
+                                ) {
+                                    Text(
+                                        text = "Target: ${template.targetWebsite}",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                                    )
+                                }
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = MaterialTheme.colorScheme.surfaceVariant
+                                ) {
+                                    Text(
+                                        text = "${template.repeatCount}x runs",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                                    )
+                                }
                             }
                         }
                     }
+
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                        contentDescription = "Open Template Workflow",
+                        tint = MaterialTheme.colorScheme.primary
+                    )
                 }
             }
         }
@@ -1053,8 +1318,8 @@ private fun EasyLibraryAndTemplatesTab(
 }
 
 /**
- * TAB 2: Easy My Data
- * Clean, uncluttered view of data sheets and 1-by-1 form filling data
+ * TAB 1: My Data
+ * Clean, uncluttered view of Data Sheets and 1-by-1 form filling data (including Birthday / Date of Birth 'dob').
  */
 @Composable
 private fun EasyMyDataTab(
@@ -1063,7 +1328,9 @@ private fun EasyMyDataTab(
     onDeleteDataSheet: (String) -> Unit,
     onOpenNewDataSheet: () -> Unit
 ) {
-    var selectedSheetId by remember { mutableStateOf(dataSheets.firstOrNull()?.id ?: "__DEFAULT__") }
+    var selectedSheetId by remember(dataSheets.size) {
+        mutableStateOf(dataSheets.firstOrNull()?.id ?: "__DEFAULT__")
+    }
     val isViewingDefault = selectedSheetId == "__DEFAULT__" || dataSheets.isEmpty()
     val activeSheet = if (!isViewingDefault) {
         dataSheets.firstOrNull { it.id == selectedSheetId } ?: dataSheets.firstOrNull()
@@ -1085,16 +1352,16 @@ private fun EasyMyDataTab(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("Select Active Data Sheet", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    Text("Select Active Data Sheet", fontSize = 15.sp, fontWeight = FontWeight.Bold)
 
                     Button(
                         onClick = onOpenNewDataSheet,
-                        shape = RoundedCornerShape(8.dp),
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                        shape = RoundedCornerShape(10.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
                     ) {
                         Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("New Sheet", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text("New Sheet", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
                 }
 
@@ -1132,7 +1399,8 @@ private fun EasyMyDataTab(
                 Card(
                     shape = RoundedCornerShape(16.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(
@@ -1162,7 +1430,6 @@ private fun EasyMyDataTab(
                             }
                         }
 
-                        // Order & Policy Row
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                             Surface(
                                 shape = RoundedCornerShape(8.dp),
@@ -1196,7 +1463,7 @@ private fun EasyMyDataTab(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("Form Fields in '${activeSheet.name}'", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    Text("Form Fields in '${activeSheet.name}'", fontSize = 14.sp, fontWeight = FontWeight.Bold)
 
                     OutlinedButton(
                         onClick = { showAddFieldDialog = true },
@@ -1210,14 +1477,15 @@ private fun EasyMyDataTab(
                 }
             }
 
-            // Standard common fields: email, username, password, phone, firstName
+            // Standard common fields including Birthday / Date of Birth ('dob')
             val standardKeys = listOf(
                 "email" to "Email Address",
                 "username" to "Username",
                 "password" to "Password",
                 "phoneNumber" to "Phone Number",
                 "firstName" to "First Name",
-                "lastName" to "Last Name"
+                "lastName" to "Last Name",
+                "dob" to "Birthday / Date of Birth (dob)"
             )
 
             items(standardKeys) { (key, label) ->
@@ -1231,7 +1499,13 @@ private fun EasyMyDataTab(
             }
 
             // Any extra custom fields
-            val otherKeys = activeSheet.fields.keys.filterNot { k -> standardKeys.any { it.first == k } }
+            val dobAliases = setOf(
+                "dob", "birthday", "birthdate", "dateofbirth", "date_of_birth",
+                "birth_date", "birth", "bday", "date of birth", "birth date"
+            )
+            val otherKeys = activeSheet.fields.keys.filterNot { k ->
+                standardKeys.any { it.first.equals(k, ignoreCase = true) } || k.trim().lowercase() in dobAliases
+            }
             items(otherKeys) { key ->
                 val values = activeSheet.getFieldValues(key)
                 EasyFieldCard(
@@ -1240,6 +1514,36 @@ private fun EasyMyDataTab(
                     values = values,
                     onEdit = { fieldKeyToEdit = key }
                 )
+            }
+        } else {
+            item {
+                Card(
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(20.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Text("Create a Data Sheet for Custom Values", fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                        Text(
+                            text = "Create a Data Sheet to store your own emails, usernames, passwords, and birthdays (e.g. '04 May 2001'). Calendar birthday pickers and dropdowns will fill directly from your Data Sheet.",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            lineHeight = 16.sp
+                        )
+                        Button(
+                            onClick = onOpenNewDataSheet,
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Create Data Sheet", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
             }
         }
 
@@ -1262,11 +1566,11 @@ private fun EasyMyDataTab(
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = MaterialTheme.colorScheme.tertiary, modifier = Modifier.size(18.dp))
-                        Text("Dynamic Default Generator", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                        Text("Smart Data Sheet & Birthday Sync", fontSize = 14.sp, fontWeight = FontWeight.Bold)
                     }
 
                     Text(
-                        text = "Whenever a field is left empty or your stored list runs out, Aura automatically generates fresh, realistic dummy data (email, password, phone, address) for each step so automation never fails.",
+                        text = "Add any birthday format in 'dob' (such as '04 May 2001', '2001-05-04', or '04/05/2001') and calendar pickers, date inputs, and Day/Month/Year dropdowns will fill that exact birthday from your Data Sheet.",
                         fontSize = 11.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         lineHeight = 16.sp
@@ -1299,14 +1603,19 @@ private fun EasyMyDataTab(
         AddCustomFieldDialog(
             onDismiss = { showAddFieldDialog = false },
             onAdd = { newKey ->
+                val normalizedNewKey = if (newKey.trim().lowercase() in setOf("birthday", "birthdate", "dateofbirth", "date_of_birth", "bday", "dob")) {
+                    "dob"
+                } else {
+                    newKey.trim()
+                }
                 val newFields = activeSheet.fields.toMutableMap().apply {
-                    if (!containsKey(newKey)) {
-                        put(newKey, emptyList())
+                    if (!containsKey(normalizedNewKey)) {
+                        put(normalizedNewKey, emptyList())
                     }
                 }
                 onSaveDataSheet(activeSheet.copy(fields = newFields))
                 showAddFieldDialog = false
-                fieldKeyToEdit = newKey
+                fieldKeyToEdit = normalizedNewKey
             }
         )
     }
@@ -1323,9 +1632,10 @@ private fun EasyFieldCard(
     onEdit: () -> Unit
 ) {
     Card(
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onEdit() }
@@ -1363,7 +1673,12 @@ private fun EasyFieldCard(
                         overflow = TextOverflow.Ellipsis
                     )
                 } else {
-                    Text("Tap to paste or upload 10s of items", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    val emptyHint = if (fieldKey.equals("dob", ignoreCase = true)) {
+                        "Tap to add birthday (e.g. 04 May 2001)"
+                    } else {
+                        "Tap to paste or upload items"
+                    }
+                    Text(emptyHint, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
 
@@ -1372,79 +1687,7 @@ private fun EasyFieldCard(
                 shape = RoundedCornerShape(8.dp),
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
             ) {
-                Text(if (values.isNotEmpty()) "Edit" else "+ Paste", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-            }
-        }
-    }
-}
-
-/**
- * TAB 3: Activity Logs
- */
-@Composable
-private fun EasyLogsTab(
-    logMessages: List<String>,
-    executionStatus: AutomationStatus
-) {
-    val emerald = Color(0xFF10B981)
-
-    LazyColumn(
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-        modifier = Modifier.fillMaxSize()
-    ) {
-        item {
-            Card(
-                shape = RoundedCornerShape(12.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    modifier = Modifier.padding(12.dp)
-                ) {
-                    Text("Execution Engine Status:", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                    Surface(
-                        shape = RoundedCornerShape(6.dp),
-                        color = if (executionStatus == AutomationStatus.PLAYING) emerald.copy(alpha = 0.2f) else MaterialTheme.colorScheme.surfaceVariant
-                    ) {
-                        Text(
-                            text = executionStatus.name,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (executionStatus == AutomationStatus.PLAYING) emerald else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                        )
-                    }
-                }
-            }
-        }
-
-        if (logMessages.isEmpty()) {
-            item {
-                Text(
-                    text = "No logs yet. Run a workflow to view step execution, element matching, and 1-by-1 data fills.",
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 16.dp)
-                )
-            }
-        } else {
-            items(logMessages) { msg ->
-                Surface(
-                    shape = RoundedCornerShape(6.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(
-                        text = msg,
-                        fontSize = 11.sp,
-                        fontFamily = com.example.ui.theme.VarelaRoundFontFamily,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                    )
-                }
+                Text(if (values.isNotEmpty()) "Edit" else "+ Add", fontSize = 11.sp, fontWeight = FontWeight.Bold)
             }
         }
     }

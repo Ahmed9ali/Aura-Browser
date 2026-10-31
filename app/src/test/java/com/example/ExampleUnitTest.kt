@@ -799,7 +799,7 @@ class ExampleUnitTest {
 
     @Test
     fun testPersonalizedContentRecommendationsAndSmartSearchService() {
-        // 1. Seed user browsing activity and bookmarks to establish interest profile
+        // 1. Seed user browsing activity and bookmarks
         repository.recordVisit("https://kotlinlang.org/docs", "Kotlin Coroutines Guide")
         repository.recordVisit("https://kotlinlang.org/docs", "Kotlin Coroutines Guide")
         repository.recordVisit("https://github.com/JetBrains/kotlin", "JetBrains Kotlin Repository")
@@ -817,7 +817,7 @@ class ExampleUnitTest {
         val bookmarks = repository.bookmarks.value
         val openTabs = repository.tabs.value
 
-        // 2. Verify personalized content recommendations appear as user types in the address bar
+        // 2. Verify personalized recommendations are completely removed
         val typedRecommendations = suggestionsEngine.getPersonalizedRecommendations(
             query = "kotlin",
             history = history,
@@ -826,21 +826,27 @@ class ExampleUnitTest {
             selectedCategory = null
         )
         assertTrue(
-            "Typing 'kotlin' should return personalized content recommendations",
-            typedRecommendations.isNotEmpty()
+            "Personalized recommendations must be empty",
+            typedRecommendations.isEmpty()
+        )
+
+        val kotlinSuggestions = suggestionsEngine.getSuggestions(
+            query = "kotlin",
+            history = history,
+            bookmarks = bookmarks,
+            tabs = openTabs,
+            searchEngine = SearchEngine.GOOGLE
+        )
+        assertTrue("Typing 'kotlin' should return smart search suggestions", kotlinSuggestions.isNotEmpty())
+        assertFalse(
+            "Search suggestions must not include PERSONALIZED items",
+            kotlinSuggestions.any { it.type == SuggestionType.PERSONALIZED }
         )
         assertTrue(
-            "Personalized recommendations should include PERSONALIZED or BOOKMARK items with reasonBadge",
-            typedRecommendations.any {
-                (it.type == SuggestionType.PERSONALIZED || it.type == SuggestionType.BOOKMARK || it.type == SuggestionType.HISTORY) &&
+            "Search suggestions should include domain, history, or autocomplete matches for 'kotlin'",
+            kotlinSuggestions.any {
+                (it.type == SuggestionType.DOMAIN || it.type == SuggestionType.HISTORY || it.type == SuggestionType.SEARCH_AUTOCOMPLETE) &&
                     !it.reasonBadge.isNullOrBlank()
-            }
-        )
-        assertTrue(
-            "Personalized recommendations should match the typed query 'kotlin'",
-            typedRecommendations.any {
-                it.title.contains("Kotlin", ignoreCase = true) ||
-                    (it.targetUrl?.contains("kotlin", ignoreCase = true) == true)
             }
         )
 

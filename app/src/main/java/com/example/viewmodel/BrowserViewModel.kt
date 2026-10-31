@@ -180,7 +180,7 @@ class BrowserViewModel(
                 query = searchQuery,
                 history = history,
                 bookmarks = bookmarks,
-                selectedCategory = selectedCategory,
+                selectedCategory = null,
                 tabs = tabs,
                 searchEngine = settings.searchEngine
             )
@@ -188,18 +188,7 @@ class BrowserViewModel(
             emptyList()
         }
 
-        val personalizedRecommendations = if (settings.suggestionsEnabled) {
-            suggestionsEngine.getPersonalizedRecommendations(
-                query = searchQuery,
-                history = history,
-                bookmarks = bookmarks,
-                tabs = tabs,
-                selectedCategory = selectedCategory,
-                limit = 5
-            )
-        } else {
-            emptyList()
-        }
+        val personalizedRecommendations = emptyList<SearchSuggestion>()
 
         BrowserUiState(
             currentScreen = screen,

@@ -174,8 +174,8 @@ fun SettingsScreen(
                             shape = groupedListCardShape(index = 1, count = 2),
                             icon = Icons.Default.Psychology,
                             badgeColor = Color(0xFF8B5CF6),
-                            title = "Personalized Suggestions",
-                            subtitle = "Real-time query discovery and smart domain completion",
+                            title = "Search Suggestions",
+                            subtitle = "Smart search autocomplete, domain completion, and open tab matching",
                             checked = settings.suggestionsEnabled,
                             onCheckedChange = { onToggleSuggestions() },
                             testTag = "setting_toggle_suggestions"

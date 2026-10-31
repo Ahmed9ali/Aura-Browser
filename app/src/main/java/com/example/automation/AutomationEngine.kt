@@ -838,6 +838,10 @@ class AutomationEngine(
         _dataSheets.value = updated
         if (_currentScript.value.dataSheetId == null) {
             _currentScript.value = _currentScript.value.copy(dataSheetId = sheet.id)
+            syncCurrentScriptToSavedScripts()
+        }
+        _savedScripts.value = _savedScripts.value.map { saved ->
+            if (saved.dataSheetId == null) saved.copy(dataSheetId = sheet.id) else saved
         }
         addLog("Saved Data Sheet: '${sheet.name}' (${sheet.fields.keys.size} fields, max ${sheet.totalRows()} rows)")
     }
@@ -846,13 +850,17 @@ class AutomationEngine(
         _dataSheets.value = _dataSheets.value.filter { it.id != sheetId }
         if (_currentScript.value.dataSheetId == sheetId) {
             _currentScript.value = _currentScript.value.copy(dataSheetId = _dataSheets.value.firstOrNull()?.id)
+            syncCurrentScriptToSavedScripts()
         }
         addLog("Deleted Data Sheet.")
     }
 
     fun getDataSheet(id: String?): DataSheet? {
-        if (id == null || id == "default") return null
-        return _dataSheets.value.firstOrNull { it.id == id }
+        if (id == "default") return null
+        if (id != null) {
+            _dataSheets.value.firstOrNull { it.id == id }?.let { return it }
+        }
+        return _dataSheets.value.firstOrNull { it.totalRows() > 0 } ?: _dataSheets.value.firstOrNull()
     }
 
     // Recording (No-Type Element Grabbing)
@@ -1353,6 +1361,7 @@ class AutomationEngine(
 
                 var currentDefaultRecord = AutomationDataGenerator.generateSingleRandomRecord()
                 var lastResolvedPassword: String? = null
+                var iterationResolvedDob: String? = null
 
                 for ((index, step) in activeScript.steps.withIndex()) {
                     if (_executionState.value.status != AutomationStatus.PLAYING &&
@@ -1414,6 +1423,7 @@ class AutomationEngine(
 
                     val stepFieldKey = inferStepFieldKey(step)
                     val fallbackHint = stepFieldKey ?: step.elementDescription
+                    val isDobFieldKey = stepFieldKey == "dob" || stepFieldKey == "dobDay" || stepFieldKey == "dobMonth" || stepFieldKey == "dobYear"
 
                     val resolvedValue = if (stepFieldKey != null) {
                         val activeSheetNow = getDataSheet(_currentScript.value.dataSheetId)
@@ -1422,6 +1432,35 @@ class AutomationEngine(
                             lastResolvedPassword != null
                         ) {
                             lastResolvedPassword!!
+                        } else if (isDobFieldKey) {
+                            // Resolve the full birthday once per iteration from the Data Sheet so dob, dobDay, dobMonth, and dobYear
+                            // all use the exact birthday added by the user in the Data Sheet (e.g. "04 May 2001")
+                            if (iterationResolvedDob == null) {
+                                val consumedDob = consumeFieldNextValue(
+                                    fieldKey = "dob",
+                                    script = _currentScript.value,
+                                    usageCounters = fieldUsageCounters,
+                                    shuffledOrders = fieldShuffledOrders,
+                                    forcedDefaultFields = fieldsForcedToDefault,
+                                    defaultFallback = { currentDefaultRecord.dob }
+                                )
+                                if (consumedDob == null) {
+                                    break@outerLoop
+                                }
+                                iterationResolvedDob = consumedDob
+                            }
+                            val rawDobForIter = iterationResolvedDob ?: currentDefaultRecord.dob
+                            val (parsedY, parsedM, parsedD) = parseDobTriplet(rawDobForIter, currentDefaultRecord)
+                            val dobPartOrFull = when (stepFieldKey) {
+                                "dobYear" -> parsedY
+                                "dobMonth" -> parsedM
+                                "dobDay" -> parsedD
+                                else -> rawDobForIter
+                            }
+                            _executionState.value = _executionState.value.copy(
+                                currentDataSummary = "$stepFieldKey: $dobPartOrFull"
+                            )
+                            dobPartOrFull
                         } else {
                             val consumed = consumeFieldNextValue(
                                 fieldKey = stepFieldKey,
@@ -1455,13 +1494,13 @@ class AutomationEngine(
                         step.actionType != AutomationActionType.WAIT &&
                         fallbackStepExecutor != null
                     ) {
-                        val effectiveVal = when (step.actionType) {
-                            AutomationActionType.SELECT_DATE -> {
+                        val effectiveVal = when {
+                            step.actionType == AutomationActionType.SELECT_DATE || stepFieldKey == "dob" -> {
                                 val dob = resolvedValue.ifBlank { currentDefaultRecord.dob }
                                 val (y, m, d) = parseDobTriplet(dob, currentDefaultRecord)
                                 "$y-$m-$d"
                             }
-                            AutomationActionType.SELECT_COUNTRY_CODE -> {
+                            step.actionType == AutomationActionType.SELECT_COUNTRY_CODE -> {
                                 resolvedValue.ifBlank { currentDefaultRecord.countryCode }
                             }
                             else -> resolvedValue
@@ -1479,9 +1518,17 @@ class AutomationEngine(
                             navigateWebViewAndWait(targetUrl)
                         }
                         AutomationActionType.CLICK -> {
-                            val js = AutomationScripts.createClickScript(step.selector, fallbackHint)
-                            val ok = evaluateJsWithRetry(js)
-                            addLog("[Run $iteration] ${if (ok) "Clicked" else "Attempted click"}: ${step.elementDescription}")
+                            if (stepFieldKey == "dob") {
+                                val dob = resolvedValue.ifBlank { currentDefaultRecord.dob }
+                                val (y, m, d) = parseDobTriplet(dob, currentDefaultRecord)
+                                val js = AutomationScripts.createSelectDateScript(step.selector, "$y-$m-$d", d, m, y, fallbackHint)
+                                val ok = evaluateJsWithRetry(js, maxAttempts = 25, retryDelayMs = 200L)
+                                addLog("[Run $iteration] ${if (ok) "Selected" else "Attempted"} Date: '$y-$m-$d'")
+                            } else {
+                                val js = AutomationScripts.createClickScript(step.selector, fallbackHint)
+                                val ok = evaluateJsWithRetry(js)
+                                addLog("[Run $iteration] ${if (ok) "Clicked" else "Attempted click"}: ${step.elementDescription}")
+                            }
                         }
                         AutomationActionType.CHECKBOX -> {
                             val js = AutomationScripts.createCheckScript(step.selector, isRadio = false, desiredState = true, fallbackHint = fallbackHint)
@@ -1646,52 +1693,12 @@ class AutomationEngine(
         rawDob: String,
         fallbackRecord: AutomationDataRecord
     ): Triple<String, String, String> {
-        val monthMap = mapOf(
-            "jan" to "01", "january" to "01",
-            "feb" to "02", "february" to "02",
-            "mar" to "03", "march" to "03",
-            "apr" to "04", "april" to "04",
-            "may" to "05",
-            "jun" to "06", "june" to "06",
-            "jul" to "07", "july" to "07",
-            "aug" to "08", "august" to "08",
-            "sep" to "09", "sept" to "09", "september" to "09",
-            "oct" to "10", "october" to "10",
-            "nov" to "11", "november" to "11",
-            "dec" to "12", "december" to "12"
+        return AutomationDataGenerator.parseFlexibleDob(
+            rawDob = rawDob,
+            fallbackYear = fallbackRecord.dobYear,
+            fallbackMonth = fallbackRecord.dobMonth,
+            fallbackDay = fallbackRecord.dobDay
         )
-        val parts = rawDob.trim().split(Regex("[-/.,\\s]+")).filter { it.isNotBlank() }
-        if (parts.size >= 3) {
-            val namedMonthIdx = parts.indexOfFirst { monthMap.containsKey(it.lowercase()) }
-            if (namedMonthIdx >= 0) {
-                val m = monthMap[parts[namedMonthIdx].lowercase()] ?: fallbackRecord.dobMonth
-                val rest = parts.filterIndexed { i, _ -> i != namedMonthIdx }
-                val y = rest.firstOrNull { it.length == 4 } ?: rest.last()
-                val d = (rest.firstOrNull { it != y } ?: fallbackRecord.dobDay).padStart(2, '0')
-                return Triple(y, m, d)
-            }
-            return when {
-                parts[0].length == 4 -> Triple(
-                    parts[0],
-                    parts[1].padStart(2, '0'),
-                    parts[2].padStart(2, '0')
-                )
-                parts[2].length == 4 -> {
-                    val firstNum = parts[0].toIntOrNull() ?: 1
-                    if (firstNum > 12) {
-                        Triple(parts[2], parts[1].padStart(2, '0'), parts[0].padStart(2, '0'))
-                    } else {
-                        Triple(parts[2], parts[0].padStart(2, '0'), parts[1].padStart(2, '0'))
-                    }
-                }
-                else -> Triple(
-                    parts[0],
-                    parts[1].padStart(2, '0'),
-                    parts[2].padStart(2, '0')
-                )
-            }
-        }
-        return Triple(fallbackRecord.dobYear, fallbackRecord.dobMonth, fallbackRecord.dobDay)
     }
 
     private fun isSingleFullBirthdayStep(step: AutomationStep): Boolean {
@@ -1706,15 +1713,28 @@ class AutomationEngine(
         return hasFullDobWord && !hasExplicitPartWord
     }
 
+    private fun normalizeDobKeyAlias(key: String?): String? {
+        if (key == null) return null
+        return when (key.trim().lowercase()) {
+            "dob", "birthday", "birthdate", "dateofbirth", "date_of_birth", "birth_date", "bday", "birth" -> "dob"
+            "dobday", "birth_day", "bday_day", "birthday_day" -> "dobDay"
+            "dobmonth", "birth_month", "bday_month", "birthday_month" -> "dobMonth"
+            "dobyear", "birth_year", "bday_year", "birthday_year" -> "dobYear"
+            else -> key
+        }
+    }
+
     private fun inferStepFieldKey(step: AutomationStep): String? {
         if (step.actionType == AutomationActionType.SELECT_DATE) return "dob"
-        val rawKey = when {
-            !step.variableKey.isNullOrBlank() -> step.variableKey
-            else -> {
-                val regex = Regex("\\{\\{([a-zA-Z0-9_]+)\\}\\}")
-                regex.find(step.value)?.groupValues?.get(1)
+        val rawKey = normalizeDobKeyAlias(
+            when {
+                !step.variableKey.isNullOrBlank() -> step.variableKey
+                else -> {
+                    val regex = Regex("\\{\\{([a-zA-Z0-9_]+)\\}\\}")
+                    regex.find(step.value)?.groupValues?.get(1)
+                }
             }
-        }
+        )
         if (rawKey != null) {
             if ((rawKey == "dobDay" || rawKey == "dobMonth" || rawKey == "dobYear") && isSingleFullBirthdayStep(step)) {
                 return "dob"
@@ -1725,8 +1745,9 @@ class AutomationEngine(
             AutomationActionType.SELECT_COUNTRY_CODE -> "countryCode"
             AutomationActionType.SELECT_DATE -> "dob"
             AutomationActionType.UPLOAD_FILE -> "fileName"
-            AutomationActionType.INPUT -> detectVariableKeyFromSelector(step.selector, step.elementDescription) ?: "username"
-            AutomationActionType.SELECT_DROPDOWN -> detectVariableKeyFromSelector(step.selector, step.elementDescription) ?: "gender"
+            AutomationActionType.INPUT -> normalizeDobKeyAlias(detectVariableKeyFromSelector(step.selector, step.elementDescription)) ?: "username"
+            AutomationActionType.SELECT_DROPDOWN -> normalizeDobKeyAlias(detectVariableKeyFromSelector(step.selector, step.elementDescription)) ?: "gender"
+            AutomationActionType.CLICK -> if (isSingleFullBirthdayStep(step)) "dob" else null
             else -> null
         }
     }
@@ -1739,8 +1760,21 @@ class AutomationEngine(
         forcedDefaultFields: MutableSet<String>,
         defaultFallback: () -> String
     ): String? {
-        val activeSheet = getDataSheet(script.dataSheetId)
-        if (activeSheet == null || forcedDefaultFields.contains(fieldKey)) {
+        val isDobField = fieldKey.equals("dob", ignoreCase = true) ||
+            fieldKey.equals("dobDay", ignoreCase = true) ||
+            fieldKey.equals("dobMonth", ignoreCase = true) ||
+            fieldKey.equals("dobYear", ignoreCase = true)
+
+        val primarySheet = getDataSheet(script.dataSheetId)
+        val activeSheet = if (primarySheet != null && primarySheet.getFieldValues(fieldKey).isNotEmpty()) {
+            primarySheet
+        } else if (script.dataSheetId != "default") {
+            _dataSheets.value.firstOrNull { it.getFieldValues(fieldKey).isNotEmpty() } ?: primarySheet
+        } else {
+            primarySheet
+        }
+
+        if (activeSheet == null || (!isDobField && forcedDefaultFields.contains(fieldKey))) {
             val generated = defaultFallback()
             addLog("Using Default (Random) for '$fieldKey': $generated")
             return generated
@@ -1772,6 +1806,20 @@ class AutomationEngine(
             }
             usageCounters[fieldKey] = usageIdx + 1
             addLog("Used '$fieldKey' [${usageIdx + 1}/${storedList.size}] (${order.shortLabel}) from '${activeSheet.name}': $chosen")
+            return chosen
+        }
+
+        // For birthday fields ('dob', 'dobDay', 'dobMonth', 'dobYear'), always reuse the user's Data Sheet birthday
+        // rather than falling back to random generated birthdays or pausing when repeatCount > storedList.size.
+        if (isDobField && storedList.isNotEmpty() && policy != DataExhaustionPolicy.STOP) {
+            val loopIdx = usageIdx % storedList.size
+            val chosen = when (order) {
+                DataIterationOrder.TOP_TO_BOTTOM -> storedList[loopIdx]
+                DataIterationOrder.BOTTOM_TO_TOP -> storedList[(storedList.size - 1) - loopIdx]
+                DataIterationOrder.RANDOM -> storedList[effectiveShuffle[loopIdx]]
+            }
+            usageCounters[fieldKey] = usageIdx + 1
+            addLog("Using birthday '$fieldKey' [${loopIdx + 1}/${storedList.size}] from '${activeSheet.name}': $chosen")
             return chosen
         }
 

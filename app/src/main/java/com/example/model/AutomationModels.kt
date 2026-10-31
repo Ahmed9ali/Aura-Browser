@@ -90,28 +90,73 @@ data class DataSheet(
     val createdAt: Long = System.currentTimeMillis()
 ) {
     fun getFieldValues(key: String): List<String> {
-        val direct = fields[key]?.map { it.trim() }?.filter { it.isNotBlank() } ?: emptyList()
-        if (direct.isNotEmpty()) return direct
+        val normalizedKey = key.trim()
+        // 1. Direct exact or case-insensitive match
+        val directExact = fields[normalizedKey]?.map { it.trim() }?.filter { it.isNotBlank() } ?: emptyList()
+        if (directExact.isNotEmpty()) return directExact
 
-        // Automatically derive split DOB fields (dobDay, dobMonth, dobYear) from 'dob' column if present
-        if (key.equals("dobDay", ignoreCase = true) ||
-            key.equals("dobMonth", ignoreCase = true) ||
-            key.equals("dobYear", ignoreCase = true)
-        ) {
-            val dobList = fields["dob"]?.map { it.trim() }?.filter { it.isNotBlank() } ?: emptyList()
-            if (dobList.isNotEmpty()) {
-                return dobList.mapNotNull { rawDob ->
-                    val parsed = parseFlexibleDobString(rawDob)
+        val directIgnoreCase = fields.entries
+            .firstOrNull { it.key.trim().equals(normalizedKey, ignoreCase = true) }
+            ?.value
+            ?.map { it.trim() }
+            ?.filter { it.isNotBlank() }
+            ?: emptyList()
+        if (directIgnoreCase.isNotEmpty()) return directIgnoreCase
+
+        // 2. Birthday / Date of Birth alias resolution & split component derivation
+        val dobAliases = setOf(
+            "dob", "birthday", "birthdate", "dateofbirth", "date_of_birth",
+            "birth_date", "birth", "bday", "date of birth", "birth date"
+        )
+        val lowerKey = normalizedKey.lowercase()
+        val isFullDobKey = lowerKey in dobAliases
+        val isSplitDobKey = lowerKey == "dobday" || lowerKey == "dobmonth" || lowerKey == "dobyear" ||
+            lowerKey == "birth_day" || lowerKey == "birth_month" || lowerKey == "birth_year" ||
+            lowerKey == "bday_day" || lowerKey == "bday_month" || lowerKey == "bday_year"
+
+        if (isFullDobKey || isSplitDobKey) {
+            val rawDobList = fields.entries
+                .firstOrNull { (k, v) ->
+                    k.trim().lowercase() in dobAliases && v.any { it.isNotBlank() }
+                }
+                ?.value
+                ?.map { it.trim() }
+                ?.filter { it.isNotBlank() }
+                ?: emptyList()
+
+            if (rawDobList.isNotEmpty()) {
+                if (isFullDobKey) {
+                    return rawDobList
+                }
+                return rawDobList.map { rawDob ->
+                    val parsed = AutomationDataGenerator.parseFlexibleDob(rawDob)
                     when {
-                        key.equals("dobYear", ignoreCase = true) -> parsed.first
-                        key.equals("dobMonth", ignoreCase = true) -> parsed.second
+                        lowerKey.endsWith("year") -> parsed.first
+                        lowerKey.endsWith("month") -> parsed.second
                         else -> parsed.third
+                    }
+                }
+            }
+
+            // Also support reassembling full 'dob' if the user entered separate dobYear / dobMonth / dobDay fields
+            if (isFullDobKey) {
+                val days = getRawByKeys("dobday", "day", "birth_day", "bday_day")
+                val months = getRawByKeys("dobmonth", "month", "birth_month", "bday_month")
+                val years = getRawByKeys("dobyear", "year", "birth_year", "bday_year")
+                val maxLen = maxOf(days.size, months.size, years.size)
+                if (maxLen > 0) {
+                    return (0 until maxLen).map { i ->
+                        val d = days.getOrNull(i) ?: days.lastOrNull() ?: "04"
+                        val m = months.getOrNull(i) ?: months.lastOrNull() ?: "05"
+                        val y = years.getOrNull(i) ?: years.lastOrNull() ?: "2001"
+                        val (py, pm, pd) = AutomationDataGenerator.parseFlexibleDob("$d $m $y")
+                        "$py-$pm-$pd"
                     }
                 }
             }
         }
 
-        // Automatically derive countryCode from phoneNumber column if phoneNumber entries include a leading +code
+        // 3. Automatically derive countryCode from phoneNumber column if phoneNumber entries include a leading +code
         if (key.equals("countryCode", ignoreCase = true)) {
             val phoneList = (fields["phoneNumber"] ?: fields["phone"])
                 ?.map { it.trim() }
@@ -127,53 +172,14 @@ data class DataSheet(
         return emptyList()
     }
 
-    private fun parseFlexibleDobString(rawDob: String): Triple<String, String, String> {
-        val monthNames = mapOf(
-            "jan" to "01", "january" to "01",
-            "feb" to "02", "february" to "02",
-            "mar" to "03", "march" to "03",
-            "apr" to "04", "april" to "04",
-            "may" to "05",
-            "jun" to "06", "june" to "06",
-            "jul" to "07", "july" to "07",
-            "aug" to "08", "august" to "08",
-            "sep" to "09", "sept" to "09", "september" to "09",
-            "oct" to "10", "october" to "10",
-            "nov" to "11", "november" to "11",
-            "dec" to "12", "december" to "12"
-        )
-        val tokens = rawDob.trim().split(Regex("[-/.,\\s]+")).filter { it.isNotBlank() }
-        if (tokens.size >= 3) {
-            val namedMonthIdx = tokens.indexOfFirst { monthNames.containsKey(it.lowercase()) }
-            if (namedMonthIdx >= 0) {
-                val m = monthNames[tokens[namedMonthIdx].lowercase()] ?: "05"
-                val remaining = tokens.filterIndexed { idx, _ -> idx != namedMonthIdx }
-                val yToken = remaining.firstOrNull { it.length == 4 } ?: remaining.last()
-                val dToken = remaining.firstOrNull { it != yToken } ?: "14"
-                return Triple(yToken, m, dToken.padStart(2, '0'))
-            }
-            return when {
-                tokens[0].length == 4 -> Triple(
-                    tokens[0],
-                    tokens[1].padStart(2, '0'),
-                    tokens[2].padStart(2, '0')
-                )
-                tokens[2].length == 4 -> {
-                    val firstNum = tokens[0].toIntOrNull() ?: 1
-                    if (firstNum > 12) {
-                        Triple(tokens[2], tokens[1].padStart(2, '0'), tokens[0].padStart(2, '0'))
-                    } else {
-                        Triple(tokens[2], tokens[0].padStart(2, '0'), tokens[1].padStart(2, '0'))
-                    }
-                }
-                else -> Triple(
-                    tokens[0],
-                    tokens[1].padStart(2, '0'),
-                    tokens[2].padStart(2, '0')
-                )
-            }
-        }
-        return Triple("1998", "05", "14")
+    private fun getRawByKeys(vararg candidateKeys: String): List<String> {
+        val lowerSet = candidateKeys.map { it.lowercase() }.toSet()
+        return fields.entries
+            .firstOrNull { (k, v) -> k.trim().lowercase() in lowerSet && v.any { it.isNotBlank() } }
+            ?.value
+            ?.map { it.trim() }
+            ?.filter { it.isNotBlank() }
+            ?: emptyList()
     }
 
     fun totalRows(): Int {
@@ -444,7 +450,7 @@ object AutomationDataGenerator {
             "phone", "phonenumber", "mobile" -> randRec.phoneNumber
             "countrycode" -> randRec.countryCode
             "gender", "sex" -> randRec.gender
-            "dob", "birthdate" -> randRec.dob
+            "dob", "birthdate", "birthday", "dateofbirth", "bday" -> randRec.dob
             "dobday" -> randRec.dobDay
             "dobmonth" -> randRec.dobMonth
             "dobyear" -> randRec.dobYear
@@ -456,5 +462,101 @@ object AutomationDataGenerator {
             "filename", "file" -> randRec.fileName
             else -> "auto_${fieldKey}_${Random.nextInt(1000, 9999)}"
         }
+    }
+
+    /**
+     * Parses any human or machine birthday format (e.g., "04 May 2001", "4th May 2001",
+     * "May 04, 2001", "2001-05-04", "04/05/2001", "04-05-2001", "04.05.2001", "04May2001")
+     * into a normalized numeric (year4Digit, month2Digit, day2Digit) Triple.
+     */
+    fun parseFlexibleDob(
+        rawDob: String,
+        fallbackYear: String = "2001",
+        fallbackMonth: String = "05",
+        fallbackDay: String = "04"
+    ): Triple<String, String, String> {
+        val monthNames = mapOf(
+            "jan" to "01", "january" to "01",
+            "feb" to "02", "february" to "02",
+            "mar" to "03", "march" to "03",
+            "apr" to "04", "april" to "04",
+            "may" to "05",
+            "jun" to "06", "june" to "06",
+            "jul" to "07", "july" to "07",
+            "aug" to "08", "august" to "08",
+            "sep" to "09", "sept" to "09", "september" to "09",
+            "oct" to "10", "october" to "10",
+            "nov" to "11", "november" to "11",
+            "dec" to "12", "december" to "12"
+        )
+
+        // Pre-normalize compact strings like "04May2001" or "4th May, 2001"
+        val spaced = rawDob.trim()
+            .replace(Regex("(\\d)(st|nd|rd|th)\\b", RegexOption.IGNORE_CASE), "$1")
+            .replace(Regex("(\\d)([A-Za-z])"), "$1 $2")
+            .replace(Regex("([A-Za-z])(\\d)"), "$1 $2")
+
+        val tokens = spaced.split(Regex("[-/.,\\s]+")).map { it.trim() }.filter { it.isNotBlank() }
+        if (tokens.size >= 3) {
+            val namedMonthIdx = tokens.indexOfFirst { token ->
+                val clean = token.lowercase().take(3)
+                monthNames.containsKey(token.lowercase()) || monthNames.containsKey(clean)
+            }
+            if (namedMonthIdx >= 0) {
+                val rawMonthToken = tokens[namedMonthIdx].lowercase()
+                val m = monthNames[rawMonthToken] ?: monthNames[rawMonthToken.take(3)] ?: fallbackMonth
+                val remaining = tokens.filterIndexed { idx, _ -> idx != namedMonthIdx }
+                val yToken = remaining.firstOrNull { it.length == 4 && it.all(Char::isDigit) }
+                    ?: remaining.lastOrNull { it.any(Char::isDigit) }
+                    ?: fallbackYear
+                val dRaw = remaining.firstOrNull { it != yToken && it.any(Char::isDigit) } ?: fallbackDay
+                val dDigits = dRaw.filter(Char::isDigit).ifBlank { fallbackDay }
+                val yDigits = yToken.filter(Char::isDigit).let {
+                    when (it.length) {
+                        4 -> it
+                        2 -> if ((it.toIntOrNull() ?: 0) <= 30) "20$it" else "19$it"
+                        else -> fallbackYear
+                    }
+                }
+                return Triple(yDigits, m.padStart(2, '0'), dDigits.padStart(2, '0'))
+            }
+
+            val numericTokens = tokens.map { it.filter(Char::isDigit) }.filter { it.isNotBlank() }
+            if (numericTokens.size >= 3) {
+                return when {
+                    numericTokens[0].length == 4 -> {
+                        val y = numericTokens[0]
+                        val second = numericTokens[1].toIntOrNull() ?: 1
+                        val third = numericTokens[2].toIntOrNull() ?: 1
+                        if (second > 12 && third <= 12) {
+                            Triple(y, numericTokens[2].padStart(2, '0'), numericTokens[1].padStart(2, '0'))
+                        } else {
+                            Triple(y, numericTokens[1].padStart(2, '0'), numericTokens[2].padStart(2, '0'))
+                        }
+                    }
+                    numericTokens[2].length == 4 -> {
+                        val y = numericTokens[2]
+                        val firstNum = numericTokens[0].toIntOrNull() ?: 1
+                        if (firstNum > 12) {
+                            Triple(y, numericTokens[1].padStart(2, '0'), numericTokens[0].padStart(2, '0'))
+                        } else {
+                            Triple(y, numericTokens[0].padStart(2, '0'), numericTokens[1].padStart(2, '0'))
+                        }
+                    }
+                    else -> {
+                        val rawY = numericTokens[2]
+                        val y = if (rawY.length == 2) {
+                            if ((rawY.toIntOrNull() ?: 0) <= 30) "20$rawY" else "19$rawY"
+                        } else fallbackYear
+                        Triple(
+                            y,
+                            numericTokens[1].padStart(2, '0'),
+                            numericTokens[0].padStart(2, '0')
+                        )
+                    }
+                }
+            }
+        }
+        return Triple(fallbackYear, fallbackMonth.padStart(2, '0'), fallbackDay.padStart(2, '0'))
     }
 }

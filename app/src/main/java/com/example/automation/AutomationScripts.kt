@@ -361,9 +361,9 @@ object AutomationScripts {
                 }
 
                 if (isDobContext) {
-                    var cleanNumericText = text.replace(/[^0-9]/g, '').trim();
-                    if (/^(19\d\d|20\d\d)$/.test(cleanNumericText)) return 'dobYear';
-                    if (/^(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)$/i.test(text)) return 'dobMonth';
+                    var trimmedTxt = (text || '').trim();
+                    if (/^(19\d\d|20\d\d)$/.test(trimmedTxt)) return 'dobYear';
+                    if (/^(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)$/i.test(trimmedTxt)) return 'dobMonth';
 
                     if (dobContainer && tag !== 'input') {
                         var elRect = el.getBoundingClientRect();
@@ -1034,9 +1034,9 @@ object AutomationScripts {
                 if (ac === 'bday-year' || /^(year|yyyy|yy|birth_year|dob_year|bday_year|birthday_year|date_year)$/i.test(name) || /^(year|yyyy|birth_year|dob_year|bday-year)$/i.test(id) || /\b(birth[_-]year|dob[_-]?year|bday[_-]year|birthday[_-]year|select.*year|^year$|^yyyy$)\b/i.test(fieldHint) || (isDobContext && /\b(year|yyyy|yr)\b/i.test(fieldHint))) return 'DOB_YEAR';
 
                 if (isDobContext) {
-                    var cleanNumericText = text.replace(/[^0-9]/g, '').trim();
-                    if (/^(19\d\d|20\d\d)$/.test(cleanNumericText)) return 'DOB_YEAR';
-                    if (/^(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)$/i.test(text)) return 'DOB_MONTH';
+                    var trimmedTxt = (text || '').trim();
+                    if (/^(19\d\d|20\d\d)$/.test(trimmedTxt)) return 'DOB_YEAR';
+                    if (/^(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)$/i.test(trimmedTxt)) return 'DOB_MONTH';
 
                     if (dobContainer) {
                         var elRect = el.getBoundingClientRect();
@@ -3495,6 +3495,64 @@ object AutomationScripts {
                     return cells;
                 }
 
+                function getCalendarHeaderState(ov) {
+                    var state = {
+                        year: 0,
+                        month: 0,
+                        yearSwitch: null,
+                        monthSwitch: null,
+                        mainSwitch: findCalendarHeaderSwitch(ov)
+                    };
+                    if (!ov) return state;
+
+                    var ovRect = ov.getBoundingClientRect();
+                    var headerMaxY = ovRect.top + Math.max(76, ovRect.height * 0.30);
+                    var headerNodes = ov.querySelectorAll(
+                        '.datepicker-switch, .view-switch, .vdp-datepicker .day__month_btn, .vdp-datepicker header .up, ' +
+                        '.mx-btn-current-year, .mx-btn-current-month, .ant-picker-header-view button, .ant-picker-header-view, ' +
+                        '.el-date-picker__header-label, .MuiPickersCalendarHeader-switchViewButton, .MuiPickersCalendarHeader-label, ' +
+                        '.flatpickr-current-month, .react-datepicker__current-month, .dp__month_year_select, thead th, header *, button, span, div, a'
+                    );
+
+                    for (var i = 0; i < headerNodes.length; i++) {
+                        var hn = headerNodes[i];
+                        if (!isNodeVisible(hn)) continue;
+                        var hr = hn.getBoundingClientRect();
+                        if (hr.top > headerMaxY || hr.width > ovRect.width * 0.90 || hr.height > 68) continue;
+                        var txt = (hn.innerText || hn.textContent || '').replace(/\s+/g, ' ').trim();
+                        if (!txt || txt.length > 32) continue;
+                        // Skip decade range headers like "2020-2029" when extracting single active year
+                        if (/\b(19\d\d|20\d\d)\s*[-~–—]\s*(19\d\d|20\d\d)\b/.test(txt)) continue;
+
+                        var ym = txt.match(/\b(19\d\d|20\d\d)\b/);
+                        if (ym) {
+                            state.year = parseInt(ym[1], 10);
+                            state.yearSwitch = hn;
+                        }
+
+                        var tokens = txt.split(/[\s,/-]+/);
+                        for (var t = 0; t < tokens.length; t++) {
+                            var mNum = detectMonthNumFromText(tokens[t]);
+                            if (mNum > 0) {
+                                state.month = mNum;
+                                state.monthSwitch = hn;
+                                break;
+                            }
+                        }
+                        var ymNumeric = txt.match(/^(19\d\d|20\d\d)\s*[-年/.]\s*(0?[1-9]|1[0-2])(月)?$/);
+                        if (ymNumeric) {
+                            state.year = parseInt(ymNumeric[1], 10);
+                            state.month = parseInt(ymNumeric[2], 10);
+                            if (!state.yearSwitch) state.yearSwitch = hn;
+                            if (!state.monthSwitch) state.monthSwitch = hn;
+                        }
+                    }
+
+                    if (!state.yearSwitch) state.yearSwitch = state.mainSwitch;
+                    if (!state.monthSwitch) state.monthSwitch = state.mainSwitch;
+                    return state;
+                }
+
                 function stepSingleCalendarOverlay(ov) {
                     if (!ov || !isNodeVisible(ov)) return 'NONE';
 
@@ -3554,7 +3612,7 @@ object AutomationScripts {
                         }
                     }
 
-                    // Stage 2: Years Grid View (e.g. account.fydeos.io showing header "2020-2029" and 12 cells 2019..2030)
+                    // Stage 2: Years Grid View (e.g. account.fydeos.io showing header "2020-2029" and 12 cells 2019..2030, or scrollable year list)
                     var yearCells = [];
                     for (var y = 0; y < cells.length; y++) {
                         if (/^(19\d\d|20\d\d)$/.test(cells[y].text)) {
@@ -3566,6 +3624,25 @@ object AutomationScripts {
                         }
                     }
                     if (yearCells.length >= 4) {
+                        // First check if targetYearNum is directly visible as an active (non-muted) cell in yearCells
+                        var directActiveYearCell = null;
+                        for (var dy = 0; dy < yearCells.length; dy++) {
+                            if (yearCells[dy].year === targetYearNum && !yearCells[dy].muted) {
+                                directActiveYearCell = yearCells[dy].cell;
+                                break;
+                            }
+                        }
+                        if (directActiveYearCell) {
+                            try {
+                                if (directActiveYearCell.node && directActiveYearCell.node.scrollIntoView) {
+                                    directActiveYearCell.node.scrollIntoView({ block: 'center' });
+                                }
+                            } catch (e) {}
+                            tapCalendarCell(directActiveYearCell);
+                            window._auraDateYearSelected = true;
+                            return 'STEPPED:YEAR_SELECTED';
+                        }
+
                         // Determine active in-decade range [minDecadeYear, maxDecadeYear]
                         var ovText = (ov.innerText || '').trim();
                         var hdrRangeMatch = ovText.match(/\b(19\d\d|20\d\d)\s*[-~–—]\s*(19\d\d|20\d\d)\b/);
@@ -3590,21 +3667,13 @@ object AutomationScripts {
                             }
                         }
 
-                        // If targetYearNum is inside the current decade range (or directly visible as non-muted), tap that year cell!
+                        // If targetYearNum is inside the current decade range, tap that year cell
                         if (targetYearNum >= minDecadeYear && targetYearNum <= maxDecadeYear) {
                             var exactYearCell = null;
-                            for (var yc = 0; yc < yearCells.length; yc++) {
-                                if (yearCells[yc].year === targetYearNum && !yearCells[yc].muted) {
-                                    exactYearCell = yearCells[yc].cell;
+                            for (var yc2 = 0; yc2 < yearCells.length; yc2++) {
+                                if (yearCells[yc2].year === targetYearNum) {
+                                    exactYearCell = yearCells[yc2].cell;
                                     break;
-                                }
-                            }
-                            if (!exactYearCell) {
-                                for (var yc2 = 0; yc2 < yearCells.length; yc2++) {
-                                    if (yearCells[yc2].year === targetYearNum) {
-                                        exactYearCell = yearCells[yc2].cell;
-                                        break;
-                                    }
                                 }
                             }
                             if (exactYearCell) {
@@ -3615,7 +3684,7 @@ object AutomationScripts {
                         }
 
                         // Otherwise navigate Previous («) or Next (») decade
-                        if (targetYearNum < minDecadeYear && (window._auraDecadeNavClicks || 0) < 12) {
+                        if (targetYearNum < minDecadeYear && (window._auraDecadeNavClicks || 0) < 20) {
                             var prevDecBtn = findCalendarNavBtn(ov, 'prev', true);
                             if (prevDecBtn) {
                                 window._auraDecadeNavClicks = (window._auraDecadeNavClicks || 0) + 1;
@@ -3624,12 +3693,12 @@ object AutomationScripts {
                             }
                             // If no « button found, try tapping the decade header switch (e.g. "2020-2029") to zoom out to Decade-Range cells
                             var zoomHdr = findCalendarHeaderSwitch(ov);
-                            if (zoomHdr && (window._auraHeaderSwitchClicks || 0) < 2) {
+                            if (zoomHdr && (window._auraHeaderSwitchClicks || 0) < 4) {
                                 window._auraHeaderSwitchClicks = (window._auraHeaderSwitchClicks || 0) + 1;
                                 dispatchHumanTap(zoomHdr);
                                 return 'STEPPED:ZOOM_TO_DECADES';
                             }
-                        } else if (targetYearNum > maxDecadeYear && (window._auraDecadeNavClicks || 0) < 12) {
+                        } else if (targetYearNum > maxDecadeYear && (window._auraDecadeNavClicks || 0) < 20) {
                             var nextDecBtn = findCalendarNavBtn(ov, 'next', true);
                             if (nextDecBtn) {
                                 window._auraDecadeNavClicks = (window._auraDecadeNavClicks || 0) + 1;
@@ -3656,6 +3725,24 @@ object AutomationScripts {
                     var isTwelveCellMonthGrid = (monthCells.length === 0 && cells.length === 12 &&
                         cells.every(function(c) { return /^(0?[1-9]|1[0-2])(月)?$/.test(c.text); }));
                     if (monthCells.length >= 6 || isTwelveCellMonthGrid) {
+                        // CRITICAL: If we arrived at Months View from Days View (e.g. header says "2026" instead of "2001"),
+                        // we MUST zoom out to Years View (or step the year header) BEFORE picking the month!
+                        var monthViewHdr = getCalendarHeaderState(ov);
+                        if (!window._auraDateYearSelected && monthViewHdr.year > 0 && monthViewHdr.year !== targetYearNum) {
+                            if (monthViewHdr.yearSwitch && (window._auraHeaderSwitchClicks || 0) < 4) {
+                                window._auraHeaderSwitchClicks = (window._auraHeaderSwitchClicks || 0) + 1;
+                                dispatchHumanTap(monthViewHdr.yearSwitch);
+                                return 'STEPPED:ZOOM_MONTHS_TO_YEARS';
+                            }
+                            var mvNavDir = (targetYearNum < monthViewHdr.year) ? 'prev' : 'next';
+                            var mvNavBtn = findCalendarNavBtn(ov, mvNavDir, true);
+                            if (mvNavBtn && (window._auraDecadeNavClicks || 0) < 35) {
+                                window._auraDecadeNavClicks = (window._auraDecadeNavClicks || 0) + 1;
+                                dispatchHumanTap(mvNavBtn);
+                                return 'STEPPED:MONTH_VIEW_YEAR_NAV';
+                            }
+                        }
+
                         var chosenMonthCell = null;
                         if (monthCells.length >= 6) {
                             for (var mc = 0; mc < monthCells.length; mc++) {
@@ -3683,14 +3770,38 @@ object AutomationScripts {
                         }
                     }
                     if (rawDayCells.length >= 15) {
-                        // Check if the calendar opened directly on Days View with the wrong year (e.g. current year 2026)
-                        var hdrSw = findCalendarHeaderSwitch(ov);
-                        var hdrTxt = hdrSw ? (hdrSw.innerText || hdrSw.textContent || '').trim() : '';
-                        var hdrYearMatch = hdrTxt.match(/\b(19\d\d|20\d\d)\b/);
-                        if (hdrSw && hdrYearMatch && hdrYearMatch[1] !== yearStr && !window._auraDateYearSelected && (window._auraHeaderSwitchClicks || 0) < 2) {
-                            window._auraHeaderSwitchClicks = (window._auraHeaderSwitchClicks || 0) + 1;
-                            dispatchHumanTap(hdrSw);
-                            return 'STEPPED:OPEN_YEAR_SWITCH';
+                        var dayViewHdr = getCalendarHeaderState(ov);
+
+                        // 1. Check if the calendar opened on Days View with the wrong year (e.g. current year 2026 vs 2001)
+                        if (!window._auraDateYearSelected && dayViewHdr.year > 0 && dayViewHdr.year !== targetYearNum) {
+                            if (dayViewHdr.yearSwitch && (window._auraHeaderSwitchClicks || 0) < 4) {
+                                window._auraHeaderSwitchClicks = (window._auraHeaderSwitchClicks || 0) + 1;
+                                dispatchHumanTap(dayViewHdr.yearSwitch);
+                                return 'STEPPED:OPEN_YEAR_SWITCH';
+                            }
+                            var yrDir = (targetYearNum < dayViewHdr.year) ? 'prev' : 'next';
+                            var yrBtn = findCalendarNavBtn(ov, yrDir, true);
+                            if (yrBtn && (window._auraDecadeNavClicks || 0) < 35) {
+                                window._auraDecadeNavClicks = (window._auraDecadeNavClicks || 0) + 1;
+                                dispatchHumanTap(yrBtn);
+                                return 'STEPPED:DAYS_VIEW_YEAR_NAV';
+                            }
+                        }
+
+                        // 2. Check if the calendar is on Days View with the wrong month (e.g. October vs May)
+                        if (!window._auraDateMonthSelected && dayViewHdr.month > 0 && dayViewHdr.month !== targetMonthNum) {
+                            if (dayViewHdr.monthSwitch && (window._auraHeaderSwitchClicks || 0) < 4) {
+                                window._auraHeaderSwitchClicks = (window._auraHeaderSwitchClicks || 0) + 1;
+                                dispatchHumanTap(dayViewHdr.monthSwitch);
+                                return 'STEPPED:OPEN_MONTH_SWITCH';
+                            }
+                            var moDir = (targetMonthNum < dayViewHdr.month) ? 'prev' : 'next';
+                            var moBtn = findCalendarNavBtn(ov, moDir, false);
+                            if (moBtn && (window._auraMonthNavClicks || 0) < 14) {
+                                window._auraMonthNavClicks = (window._auraMonthNavClicks || 0) + 1;
+                                dispatchHumanTap(moBtn);
+                                return 'STEPPED:DAYS_VIEW_MONTH_NAV';
+                            }
                         }
 
                         // Slice between the first '1' (start of current month) and the second '1' (start of next month)
@@ -3753,7 +3864,7 @@ object AutomationScripts {
                     return sig.join('|');
                 }
 
-                var stepKey = 'dob_' + '$escapedSelector';
+                var stepKey = 'dob_' + '$escapedSelector' + '_' + isoStr;
                 var overlays = findDatePickerOverlays(el);
 
                 // Phase 1: On the first attempt for this DOB step, if no calendar overlay is open yet, tap the trigger to open it
@@ -3764,6 +3875,7 @@ object AutomationScripts {
                     window._auraDateMonthSelected = false;
                     window._auraHeaderSwitchClicks = 0;
                     window._auraDecadeNavClicks = 0;
+                    window._auraMonthNavClicks = 0;
                     if (overlays.length === 0) {
                         openDatePickerTrigger(el);
                         overlays = findDatePickerOverlays(el);

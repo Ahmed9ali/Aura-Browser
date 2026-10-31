@@ -27,7 +27,6 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.ContentCopy
@@ -41,8 +40,6 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Tab
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -70,7 +67,9 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
@@ -90,17 +89,19 @@ import com.example.ui.theme.ExpressiveSquircleShape
 import com.example.ui.theme.groupedListCardShape
 
 /**
- * Material 3 Expressive Search & Personalized Suggestion Screen
+ * Material 3 Expressive Search & Smart Suggestion Screen
  * - Features a full-width Pill Address/Search Bar at the top with quick Search Engine switching
- *   and personalized category filter chips.
- * - Dynamically surfaces Personalized Content Recommendations (`SuggestionType.PERSONALIZED` & `SWITCH_TO_TAB`)
- *   and Smart Search & Domain Autocomplete Suggestions as the user begins typing in the address bar.
+ *   and one-tap URL completion tokens when typing.
+ * - Surfaces ranked Search Autocomplete, Website/Domain completions, Open Tab switchers,
+ *   Bookmarks, and History matches as the user types (without personalized feed clutter).
  * - Renders Clipboard Copy/Paste and Real Search & Browsing History as a unified Material 3 Grouped List.
  */
 private sealed interface SearchGroupEntry {
     data class ClipboardPasteEntry(val copiedText: String) : SearchGroupEntry
     data class RealHistoryEntry(val item: HistoryItem) : SearchGroupEntry
 }
+
+private val quickUrlTokens = listOf("www.", ".com", ".org", ".io", "https://")
 
 @Composable
 fun SearchScreen(
@@ -181,8 +182,24 @@ fun SearchScreen(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
+    // Filter strictly non-personalized search, domain, open-tab, bookmark, and history suggestions
+    val activeSearchSuggestions = remember(query, suggestions, suggestionsEnabled) {
+        if (!suggestionsEnabled || query.isBlank()) {
+            emptyList()
+        } else {
+            suggestions.filter {
+                it.type == SuggestionType.DOMAIN ||
+                        it.type == SuggestionType.SWITCH_TO_TAB ||
+                        it.type == SuggestionType.BOOKMARK ||
+                        it.type == SuggestionType.HISTORY ||
+                        it.type == SuggestionType.SEARCH_AUTOCOMPLETE
+            }.distinctBy { "${it.type}_${it.title.lowercase()}_${it.targetUrl ?: it.query.lowercase()}" }
+                .take(10)
+        }
+    }
+
     // Filter strictly REAL user search and browsing history (never dummy history)
-    val realHistoryItems = remember(query, history) {
+    val realHistoryItems = remember(query, history, activeSearchSuggestions) {
         val cleanHistory = history.filter { item ->
             item.url.isNotBlank() &&
                     !item.url.startsWith("aura://", ignoreCase = true) &&
@@ -192,9 +209,11 @@ fun SearchScreen(
             cleanHistory
         } else {
             val trimmedQuery = query.trim()
+            val suggestedUrls = activeSearchSuggestions.mapNotNull { it.targetUrl }.toSet()
             cleanHistory.filter { item ->
-                item.title.contains(trimmedQuery, ignoreCase = true) ||
-                        item.url.contains(trimmedQuery, ignoreCase = true)
+                item.url !in suggestedUrls &&
+                        (item.title.contains(trimmedQuery, ignoreCase = true) ||
+                                item.url.contains(trimmedQuery, ignoreCase = true))
             }
         }
     }
@@ -215,42 +234,12 @@ fun SearchScreen(
         }
     }
 
-    // Partition live suggestions as the user types in the address bar
-    val typingPersonalizedItems = remember(query, suggestions, personalizedRecommendations, selectedCategory, suggestionsEnabled) {
-        if (!suggestionsEnabled) {
-            emptyList()
-        } else if (query.isNotBlank()) {
-            val fromSuggestions = suggestions.filter {
-                it.type == SuggestionType.PERSONALIZED ||
-                        it.type == SuggestionType.SWITCH_TO_TAB ||
-                        it.type == SuggestionType.DISCOVERY
-            }
-            (fromSuggestions + personalizedRecommendations).distinctBy { "${it.type}_${it.title}_${it.targetUrl}" }.take(5)
-        } else if (selectedCategory != null) {
-            personalizedRecommendations.take(5)
-        } else {
-            personalizedRecommendations.take(4)
-        }
-    }
-
-    val smartQueryAndDomainSuggestions = remember(query, suggestions, suggestionsEnabled) {
-        if (!suggestionsEnabled || query.isBlank()) {
-            emptyList()
-        } else {
-            suggestions.filter {
-                it.type == SuggestionType.DOMAIN ||
-                        it.type == SuggestionType.BOOKMARK ||
-                        it.type == SuggestionType.SEARCH_AUTOCOMPLETE
-            }.distinctBy { "${it.title}_${it.targetUrl ?: it.query}" }.take(6)
-        }
-    }
-
     Column(
         modifier = modifier
             .fillMaxSize()
             .testTag("search_screen")
     ) {
-        // Top Pill Address Bar + Active Search Engine Selector & Personalized Category Filter Strip
+        // Top Pill Address Bar + Active Search Engine Selector & Quick URL Tokens
         Surface(
             color = MaterialTheme.colorScheme.surface,
             tonalElevation = 1.dp,
@@ -359,7 +348,7 @@ fun SearchScreen(
                         .testTag("search_input_field")
                 )
 
-                // Quick Search Engine Switcher & Personalized Topic Filter Row
+                // Quick Search Engine Switcher & URL Input Helper Strip
                 Spacer(modifier = Modifier.height(8.dp))
 
                 LazyRow(
@@ -425,32 +414,46 @@ fun SearchScreen(
                         }
                     }
 
-                    // Topic Category Filter Chips for Personalized Content Recommendations
-                    if (suggestionsEnabled && discoveryCategories.isNotEmpty()) {
+                    // Quick URL completion tokens when typing
+                    if (query.isNotEmpty() && !query.contains(" ")) {
                         items(
-                            items = discoveryCategories,
-                            key = { "cat_$it" }
-                        ) { category ->
-                            val isSelected = selectedCategory == category
-                            FilterChip(
-                                selected = isSelected,
-                                onClick = { onCategorySelect(category) },
-                                label = {
-                                    Text(
-                                        text = category,
-                                        fontSize = 11.5.sp,
-                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
-                                    )
-                                },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = MaterialTheme.colorScheme.tertiaryContainer,
-                                    selectedLabelColor = MaterialTheme.colorScheme.onTertiaryContainer
-                                ),
+                            items = quickUrlTokens,
+                            key = { "token_$it" }
+                        ) { token ->
+                            Surface(
                                 shape = ExpressivePillShape,
+                                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                border = BorderStroke(
+                                    width = 1.dp,
+                                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
+                                ),
                                 modifier = Modifier
-                                    .height(28.dp)
-                                    .testTag("chip_category_${category.lowercase().replace(" ", "_")}")
-                            )
+                                    .clip(ExpressivePillShape)
+                                    .clickable {
+                                        val updated = when {
+                                            token == "https://" && !query.startsWith("http") -> "https://$query"
+                                            token == "www." && !query.contains("www.") -> {
+                                                if (query.startsWith("https://")) {
+                                                    "https://www.${query.removePrefix("https://")}"
+                                                } else {
+                                                    "www.$query"
+                                                }
+                                            }
+                                            !query.endsWith(token) -> "$query$token"
+                                            else -> query
+                                        }
+                                        onQueryChange(updated)
+                                    }
+                                    .testTag("chip_token_${token.replace(Regex("[^a-z0-9]"), "")}")
+                            ) {
+                                Text(
+                                    text = token,
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                                )
+                            }
                         }
                     }
                 }
@@ -462,7 +465,7 @@ fun SearchScreen(
             color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
         )
 
-        // Unified Scrollable Feed: Personalized Recommendations (as user types), Smart Search Suggestions, and Clipboard/History
+        // Unified Scrollable Feed: Smart Search Suggestions and Clipboard/History
         LazyColumn(
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 96.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -470,24 +473,20 @@ fun SearchScreen(
                 .fillMaxSize()
                 .testTag("suggestions_list")
         ) {
-            // 1. When typing in the address bar (or filtering by category): Personalized Content Recommendations first!
-            if (query.isNotBlank() && typingPersonalizedItems.isNotEmpty()) {
-                item(key = "personalized_typing_recommendations_section") {
+            // 1. When typing in the address bar: Smart Search, Website, Open Tab, Bookmark & History Suggestions
+            if (activeSearchSuggestions.isNotEmpty()) {
+                item(key = "smart_search_autocomplete_section") {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .testTag("personalized_recommendations_section")
+                            .testTag("smart_autocomplete_section")
                     ) {
                         ExpressiveGroupHeader(
-                            title = if (selectedCategory != null) {
-                                "Personalized For You • $selectedCategory"
-                            } else {
-                                "Personalized Content Recommendations"
-                            },
-                            icon = Icons.Default.AutoAwesome,
-                            iconTint = Color(0xFF8B5CF6),
-                            badgeText = "${typingPersonalizedItems.size} ${if (typingPersonalizedItems.size == 1) "match" else "matches"}",
-                            testTagPrefix = "personalized"
+                            title = "Search Suggestions (${currentSearchEngine.displayName})",
+                            icon = Icons.Default.Search,
+                            iconTint = MaterialTheme.colorScheme.primary,
+                            badgeText = "${activeSearchSuggestions.size}",
+                            testTagPrefix = "autocomplete"
                         )
 
                         Spacer(modifier = Modifier.height(6.dp))
@@ -496,15 +495,16 @@ fun SearchScreen(
                             verticalArrangement = Arrangement.spacedBy(3.dp),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .testTag("group_personalized_container")
+                                .testTag("group_autocomplete_container")
                         ) {
-                            typingPersonalizedItems.forEachIndexed { index, suggestion ->
+                            activeSearchSuggestions.forEachIndexed { index, suggestion ->
                                 val cardShape = groupedListCardShape(
                                     index = index,
-                                    count = typingPersonalizedItems.size
+                                    count = activeSearchSuggestions.size
                                 )
-                                PersonalizedSuggestionGroupedCardItem(
+                                SearchSuggestionGroupedCardItem(
                                     suggestion = suggestion,
+                                    typedQuery = query,
                                     shape = cardShape,
                                     onClick = { onSelectSuggestion(suggestion) },
                                     onFillQuery = {
@@ -517,50 +517,7 @@ fun SearchScreen(
                 }
             }
 
-            // 2. When typing in the address bar: Smart Search & Domain Autocomplete Suggestions
-            if (smartQueryAndDomainSuggestions.isNotEmpty()) {
-                item(key = "smart_search_autocomplete_section") {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("smart_autocomplete_section")
-                    ) {
-                        ExpressiveGroupHeader(
-                            title = "Search & Website Suggestions (${currentSearchEngine.displayName})",
-                            icon = Icons.Default.Search,
-                            iconTint = MaterialTheme.colorScheme.primary,
-                            badgeText = "${smartQueryAndDomainSuggestions.size}",
-                            testTagPrefix = "autocomplete"
-                        )
-
-                        Spacer(modifier = Modifier.height(6.dp))
-
-                        Column(
-                            verticalArrangement = Arrangement.spacedBy(3.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("group_autocomplete_container")
-                        ) {
-                            smartQueryAndDomainSuggestions.forEachIndexed { index, suggestion ->
-                                val cardShape = groupedListCardShape(
-                                    index = index,
-                                    count = smartQueryAndDomainSuggestions.size
-                                )
-                                PersonalizedSuggestionGroupedCardItem(
-                                    suggestion = suggestion,
-                                    shape = cardShape,
-                                    onClick = { onSelectSuggestion(suggestion) },
-                                    onFillQuery = {
-                                        onQueryChange(suggestion.query)
-                                    }
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            // 3. Clipboard Copy/Paste (first) and Real Search/Browsing History
+            // 2. Clipboard Copy/Paste (first) and Real Search/Browsing History
             if (groupedEntries.isNotEmpty()) {
                 item(key = "clipboard_and_history_group_section") {
                     Column(modifier = Modifier.fillMaxWidth()) {
@@ -655,55 +612,8 @@ fun SearchScreen(
                 }
             }
 
-            // 4. Zero-query Personalized Content Recommendations (when query is blank and recommendations are enabled)
-            if (query.isBlank() && typingPersonalizedItems.isNotEmpty()) {
-                item(key = "personalized_zero_query_recommendations_section") {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("personalized_recommendations_section")
-                    ) {
-                        ExpressiveGroupHeader(
-                            title = if (selectedCategory != null) {
-                                "Recommended For You • $selectedCategory"
-                            } else {
-                                "Recommended For You"
-                            },
-                            icon = Icons.Default.AutoAwesome,
-                            iconTint = Color(0xFF8B5CF6),
-                            badgeText = "Personalized",
-                            testTagPrefix = "personalized"
-                        )
-
-                        Spacer(modifier = Modifier.height(6.dp))
-
-                        Column(
-                            verticalArrangement = Arrangement.spacedBy(3.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("group_personalized_container")
-                        ) {
-                            typingPersonalizedItems.forEachIndexed { index, suggestion ->
-                                val cardShape = groupedListCardShape(
-                                    index = index,
-                                    count = typingPersonalizedItems.size
-                                )
-                                PersonalizedSuggestionGroupedCardItem(
-                                    suggestion = suggestion,
-                                    shape = cardShape,
-                                    onClick = { onSelectSuggestion(suggestion) },
-                                    onFillQuery = {
-                                        onQueryChange(suggestion.targetUrl ?: suggestion.query)
-                                    }
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            // 5. Fallback Empty State when suggestions are disabled and there is no history or clipboard
-            if (groupedEntries.isEmpty() && typingPersonalizedItems.isEmpty() && smartQueryAndDomainSuggestions.isEmpty()) {
+            // 3. Fallback Empty State when there are no active suggestions, history, or clipboard links
+            if (groupedEntries.isEmpty() && activeSearchSuggestions.isEmpty()) {
                 item(key = "empty_search_history_state") {
                     Card(
                         shape = RoundedCornerShape(24.dp),
@@ -767,38 +677,65 @@ fun SearchScreen(
 }
 
 /**
- * Personalized Content Recommendation / Smart Autocomplete Card inside the Material 3 Grouped List.
+ * Smart Search / Website / Open Tab / Bookmark / History Suggestion Card inside the Material 3 Grouped List.
  */
 @Composable
-private fun PersonalizedSuggestionGroupedCardItem(
+private fun SearchSuggestionGroupedCardItem(
     suggestion: SearchSuggestion,
+    typedQuery: String,
     shape: Shape,
     onClick: () -> Unit,
     onFillQuery: () -> Unit
 ) {
-    val isPersonalized = suggestion.type == SuggestionType.PERSONALIZED || suggestion.type == SuggestionType.DISCOVERY
     val isSwitchTab = suggestion.type == SuggestionType.SWITCH_TO_TAB
     val isBookmark = suggestion.type == SuggestionType.BOOKMARK
     val isDomain = suggestion.type == SuggestionType.DOMAIN
+    val isHistory = suggestion.type == SuggestionType.HISTORY
 
     val badgeAccent = when {
         isSwitchTab -> Color(0xFF10B981)
-        isPersonalized -> Color(0xFF8B5CF6)
         isBookmark -> Color(0xFFF59E0B)
         isDomain -> Color(0xFF0284C7)
+        isHistory -> MaterialTheme.colorScheme.secondary
         else -> MaterialTheme.colorScheme.primary
     }
 
     val leadingIcon = when {
         isSwitchTab -> Icons.Default.Tab
-        isPersonalized -> Icons.Default.AutoAwesome
         isBookmark -> Icons.Default.Bookmark
         isDomain -> Icons.Default.Language
+        isHistory -> Icons.Default.History
         else -> Icons.Default.Search
     }
 
     val tagSlug = remember(suggestion.title) {
         suggestion.title.take(15).lowercase().replace(Regex("[^a-z0-9]+"), "_").trim('_')
+    }
+
+    val primaryColor = MaterialTheme.colorScheme.primary
+    val onSurfaceColor = MaterialTheme.colorScheme.onSurface
+    val highlightedTitle = remember(suggestion.title, typedQuery, primaryColor, onSurfaceColor) {
+        val cleanQuery = typedQuery.trim()
+        if (cleanQuery.isEmpty()) {
+            AnnotatedString(suggestion.title)
+        } else {
+            val matchIndex = suggestion.title.indexOf(cleanQuery, ignoreCase = true)
+            if (matchIndex >= 0) {
+                buildAnnotatedString {
+                    append(suggestion.title)
+                    addStyle(
+                        style = SpanStyle(
+                            color = primaryColor,
+                            fontWeight = FontWeight.Bold
+                        ),
+                        start = matchIndex,
+                        end = (matchIndex + cleanQuery.length).coerceAtMost(suggestion.title.length)
+                    )
+                }
+            } else {
+                AnnotatedString(suggestion.title)
+            }
+        }
     }
 
     Card(
@@ -842,7 +779,7 @@ private fun PersonalizedSuggestionGroupedCardItem(
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Text(
-                        text = suggestion.title,
+                        text = highlightedTitle,
                         style = MaterialTheme.typography.bodyLarge,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurface,
@@ -851,7 +788,7 @@ private fun PersonalizedSuggestionGroupedCardItem(
                         modifier = Modifier.weight(1f, fill = false)
                     )
 
-                    val badgeLabel = suggestion.reasonBadge ?: suggestion.category
+                    val badgeLabel = suggestion.reasonBadge
                     if (!badgeLabel.isNullOrBlank()) {
                         Surface(
                             shape = ExpressiveChipShape,
